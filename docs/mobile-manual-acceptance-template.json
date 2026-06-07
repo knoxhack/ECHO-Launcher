@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "testedAt": "",
+  "tester": "",
+  "androidDevice": {
+    "model": "",
+    "androidVersion": "",
+    "network": "Same Wi-Fi/LAN as desktop"
+  },
+  "desktop": {
+    "os": "",
+    "lanUrl": "http://<desktop-lan-ip>:4177/api/"
+  },
+  "artifacts": {
+    "apkSha256": "",
+    "rcPackage": ""
+  },
+  "checks": [
+    {
+      "id": "apk-installed",
+      "status": "pending",
+      "notes": "Install APK on a physical Android phone."
+    },
+    {
+      "id": "qr-pairing",
+      "status": "pending",
+      "notes": "Scan desktop QR from Android Settings."
+    },
+    {
+      "id": "desktop-approval",
+      "status": "pending",
+      "notes": "Approve the pending Android device in desktop Settings."
+    },
+    {
+      "id": "auto-finish-pairing",
+      "status": "pending",
+      "notes": "Android finishes pairing without another manual Pair tap."
+    },
+    {
+      "id": "live-data",
+      "status": "pending",
+      "notes": "Record the visible Android banner, for example: Live launcher data shown; Sample fallback not shown."
+    },
+    {
+      "id": "launch-action",
+      "status": "pending",
+      "notes": "Paste the observed Launch/Minecraft Launcher result message."
+    },
+    {
+      "id": "update-action",
+      "status": "pending",
+      "notes": "Paste the observed Update message, such as queued/running/already running/complete/failed."
+    },
+    {
+      "id": "repair-action",
+      "status": "pending",
+      "notes": "Paste the observed Repair message, such as queued/running/already running/complete/failed."
+    },
+    {
+      "id": "scan-install-action",
+      "status": "pending",
+      "notes": "Paste the observed Scan/Verify message, including missing/corrupt counts or complete status."
+    },
+    {
+      "id": "packos-check-action",
+      "status": "pending",
+      "notes": "Paste the observed Run PackOS Check message, including ready/state/blocked/unavailable status."
+    },
+    {
+      "id": "support-bundle-action",
+      "status": "pending",
+      "notes": "Paste the observed Export Support Bundle message, including exported/zip/complete/failed status."
+    },
+    {
+      "id": "duplicate-operation-guard",
+      "status": "pending",
+      "notes": "Describe repeated Update/Repair/Scan/Support Bundle tap behavior, for example: already running; no overlapping duplicate operation created."
+    },
+    {
+      "id": "desktop-diagnostics-copied",
+      "status": "pending",
+      "notes": "Desktop Settings Copy Diagnostics text captured."
+    },
+    {
+      "id": "android-diagnostics-copied",
+      "status": "pending",
+      "notes": "Android Settings Copy Diagnostics text captured."
+    }
+  ],
+  "diagnostics": {
+    "desktopCopied": "Paste Desktop Settings > Mobile Command Center > Copy Diagnostics output here. Must include Phone health URL, Command center URL, Pending devices, Paired devices, Beta acceptance checklist, LAN/firewall troubleshooting, and No device tokens.",
+    "androidCopied": "Paste Android Settings > Bridge Status > Copy Diagnostics output here."
+  },
+  "overallNotes": ""
+}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ECHO Launcher">
+  <rect width="64" height="64" rx="14" fill="#06111f"/>
+  <path d="M18 20h20v6H25v12h13v6H18V20Z" fill="#25e8ff"/>
+  <path d="M42 20h4v8h8v4h-8v12h-4V32h-8v-4h8v-8Z" fill="#ffb547"/>
+  <rect x="8" y="8" width="48" height="48" rx="12" fill="none" stroke="#25e8ff" stroke-opacity=".55" stroke-width="2"/>
+</svg>

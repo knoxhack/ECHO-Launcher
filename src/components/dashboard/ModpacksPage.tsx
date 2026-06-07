@@ -1,0 +1,386 @@
+import { Archive, Boxes, DownloadCloud, Eye, FileInput, FolderSearch, LockKeyhole, Play, RadioTower, RotateCcw, ShieldAlert } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { officialModpacks, type OfficialModpack } from '../../data/officialModpacks'
+import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
+import { useLauncherStore } from '../../stores/launcherStore'
+import { usePackOsStore } from '../../stores/packOsStore'
+import { useProfileStore } from '../../stores/profileStore'
+import { useReleaseStore } from '../../stores/releaseStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import type { NativeImportCandidate } from '../../types/native'
+import type { ToolsTabId } from '../../types/launcher'
+import type { PackOsLauncherPackState } from '../../types/packos'
+import type { ReleaseEntry, ReleaseIndex } from '../../types/releases'
+import { packOsHealthStatus, packOsUiStateLabel } from '../../utils/packosStatus'
+import { latestPlayableReleaseForPack, releaseAcceptedCount, releaseFeedConfigured, releaseRejectedCount } from '../../utils/releaseValidation'
+import { CyberButton } from '../cyber/CyberButton'
+import { GlassCard } from '../cyber/GlassCard'
+import { MetricCard } from '../cyber/MetricCard'
+import { StatusChip } from '../cyber/StatusChip'
+import { WarningCard } from '../cyber/WarningCard'
+
+const packOsIdAliases: Record<string, string> = {
+  'echo-prime': 'echo_prime',
+  'arcane-division': 'arcana_division',
+  orbital: 'pack2_draft',
+}
+
+function packOsIdFor(packId: string) {
+  return packOsIdAliases[packId] ?? packId
+}
+
+export function ModpacksPage() {
+  const addToast = useLauncherStore((state) => state.addToast)
+  const setActivePage = useLauncherStore((state) => state.setActivePage)
+  const setActiveToolsTab = useLauncherStore((state) => state.setActiveToolsTab)
+  const setSelectedProfileId = useLauncherStore((state) => state.setSelectedProfileId)
+  const releaseFeed = useSettingsStore((state) => state.releaseFeed)
+  const setProfiles = useProfileStore((state) => state.setProfiles)
+  const releaseIndex = useReleaseStore((state) => state.releaseIndex)
+  const loadingReleases = useReleaseStore((state) => state.loadingReleases)
+  const loadReleases = useReleaseStore((state) => state.loadReleases)
+  const packOs = usePackOsStore((state) => state.packOs)
+  const refreshPackOs = usePackOsStore((state) => state.refreshPackOs)
+  const [importCandidates, setImportCandidates] = useState<NativeImportCandidate[]>([])
+  const [scanningImports, setScanningImports] = useState(false)
+
+  const playableRelease = useMemo<ReleaseEntry | null>(
+    () => latestPlayableReleaseForPack(releaseIndex, 'ashfall-native-edition'),
+    [releaseIndex],
+  )
+  const acceptedCount = releaseAcceptedCount(releaseIndex)
+  const rejectedCount = releaseRejectedCount(releaseIndex)
+
+  const refreshReleases = useCallback(async (refresh = false, announce = refresh) => {
+    try {
+      const index = await loadReleases(refresh)
+      const hasPlayableRelease = Boolean(latestPlayableReleaseForPack(index, 'ashfall-native-edition'))
+      const accepted = releaseAcceptedCount(index)
+      const rejected = releaseRejectedCount(index)
+      if (announce) {
+        addToast(
+          hasPlayableRelease ? 'Ashfall release loaded' : 'Release feed checked',
+          `${accepted} accepted and ${rejected} rejected in ${index.source.owner}/${index.source.repo}.`,
+          accepted ? 'success' : 'warning',
+        )
+      }
+    } catch (error) {
+      if (announce) {
+        addToast('Release feed unavailable', error instanceof Error ? error.message : 'Configure the GitHub release feed in Settings.', 'warning')
+      }
+    }
+  }, [addToast, loadReleases])
+
+  useEffect(() => {
+    void refreshPackOs()
+  }, [refreshPackOs])
+
+  useEffect(() => {
+    if (releaseFeedConfigured(releaseFeed)) {
+      const timer = window.setTimeout(() => void refreshReleases(false, false), 0)
+      return () => window.clearTimeout(timer)
+    }
+  }, [refreshReleases, releaseFeed])
+
+  const importManifest = async () => {
+    if (!isNativeAvailable()) {
+      addToast('Desktop app required', 'Manifest import reads local files and requires the desktop app.', 'warning')
+      return
+    }
+    const file = await invokeNative('dialog:select-file', {
+      title: 'Import Ashfall pack manifest',
+      filters: [{ name: 'Ashfall Manifest', extensions: ['json'] }],
+    })
+    if (file.canceled || !file.path) return
+    try {
+      const imported = await invokeNative('manifest:import', { filePath: file.path })
+      addToast('Manifest imported', `${imported.manifest.version} saved to ${imported.manifestPath}`, 'success')
+    } catch (error) {
+      addToast('Manifest import failed', error instanceof Error ? error.message : 'Unable to import manifest.', 'danger')
+    }
+  }
+
+  const scanImports = async (manual = false) => {
+    if (!isNativeAvailable()) {
+      addToast('Desktop app required', 'Install import scanning requires the desktop backend.', 'warning')
+      return
+    }
+    setScanningImports(true)
+    try {
+      let rootPath: string | undefined
+      if (manual) {
+        const folder = await invokeNative('dialog:select-directory', {
+          title: 'Select an existing Ashfall install',
+        })
+        if (folder.canceled || !folder.path) return
+        rootPath = folder.path
+      }
+      const candidates = await invokeNative('instance:scan-imports', { rootPath })
+      setImportCandidates(candidates)
+      addToast('Import scan complete', `${candidates.length} candidate install${candidates.length === 1 ? '' : 's'} detected.`, candidates.length ? 'success' : 'warning')
+    } catch (error) {
+      addToast('Import scan failed', error instanceof Error ? error.message : 'Unable to scan for Ashfall installs.', 'danger')
+    } finally {
+      setScanningImports(false)
+    }
+  }
+
+  const importCandidate = async (candidate: NativeImportCandidate) => {
+    try {
+      const result = await invokeNative('instance:import', { path: candidate.path, name: 'Ashfall' })
+      const profiles = await invokeNative('profile:list')
+      setProfiles(profiles)
+      addToast(result.ok ? 'Ashfall install linked' : 'Import failed', `${result.profile.name} now points to ${result.profile.installPath}.`, result.ok ? 'success' : 'danger')
+    } catch (error) {
+      addToast('Import failed', error instanceof Error ? error.message : 'Unable to import selected install.', 'danger')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <GlassCard>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase text-amber-echo">Official Packs</p>
+            <h2 className="mt-1 text-2xl font-semibold text-white">ECHO Modpacks</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+              Official ECHO packs are tracked here. Ashfall now exposes loader-specific beta choices so testers can verify each runtime path separately.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <CyberButton icon={DownloadCloud} onClick={() => setActivePage('downloads')} variant="primary">
+              Install / Update
+            </CyberButton>
+            <CyberButton disabled={loadingReleases} icon={RadioTower} onClick={() => void refreshReleases(true, true)} variant="secondary">
+              {loadingReleases ? 'Refreshing...' : 'Refresh Feed'}
+            </CyberButton>
+            <CyberButton disabled={scanningImports} icon={FolderSearch} onClick={() => void scanImports(false)} variant="secondary">
+              {scanningImports ? 'Scanning...' : 'Scan Imports'}
+            </CyberButton>
+          </div>
+        </div>
+      </GlassCard>
+
+      <GlassCard tone={playableRelease ? 'success' : 'amber'}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase text-cyan-soft">GitHub Releases</p>
+            <h3 className="mt-1 text-lg font-semibold text-white">
+              {releaseFeedConfigured(releaseFeed) ? `${releaseFeed.owner}/${releaseFeed.repo}` : 'Release feed not configured'}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              {playableRelease
+                ? `${playableRelease.name} is ready for strict install.`
+                : 'No playable Ashfall release is available until echo-release.json, the pack manifest, and the pack zip are uploaded together.'}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <MetricCard icon={Boxes} label="Official Packs" value={`${officialModpacks.length}`} />
+            <MetricCard icon={RadioTower} label="Playable" value={`${acceptedCount}`} />
+            <MetricCard icon={Archive} label="Trust" value={playableRelease ? 'Verified' : 'Missing'} tone={playableRelease ? 'success' : 'amber'} />
+          </div>
+        </div>
+        {rejectedCount > 0 ? (
+          <div className="mt-4 rounded-lg border border-amber-echo/30 bg-amber-echo/10 p-3 text-sm leading-6 text-amber-100">
+            {rejectedCount} GitHub release{rejectedCount === 1 ? '' : 's'} rejected. {releaseIndex?.warnings[0] ?? 'Open Downloads for exact asset diagnostics.'}
+          </div>
+        ) : null}
+      </GlassCard>
+
+      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+        <div className="grid gap-4 lg:grid-cols-2">
+          {officialModpacks.map((pack) => (
+            <OfficialPackCard
+              key={pack.id}
+              pack={pack}
+              packOsState={packOs?.packs.find((state) => state.packId === packOsIdFor(pack.id))}
+              releaseIndex={releaseIndex}
+              setActivePage={setActivePage}
+              setSelectedProfileId={setSelectedProfileId}
+              setActiveToolsTab={setActiveToolsTab}
+            />
+          ))}
+        </div>
+
+        <GlassCard>
+          <div className="grid gap-2">
+            <CyberButton icon={FolderSearch} onClick={() => void scanImports(true)} variant="secondary">
+              Manual Import
+            </CyberButton>
+            <CyberButton icon={FileInput} onClick={() => void importManifest()} variant="secondary">
+              Import Manifest
+            </CyberButton>
+          </div>
+        </GlassCard>
+      </div>
+
+      {importCandidates.length > 0 ? (
+        <GlassCard tone="cyan">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-cyan-soft">Guided Import</p>
+              <h3 className="mt-1 text-lg font-semibold text-white">Detected Ashfall Installs</h3>
+            </div>
+            <StatusChip label={`${importCandidates.length} found`} status="update_available" />
+          </div>
+          <div className="grid gap-3">
+            {importCandidates.map((candidate) => (
+              <div className="grid gap-3 rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4 lg:grid-cols-[1fr_auto]" key={candidate.id}>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-white">{candidate.name}</p>
+                    <StatusChip compact status={candidate.alreadyManaged ? 'healthy' : 'warning'} label={candidate.alreadyManaged ? 'Managed' : 'Importable'} />
+                  </div>
+                  <p className="mt-2 break-all font-mono text-xs text-slate-400">{candidate.path}</p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Detected by {candidate.detectedBy.join(', ')} / {candidate.moduleCount} modules
+                  </p>
+                </div>
+                <CyberButton disabled={candidate.alreadyManaged} icon={FileInput} onClick={() => void importCandidate(candidate)} variant="primary">
+                  Link Ashfall
+                </CyberButton>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      ) : null}
+
+      <WarningCard
+        text="Preview packs stay view-only until they have strict release metadata and a supported player flow."
+        title="Official Pack Safety"
+      />
+    </div>
+  )
+}
+
+function OfficialPackCard({
+  pack,
+  packOsState,
+  releaseIndex,
+  setActivePage,
+  setSelectedProfileId,
+  setActiveToolsTab,
+}: {
+  pack: OfficialModpack
+  packOsState?: PackOsLauncherPackState
+  releaseIndex: ReleaseIndex | null
+  setActivePage: (page: 'home' | 'downloads' | 'tools') => void
+  setSelectedProfileId: (profileId: string) => void
+  setActiveToolsTab: (tab: ToolsTabId) => void
+}) {
+  const playableRelease = latestPlayableReleaseForPack(releaseIndex, pack.id)
+  const reportAllowsLauncher = packOsState ? packOsState.launcherVisible : pack.status === 'playable'
+  const isPlayable = pack.status === 'playable' && reportAllowsLauncher
+  const ready = isPlayable && Boolean(playableRelease)
+  const version = isPlayable ? playableRelease?.version ?? 'not published' : pack.version
+  const releaseLine = isPlayable ? playableRelease?.name ?? 'Awaiting strict release assets' : pack.phase
+  const packOsStatus = packOsHealthStatus(packOsState ?? null)
+  const packOsLabel = packOsState ? packOsUiStateLabel(packOsState.uiState) : 'No Report'
+  const playBlocked = Boolean(packOsState && packOsState.launchAllowed === false && packOsState.uiState !== 'unknown')
+  const playState = isPlayable
+    ? playBlocked
+      ? 'Blocked'
+      : ready
+        ? 'Enabled'
+        : pack.betaGate === 'open'
+          ? 'Missing release'
+          : 'Gated'
+    : 'Locked'
+
+  return (
+    <GlassCard className="overflow-hidden p-0" tone={isPlayable ? (ready ? 'default' : 'amber') : 'default'}>
+      <div className="relative aspect-[16/9] min-h-64 overflow-hidden">
+        <img alt="" className="absolute inset-0 h-full w-full object-cover transition duration-200 hover:opacity-95" src={pack.image} />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/15" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-transparent" />
+        <div className="absolute left-5 top-5 flex flex-wrap gap-2">
+          <StatusChip compact label={isPlayable ? 'Playable' : 'Preview'} status={ready ? 'healthy' : isPlayable ? 'warning' : 'queued'} />
+          <StatusChip compact label={packOsLabel} status={packOsStatus} />
+          <span className="rounded-full border border-white/20 bg-black/45 px-3 py-1 text-xs font-semibold uppercase text-slate-200 backdrop-blur">
+            {pack.phase}
+          </span>
+        </div>
+        <div className="absolute bottom-5 left-5 right-5">
+          <p className="text-xs font-semibold uppercase text-amber-echo">{releaseLine}</p>
+          <h3 className="mt-1 text-4xl font-black text-white">{pack.name}</h3>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-200">{pack.summary}</p>
+        </div>
+      </div>
+
+      <div className="flex h-full flex-col justify-between gap-5 p-5">
+        <div>
+          <p className="text-sm leading-6 text-slate-300">
+            {isPlayable
+              ? playableRelease?.releaseNotes[0] ?? `Upload echo-release.json, ${pack.id}-stable-version.pack.json, and the matching pack archive to enable tester installs.`
+              : pack.detail}
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+            <PackStat icon={Boxes} label="Version" value={version} />
+            <PackStat icon={Archive} label="Repo" value={pack.repo} />
+            <PackStat icon={isPlayable ? Archive : Eye} label={isPlayable ? 'Manifest' : 'Mode'} value={isPlayable ? (ready ? 'Verified' : 'Missing') : 'View-only'} />
+            <PackStat icon={RadioTower} label="Channel" value={packOsState?.channel ?? pack.channel} />
+            <PackStat icon={ShieldAlert} label="PackOS" value={packOsLabel} />
+            <PackStat icon={LockKeyhole} label="Play" value={playState} />
+            <PackStat icon={RotateCcw} label="Variant" value={packOsState?.variant ?? 'preview'} />
+          </div>
+        </div>
+
+        {isPlayable ? (
+          <div className="flex flex-wrap gap-2">
+            <CyberButton
+              disabled={playBlocked}
+              icon={Play}
+              onClick={() => {
+                if (pack.runtimeMode) setSelectedProfileId(pack.id)
+                setActivePage('home')
+              }}
+              size="sm"
+              variant="primary"
+            >
+              {pack.runtimeMode ? 'Select Runtime' : 'Play Ashfall'}
+            </CyberButton>
+            <CyberButton
+              icon={RotateCcw}
+              onClick={() => {
+                if (pack.runtimeMode) setSelectedProfileId(pack.id)
+                setActivePage('downloads')
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              Install / Update
+            </CyberButton>
+            <CyberButton
+              icon={ShieldAlert}
+              onClick={() => {
+                setActiveToolsTab('diagnostics')
+                setActivePage('tools')
+              }}
+              size="sm"
+            >
+              Verify
+            </CyberButton>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-3 text-sm leading-6 text-slate-300">
+            <Eye className="h-4 w-4 shrink-0 text-cyan-soft" aria-hidden="true" />
+            View-only preview. No install profile is created.
+          </div>
+        )}
+      </div>
+    </GlassCard>
+  )
+}
+
+function PackStat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="flex min-h-16 items-center gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+      <Icon className="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-xs uppercase text-slate-500">{label}</p>
+        <p className="truncate font-semibold text-white">{value}</p>
+      </div>
+    </div>
+  )
+}

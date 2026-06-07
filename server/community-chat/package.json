@@ -1,0 +1,32 @@
+{
+  "name": "@echo/community-chat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ECHO launcher community chat REST and WebSocket service.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "smoke": "npm run build && node dist/smoke.js",
+    "test": "vitest run",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.6.2",
+    "ioredis": "^5.8.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "@types/pg": "^8.15.6",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.6",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.6",
+    "ws": "^8.18.3"
+  }
+}
