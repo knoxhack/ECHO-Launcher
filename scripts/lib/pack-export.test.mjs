@@ -108,7 +108,7 @@ describe('default Ashfall pack export', () => {
       sourcePath: source,
       outputDir,
       version: '1.2.0-beta.1',
-      channel: 'stable',
+      channel: 'alpha',
     })
 
     expect(report.counts).toEqual({ totalFiles: 3, modJars: 2, configFiles: 1 })
@@ -117,16 +117,16 @@ describe('default Ashfall pack export', () => {
     await expect(fs.readFile(path.join(report.neededJarsPath, 'echocore-1.2.0.jar'), 'utf8')).resolves.toBe('core')
     await expect(fs.readFile(path.join(report.neededJarsPath, 'echoweathercore-1.2.0.jar'), 'utf8')).resolves.toBe('weather')
     await expect(fs.stat(path.join(report.neededJarsPath, 'weather.toml'))).rejects.toThrow()
-    expect(report.manifest.name).toBe('ashfall-neoforge-stable-1.2.0-beta.1.pack.json')
-    expect(report.artifact.name).toBe('ashfall-neoforge-stable-1.2.0-beta.1-pack.zip')
+    expect(report.manifest.name).toBe('ashfall-neoforge-edition-alpha-1.2.0-beta.1.pack.json')
+    expect(report.artifact.name).toBe('ashfall-neoforge-edition-alpha-1.2.0-beta.1-pack.zip')
     expect(report.manifest.sha256).toMatch(/^[a-f0-9]{64}$/u)
     expect(report.artifact.sha256).toMatch(/^[a-f0-9]{64}$/u)
     expect(report.uploadPrep.recommendedTag).toBe('v1.2.0-beta.1')
     expect(report.uploadPrep.releaseTitle).toBe('Ashfall 1.2.0-beta.1')
     expect(report.uploadPrep.manualUploadOrder.slice(0, 3)).toEqual([
       'echo-release.json',
-      'ashfall-neoforge-stable-1.2.0-beta.1.pack.json',
-      'ashfall-neoforge-stable-1.2.0-beta.1-pack.zip',
+      'ashfall-neoforge-edition-alpha-1.2.0-beta.1.pack.json',
+      'ashfall-neoforge-edition-alpha-1.2.0-beta.1-pack.zip',
     ])
     expect(report.uploadPrep.manualUploadOrder).toContain(fileAssetName('mods/echocore-1.2.0.jar', sha256Buffer(Buffer.from('core'))))
 
@@ -135,8 +135,8 @@ describe('default Ashfall pack export', () => {
     expect(zip.getEntry('saves/world/level.dat')).toBeNull()
 
     const release = JSON.parse(await fs.readFile(report.release.path, 'utf8'))
-    expect(release.pack).toBe('ashfall-neoforge')
-    expect(release.packs).toMatchObject([{ pack: 'ashfall-neoforge', manifestAsset: report.manifest.name }])
+    expect(release.pack).toBe('ashfall-neoforge-edition')
+    expect(release.packs).toMatchObject([{ pack: 'ashfall-neoforge-edition', manifestAsset: report.manifest.name }])
     expect(release.manifestSha256).toBe(report.manifest.sha256)
     expect(release.artifactSha256).toBe(report.artifact.sha256)
     expect(release.assets.find((asset) => asset.name === report.manifest.name)).toMatchObject({
@@ -165,7 +165,7 @@ describe('default Ashfall pack export', () => {
       const data = entry.getData()
       expect(sha256Buffer(data)).toBe(file.sha256)
       expect(data.length).toBe(file.size)
-      expect(await fs.readFile(path.join(outputDir, 'ashfall-neoforge-stable-1.2.0-beta.1-file-assets', file.assetName), 'utf8')).toBe(data.toString('utf8'))
+      expect(await fs.readFile(path.join(outputDir, 'ashfall-neoforge-edition-alpha-1.2.0-beta.1-file-assets', file.assetName), 'utf8')).toBe(data.toString('utf8'))
     }
 
     const uploadFiles = new Map(report.uploadPrep.files.map((file) => [file.name, file]))
@@ -197,7 +197,7 @@ describe('default Ashfall pack export', () => {
       sourcePath: source,
       outputPath,
       version: '1.2.0-beta.1',
-      channel: 'stable',
+      channel: 'alpha',
       emitReleaseSidecars: true,
     })
 
@@ -222,8 +222,8 @@ describe('default Ashfall pack export', () => {
     expect(zip.getEntry('.echo/checksums.sha256')).toBeTruthy()
 
     const embeddedManifest = JSON.parse(zip.getEntry('.echo/pack-manifest.json').getData().toString('utf8'))
-    expect(embeddedManifest.pack).toBe('ashfall-neoforge')
-    expect(embeddedManifest.name).toBe('Ashfall: NeoForge Loader')
+    expect(embeddedManifest.pack).toBe('ashfall-neoforge-edition')
+    expect(embeddedManifest.name).toBe('Ashfall NeoForge Edition')
     expect(embeddedManifest.files.map((file) => file.path)).toEqual([
       'config/echo/weather.toml',
       'mods/echocore-1.2.0.jar',
@@ -239,11 +239,11 @@ describe('default Ashfall pack export', () => {
     }
 
     const release = JSON.parse(await fs.readFile(report.releaseMetadataPath, 'utf8'))
-    expect(release.name).toBe('Ashfall: NeoForge Loader')
-    expect(release.packs).toMatchObject([{ pack: 'ashfall-neoforge' }])
+    expect(release.name).toBe('Ashfall NeoForge Edition')
+    expect(release.packs).toMatchObject([{ pack: 'ashfall-neoforge-edition' }])
     expect(release.artifactAsset).toBe(report.zipName)
     expect(release.artifactSha256).toBe(report.sha256)
-    expect(await fs.readFile(report.manifestPath, 'utf8')).toContain('"name": "Ashfall: NeoForge Loader"')
+    expect(await fs.readFile(report.manifestPath, 'utf8')).toContain('"name": "Ashfall NeoForge Edition"')
   })
 
   it('allows explicitly selected top-level servers.dat without default discovery', async () => {
@@ -253,7 +253,7 @@ describe('default Ashfall pack export', () => {
       sourcePath: source,
       outputPath: path.join(outputDir, 'Ashfall-with-servers.echo-pack.zip'),
       version: '1.2.0-servers',
-      channel: 'stable',
+      channel: 'alpha',
       emitReleaseSidecars: true,
       extraIncludePaths: [path.join(source, 'servers.dat')],
     })
@@ -287,7 +287,7 @@ describe('default Ashfall pack export', () => {
       sourcePath: source,
       outputPath,
       version: '1.2.0-custom',
-      channel: 'stable',
+      channel: 'alpha',
       emitReleaseSidecars: true,
       extraIncludePaths: [
         path.join(source, 'extras', 'single.json'),
@@ -344,7 +344,7 @@ describe('default Ashfall pack export', () => {
       sourcePath: source,
       outputPath: path.join(outputDir, 'Ashfall-safe.echo-pack.zip'),
       version: '1.2.0-safe',
-      channel: 'stable',
+      channel: 'alpha',
       emitReleaseSidecars: true,
       extraIncludePaths: [
         path.join(source, 'saves'),

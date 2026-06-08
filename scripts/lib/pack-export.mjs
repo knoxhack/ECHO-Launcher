@@ -5,12 +5,12 @@ import path from 'node:path'
 
 export const DEFAULT_ASHFALL_SOURCE = 'C:\\CurseForge\\Instances\\Ashfall Protocol'
 export const DEFAULT_RELEASE_VERSION = '1.2.0-beta.1'
-export const DEFAULT_RELEASE_CHANNEL = 'stable'
+export const DEFAULT_RELEASE_CHANNEL = 'alpha'
 export const DEFAULT_OUTPUT_DIR = 'release-artifacts'
 export const RELEASE_METADATA_ASSET = 'echo-release.json'
 export const ECHO_PACK_EXTENSION = '.echo-pack.zip'
-export const DEFAULT_ASHFALL_PACK_ID = 'ashfall-neoforge'
-export const DEFAULT_ASHFALL_PACK_NAME = 'Ashfall: NeoForge Loader'
+export const DEFAULT_ASHFALL_PACK_ID = 'ashfall-neoforge-edition'
+export const DEFAULT_ASHFALL_PACK_NAME = 'Ashfall NeoForge Edition'
 
 export const INCLUDE_DIRS = ['mods', 'config', 'defaultconfigs', 'datapacks', 'resourcepacks', 'shaderpacks']
 
@@ -79,7 +79,7 @@ function normalizeRelativePath(relativePath) {
 }
 
 function normalizePackId(pack = DEFAULT_ASHFALL_PACK_ID) {
-  return pack === 'ashfall' || pack === 'ashfall-stable' ? DEFAULT_ASHFALL_PACK_ID : pack
+  return pack === 'ashfall' || pack === 'ashfall-stable' || pack === 'ashfall-neoforge' ? DEFAULT_ASHFALL_PACK_ID : pack
 }
 
 function hasExcludedSuffix(relativePath) {
