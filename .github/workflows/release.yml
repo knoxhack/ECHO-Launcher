@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-beta*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional release tag (defaults to package.json version).'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      channel: ${{ steps.metadata.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - id: metadata
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "main" ] || [ "$TAG" = "" ]; then
+            TAG="v$(node -p \"require('./package.json').version\")"
+          fi
+
+          if ! [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid tag format: $TAG"
+            exit 1
+          fi
+
+          PKG_VERSION="v$(node -p \"require('./package.json').version\")"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "Tag/version mismatch: tag=$TAG package=$PKG_VERSION"
+            exit 1
+          fi
+
+          CHANNEL="stable"
+          if [[ "$TAG" == *-beta.* ]]; then
+            CHANNEL="beta"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            manifest: latest.yml
+            artifact_glob: "*.exe"
+          - os: ubuntu-latest
+            platform: linux
+            manifest: latest-linux.yml
+            artifact_glob: "*.AppImage"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build and publish ${{ matrix.platform }} release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_UPDATE_CHANNEL: ${{ needs.validate.outputs.channel }}
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            npm run package:win:publish
+          else
+            npm run package:linux:publish
+          fi
+
+      - name: Validate release assets and write checksums
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'installer-artifacts')) {
+            throw 'installer-artifacts directory missing'
+          }
+
+          $manifests = Get-ChildItem -Path 'installer-artifacts' -Filter '${{ matrix.manifest }}' -File
+          if (-not $manifests) {
+            throw "Expected manifest '${{ matrix.manifest }}' missing"
+          }
+
+          $artifacts = Get-ChildItem -Path 'installer-artifacts' -File -Filter '${{ matrix.artifact_glob }}'
+          if (-not $artifacts) {
+            throw "No release artifacts matching '${{ matrix.artifact_glob }}' found"
+          }
+
+          $sumFile = Join-Path 'installer-artifacts' "SHA256SUMS-${{ matrix.platform }}.txt"
+          Remove-Item -Force $sumFile -ErrorAction SilentlyContinue
+          Get-ChildItem installer-artifacts -File | ForEach-Object {
+            $hash = Get-FileHash -Path $_.FullName -Algorithm SHA256
+            [System.IO.File]::AppendAllText($sumFile, "$($hash.Hash.ToLower())  $($_.Name)`n")
+          }
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ needs.validate.outputs.tag }}" || \
+          gh release create "${{ needs.validate.outputs.tag }}" --title "${{ needs.validate.outputs.tag }}" --notes "Automated release"
+
+      - name: Upload platform artifacts and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.validate.outputs.tag }}" installer-artifacts/${{ matrix.manifest }} installer-artifacts/${{ matrix.manifest }} installer-artifacts/SHA256SUMS-${{ matrix.platform }}.txt --clobber
