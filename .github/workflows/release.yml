@@ -107,8 +107,8 @@ jobs:
             throw 'installer-artifacts directory missing'
           }
 
-          $manifests = Get-ChildItem -Path 'installer-artifacts' -Filter '${{ matrix.manifest }}' -File
-          if (-not $manifests) {
+          $manifest = Get-ChildItem -Path 'installer-artifacts' -Filter '${{ matrix.manifest }}' -File
+          if (-not $manifest) {
             throw "Expected manifest '${{ matrix.manifest }}' missing"
           }
 
@@ -135,4 +135,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ needs.validate.outputs.tag }}" installer-artifacts/${{ matrix.manifest }} installer-artifacts/${{ matrix.manifest }} installer-artifacts/SHA256SUMS-${{ matrix.platform }}.txt --clobber
+          gh release upload "${{ needs.validate.outputs.tag }}" installer-artifacts/SHA256SUMS-${{ matrix.platform }}.txt installer-artifacts/* --clobber
