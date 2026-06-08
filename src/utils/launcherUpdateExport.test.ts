@@ -129,7 +129,7 @@ describe('launcher update export helpers', () => {
     expect(report.latestYmlSource).toBe('repaired')
     expect(report.fixes.join(' ')).toContain('latest.yml was repaired')
     expect(report.files).toHaveLength(3)
-    expect(buildLauncherUpdateReleaseNotes(report)).toContain('Target repository: knoxhack/ECHOLauncher')
+    expect(buildLauncherUpdateReleaseNotes(report)).toContain('Target repository: knoxhack/ECHO-Launcher')
   })
 
   it('allows custom release version and update info at export time', async () => {
@@ -151,3 +151,5 @@ describe('launcher update export helpers', () => {
     expect(buildLauncherUpdateReleaseNotes(report)).toContain('Improves launcher update export flow.')
   })
 })
+
+

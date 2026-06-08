@@ -15,7 +15,7 @@ const readiness = {
   releaseFeed: {
     configured: true,
     ok: true,
-    source: 'knoxhack/ECHO',
+    source: 'knoxhack/ECHO-Ashfall-Native-Edition',
     releases: 1,
     latestVersion: '1.0.0',
     fetchedAt: '2026-05-24T12:00:00.000Z',
@@ -80,3 +80,5 @@ describe('readiness store', () => {
     expect(useReadinessStore.getState().loading).toBe(false)
   })
 })
+
+

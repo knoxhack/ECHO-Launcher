@@ -6,13 +6,15 @@ import { normalizeAshfallProfiles, selectAshfallInstallPath } from './ashfallPro
 const fallback = bundledProfiles[0]
 
 describe('ashfallProfileMigration', () => {
-  it('returns the two public alpha profiles from seed data', () => {
+  it('returns the three Ashfall edition profiles from seed data', () => {
     const normalized = normalizeAshfallProfiles(bundledProfiles, bundledProfiles)
     expect(normalized.map((profile) => profile.id)).toEqual([
       'ashfall-native-edition',
-      'standalone-runtime-showcase',
+      'ashfall-neoforge-edition',
+      'ashfall-standalone-edition',
     ])
     expect(normalized.map((profile) => profile.runtimeMode)).toEqual([
+      'native-loader-minecraft',
       'native-loader-minecraft',
       'native-runtime',
     ])
@@ -41,7 +43,7 @@ describe('ashfallProfileMigration', () => {
     ]
 
     const normalized = normalizeAshfallProfiles(oldProfiles, bundledProfiles)
-    expect(normalized).toHaveLength(2)
+    expect(normalized).toHaveLength(3)
     expect(normalized[0]).toMatchObject({
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
@@ -51,7 +53,8 @@ describe('ashfallProfileMigration', () => {
       installPath: 'C:\\Games\\ECHO\\Ashfall Stable',
       enabledAddons: ['echocore'],
     })
-    expect(normalized[1]).toMatchObject({ id: 'standalone-runtime-showcase', installPath: undefined })
+    expect(normalized[1]).toMatchObject({ id: 'ashfall-neoforge-edition', installPath: undefined })
+    expect(normalized[2]).toMatchObject({ id: 'ashfall-standalone-edition', installPath: undefined })
   })
 
   it('uses the visible user folder for fresh Ashfall installs', () => {

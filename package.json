@@ -3,8 +3,8 @@
   "private": true,
   "version": "1.0.1",
   "description": "Official desktop launcher for ECHO modpacks and Ashfall public beta builds.",
-  "author": "KnoxHack",
-  "homepage": "https://github.com/knoxhack/ECHO-Launcher-Public-Alpha",
+  "author": "knoxhack",
+  "homepage": "https://github.com/knoxhack/ECHO-Launcher",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -131,9 +131,11 @@
       {
         "provider": "github",
         "owner": "knoxhack",
-        "repo": "ECHO-Launcher-Public-Alpha",
+        "repo": "ECHO-Launcher",
         "releaseType": "release"
       }
     ]
   }
 }
+
+

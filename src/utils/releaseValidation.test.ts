@@ -27,7 +27,7 @@ const baseRelease: ReleaseEntry = {
   draft: false,
   prerelease: true,
   publishedAt: '2026-05-10T12:00:00Z',
-  releasePageUrl: 'https://github.com/knoxhack/ECHO-Native-Platform-Public-Alpha/releases/tag/v0.1.0-native-public-alpha',
+  releasePageUrl: 'https://github.com/knoxhack/ECHO-Ashfall-Native-Edition/releases/tag/v0.1.0-native-public-alpha',
   releaseNotes: ['Public alpha release'],
   manifestAssetName: 'ashfall-native-edition-alpha-0.1.0-native-public-alpha.pack.json',
   manifestUrl: 'https://example.com/manifest.json',
@@ -42,7 +42,7 @@ function releaseIndex(overrides: Partial<ReleaseIndex>): ReleaseIndex {
     source: {
       provider: 'github',
       owner: 'knoxhack',
-      repo: 'ECHO-Native-Platform-Public-Alpha',
+      repo: 'ECHO-Ashfall-Native-Edition',
       includePrereleases: true,
     },
     fetchedAt: '2026-05-10T12:00:00Z',
@@ -130,14 +130,14 @@ describe('releaseValidation', () => {
     expect(latestPlayableReleaseForPack(releaseIndex({
       releases: [
         { ...baseRelease, id: 'native', pack: 'ashfall-native-edition', version: '0.1.1', publishedAt: '2026-05-11T12:00:00Z' },
-        { ...baseRelease, id: 'standalone', pack: 'standalone-runtime-showcase', channel: 'experimental', version: '0.1.0', publishedAt: '2026-05-10T12:00:00Z' },
+        { ...baseRelease, id: 'standalone', pack: 'ashfall-standalone-edition', channel: 'experimental', version: '0.1.0', publishedAt: '2026-05-10T12:00:00Z' },
       ],
     }), 'ashfall-native-loader')?.version).toBe('0.1.1')
   })
 
   it('builds expected pack manifest asset names', () => {
     expect(packManifestAssetName('alpha', '0.1.0', 'ashfall-native-edition')).toBe('ashfall-native-edition-alpha-0.1.0.pack.json')
-    expect(packManifestAssetName('experimental', '0.1.0', 'standalone-runtime-showcase')).toBe('standalone-runtime-showcase-experimental-0.1.0.pack.json')
+    expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
   })
 
   it('validates trusted pack manifests', () => {
@@ -206,6 +206,41 @@ describe('releaseValidation', () => {
     expect(manifest.artifactName).toBe('Ashfall-1.0.0.echo-pack.zip')
   })
 
+  it('accepts Ashfall NeoForge Edition manifests with NeoForge loader metadata', () => {
+    const manifest = validatePackManifest({
+      pack: 'ashfall-neoforge-edition',
+      version: '1.0.0',
+      channel: 'alpha',
+      minecraft: '26.1.2',
+      loader: {
+        type: 'neoforge',
+        version: '26.1.2',
+        installer: {
+          assetName: 'neoforge-26.1.2-installer.jar',
+          sha256: 'f'.repeat(64),
+          installMode: 'client',
+        },
+      },
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-neoforge.jar',
+          url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echocore-1.0.0-neoforge.jar',
+          sha256: 'c'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
+      changelog: ['NeoForge release'],
+      worldgenWarning: true,
+    })
+
+    expect(manifest.pack).toBe('ashfall-neoforge-edition')
+    expect(manifest.loader?.type).toBe('neoforge')
+  })
+
   it('accepts valid Native Loader release metadata', () => {
     const manifest = validatePackManifest({
       ...baseManifest(),
@@ -267,7 +302,7 @@ describe('releaseValidation', () => {
       changelog: ['Standalone beta'],
       worldgenWarning: false,
     })
-    expect(manifest.pack).toBe('standalone-runtime-showcase')
+    expect(manifest.pack).toBe('ashfall-standalone-edition')
   })
 
   it('blocks manifests without verified artifact sources', () => {
@@ -369,3 +404,5 @@ function baseNativeLoader() {
     },
   } as const
 }
+
+

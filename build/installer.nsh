@@ -30,9 +30,9 @@ Var previousSpacedInstallDir
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "Publisher" "KnoxHack"
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayIcon" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
-  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "URLInfoAbout" "https://github.com/knoxhack/ECHO-Launcher-Public-Alpha"
-  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "URLUpdateInfo" "https://github.com/knoxhack/ECHO-Launcher-Public-Alpha/releases"
-  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "HelpLink" "https://github.com/knoxhack/ECHO-Launcher-Public-Alpha/issues"
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "URLInfoAbout" "https://github.com/knoxhack/ECHO-Launcher"
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "URLUpdateInfo" "https://github.com/knoxhack/ECHO-Launcher/releases"
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "HelpLink" "https://github.com/knoxhack/ECHO-Launcher/issues"
 
   ${If} ${FileExists} "$newStartMenuLink"
     StrCpy $0 "$INSTDIR\resources\app.asar.unpacked\build\icon.ico"

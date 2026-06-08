@@ -1,4 +1,4 @@
-export const LAUNCHER_UPDATE_REPO = 'knoxhack/ECHOLauncher'
+export const LAUNCHER_UPDATE_REPO = 'knoxhack/ECHO-Launcher'
 export const LATEST_YML_NAME = 'latest.yml'
 
 export type LauncherUpdateArtifactRole = 'installer' | 'blockmap' | 'latestYml'
@@ -332,3 +332,5 @@ export function buildLauncherUpdateReleaseNotes(report: LauncherUpdateUploadRepo
     '',
   ].join('\n')
 }
+
+

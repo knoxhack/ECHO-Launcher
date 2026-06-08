@@ -2,7 +2,15 @@ import type { LauncherProfile } from '../types/profiles'
 
 const CANONICAL_PROFILE_ID = 'ashfall-native-edition'
 const LEGACY_PROFILE_IDS = new Set(['ashfall', 'ashfall-stable'])
-const ASHFALL_PROFILE_IDS = ['ashfall-native-edition', 'ashfall-native-loader', 'ashfall-neoforge', 'standalone-runtime-showcase', 'ashfall-standalone-runtime']
+const ASHFALL_PROFILE_IDS = [
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'ashfall-native-loader',
+  'ashfall-neoforge',
+  'standalone-runtime-showcase',
+  'ashfall-standalone-runtime',
+]
 
 export interface AshfallInstallPathMigrationInput {
   profiles: LauncherProfile[]

@@ -13,7 +13,7 @@ function updateState(status: LauncherUpdateStatus, overrides: Partial<NativeLaun
     currentVersion: '1.0.0',
     status,
     feedOwner: 'knoxhack',
-    feedRepo: 'ECHOLauncher',
+    feedRepo: 'ECHO-Launcher',
     allowPrerelease: false,
     availableVersion: undefined,
     releaseName: undefined,
@@ -67,3 +67,5 @@ describe('launcher update state helpers', () => {
     expect(launcherUpdatePrimaryDetail(updateState('downloaded', { manualInstallRequired: true }))).toBe('Wine compatibility mode requires manual launcher update installation.')
   })
 })
+
+

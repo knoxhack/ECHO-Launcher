@@ -4,13 +4,14 @@ import type { ReleaseEntry, ReleaseFeedConfig, ReleaseIndex } from '../types/rel
 
 const channels: Channel[] = ['alpha', 'experimental']
 const RELEASE_CACHE_VERSION = 4
-export const officialPackIds: OfficialPackId[] = ['ashfall-native-edition', 'standalone-runtime-showcase']
-export const playableAshfallPackIds: OfficialPackId[] = ['ashfall-native-edition', 'standalone-runtime-showcase']
+export const officialPackIds: OfficialPackId[] = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
+export const playableAshfallPackIds: OfficialPackId[] = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
 
 export function normalizeOfficialPackId(pack?: string): OfficialPackId | undefined {
   if (pack === 'ashfall') return 'ashfall-native-edition'
   if (pack === 'ashfall-native-loader') return 'ashfall-native-edition'
-  if (pack === 'ashfall-standalone-runtime') return 'standalone-runtime-showcase'
+  if (pack === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
+  if (pack === 'ashfall-standalone-runtime' || pack === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
   return officialPackIds.includes(pack as OfficialPackId) ? (pack as OfficialPackId) : undefined
 }
 
@@ -205,12 +206,12 @@ export function validatePackManifest(value: unknown): PackManifest {
   if (!channels.includes(manifest.channel)) {
     throw new Error('Manifest channel is invalid.')
   }
-  if (normalizedPack === 'standalone-runtime-showcase') {
+  if (normalizedPack === 'ashfall-standalone-edition') {
     if (!manifest.runtime?.requiredJava) {
-      throw new Error('Standalone Runtime manifests must include runtime.requiredJava.')
+      throw new Error('Ashfall Standalone Edition manifests must include runtime.requiredJava.')
     }
     if (!manifest.launch?.mainClass) {
-      throw new Error('Standalone Runtime manifests must include launch metadata.')
+      throw new Error('Ashfall Standalone Edition manifests must include launch metadata.')
     }
   } else if (normalizedPack === 'ashfall-native-edition') {
     if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
@@ -218,6 +219,13 @@ export function validatePackManifest(value: unknown): PackManifest {
     }
     if (!manifest.nativeLoader) {
       throw new Error('Ashfall Native Edition manifests must include Native Loader metadata.')
+    }
+  } else if (normalizedPack === 'ashfall-neoforge-edition') {
+    if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
+      throw new Error('Manifest Minecraft version is required.')
+    }
+    if (manifest.loader?.type !== 'neoforge') {
+      throw new Error('Ashfall NeoForge Edition manifests must include NeoForge loader metadata.')
     }
   }
   if (normalizedPack === 'ashfall-native-edition' || manifest.nativeLoader) {

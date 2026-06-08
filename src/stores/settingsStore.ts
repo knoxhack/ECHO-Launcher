@@ -141,12 +141,12 @@ export const useSettingsStore = create<SettingsStore>()(
       releaseFeed: {
         provider: 'github',
         owner: 'knoxhack',
-        repo: 'ECHO-Native-Platform-Public-Alpha',
+        repo: 'ECHO-Ashfall-Native-Edition',
         includePrereleases: true,
       },
       publisher: {
         owner: 'knoxhack',
-        repo: 'ECHO-Native-Platform-Public-Alpha',
+        repo: 'ECHO-Ashfall-Native-Edition',
         hasToken: false,
       },
       supportGuideUrl: '',
@@ -262,3 +262,5 @@ export const useSettingsStore = create<SettingsStore>()(
     },
   ),
 )
+
+

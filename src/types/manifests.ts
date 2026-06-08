@@ -4,7 +4,10 @@ export type LoaderType = 'neoforge' | 'echo-native-loader'
 export type FileSide = 'client' | 'server' | 'both'
 export type NeoForgeInstallMode = 'client' | 'server'
 export type PackArtifactMode = 'files' | 'zip'
-export type AshfallRuntimePackId = 'ashfall-native-edition' | 'standalone-runtime-showcase'
+export type AshfallRuntimePackId =
+  | 'ashfall-native-edition'
+  | 'ashfall-neoforge-edition'
+  | 'ashfall-standalone-edition'
 export type OfficialPackId = AshfallRuntimePackId
 
 export interface LoaderInstaller {

@@ -84,7 +84,7 @@ npm ci
 npm run package:linux
 ```
 
-The **Build Linux Installer** workflow does not publish a GitHub Release. It uploads a downloadable workflow artifact named `echo-launcher-linux-appimage`. Download it from the workflow run, then upload these generated files to the `knoxhack/ECHOLauncher` GitHub Release:
+The **Build Linux Installer** workflow does not publish a GitHub Release. It uploads a downloadable workflow artifact named `echo-launcher-linux-appimage`. Download it from the workflow run, then upload these generated files to the `knoxhack/ECHO-Launcher` GitHub Release:
 
 - `ECHO-Launcher-1.0.1-x86_64.AppImage`
 - `ECHO-Launcher-1.0.1-x86_64.AppImage.blockmap`
@@ -99,7 +99,7 @@ chmod +x ECHO-Launcher-1.0.1-x86_64.AppImage
 
 Windows can still produce `linux-unpacked`, but final AppImage packaging may fail there because AppImage creation needs Linux-style symlink behavior.
 
-Launcher self-update publishing uses a dedicated GitHub Releases feed at `knoxhack/ECHOLauncher`, separate from Ashfall pack releases. Set `GH_TOKEN` with release upload permissions, then run:
+Launcher self-update publishing uses a dedicated GitHub Releases feed at `knoxhack/ECHO-Launcher`, separate from Ashfall pack releases. Set `GH_TOKEN` with release upload permissions, then run:
 
 ```bash
 npm run package:win:publish
@@ -115,7 +115,7 @@ Manual browser export flow:
 1. Run `npm.cmd run package:win`.
 2. Run `npm run dev` and open the browser preview.
 3. Select the repo folder, `installer-artifacts` folder, or the three update files manually.
-4. Click **Export Upload Bundle** and upload the bundled release assets to `knoxhack/ECHOLauncher`.
+4. Click **Export Upload Bundle** and upload the bundled release assets to `knoxhack/ECHO-Launcher`.
 
 Validation:
 
@@ -199,7 +199,7 @@ Version 3 does not store a client secret. Normal beta play delegates Microsoft l
 Version 2 turns the MVP into a real desktop updater foundation:
 
 - Strict desktop gate when the Electron bridge is unavailable
-- Official GitHub Releases feed, defaulting to `knoxhack/ECHO`
+- Official GitHub Releases feed, defaulting to `knoxhack/ECHO-Ashfall-Native-Edition`
 - Release listing through allowlisted native IPC
 - Trusted manifest fetch and cache with SHA-256 verification
 - Install/update from verified release artifacts
@@ -375,3 +375,6 @@ Version 4:
 - Asset validation dashboards
 - Codex/GitHub workflow hooks
 - Screenshot/media tools
+
+
+

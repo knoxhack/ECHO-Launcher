@@ -22,12 +22,13 @@ interface LauncherStore {
 }
 
 const defaultProfileId = 'ashfall-native-edition'
-const selectableProfileIds = new Set(['ashfall-native-edition', 'standalone-runtime-showcase'])
+const selectableProfileIds = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 
 function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'ashfall' || profileId === 'ashfall-stable') return defaultProfileId
-  if (profileId === 'ashfall-neoforge' || profileId === 'ashfall-native-loader') return defaultProfileId
-  if (profileId === 'ashfall-standalone-runtime') return 'standalone-runtime-showcase'
+  if (profileId === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
+  if (profileId === 'ashfall-native-loader') return defaultProfileId
+  if (profileId === 'ashfall-standalone-runtime' || profileId === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
   return profileId && selectableProfileIds.has(profileId) ? profileId : defaultProfileId
 }
 

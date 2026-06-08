@@ -86,7 +86,7 @@ export function StandaloneRuntimePage() {
 
   const handleLaunch = async () => {
     if (selectedMode === 'native-runtime') {
-      const result = await launchStandalone({ profileId: runtimeProfile?.id ?? 'standalone-runtime-showcase' })
+      const result = await launchStandalone({ profileId: runtimeProfile?.id ?? 'ashfall-standalone-edition' })
       if (!result) return
       addToast(result.ok ? 'Standalone runtime launched' : 'Standalone runtime blocked', result.message, result.ok ? 'success' : 'danger')
       return

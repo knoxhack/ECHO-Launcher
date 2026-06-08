@@ -863,7 +863,7 @@ export function SettingsPage() {
                       <div>
                         <p className="text-sm font-semibold text-white">Launcher Updates</p>
                         <p className="mt-1 text-xs text-slate-400">
-                          Dedicated feed: {launcherUpdate?.feedOwner ?? 'knoxhack'}/{launcherUpdate?.feedRepo ?? 'ECHOLauncher'}
+                          Dedicated feed: {launcherUpdate?.feedOwner ?? 'knoxhack'}/{launcherUpdate?.feedRepo ?? 'ECHO-Launcher'}
                         </p>
                       </div>
                       {launcherUpdate ? (
@@ -1291,3 +1291,5 @@ export function SettingsPage() {
     </div>
   )
 }
+
+

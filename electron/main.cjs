@@ -62,7 +62,8 @@ const APP_PROTOCOL_VERSION = 3
 const APP_ID = 'com.echo.launcher'
 const APP_NAME = 'ECHO Launcher'
 const LAUNCHER_UPDATE_OWNER = 'knoxhack'
-const LAUNCHER_UPDATE_REPO = 'ECHO-Launcher-Public-Alpha'
+const LAUNCHER_UPDATE_REPO = 'ECHO-Launcher'
+const LAUNCHER_UPDATE_STREAM = 'public'
 const MINECRAFT_DOWNLOAD_URL = 'https://www.minecraft.net/en-us/download'
 const MINECRAFT_HELP_URL = 'https://help.minecraft.net/hc/en-us/articles/23907917790093-How-to-Download-and-Install-the-Minecraft-Launcher'
 const MINECRAFT_WINDOWS_DOWNLOAD_URL = 'https://aka.ms/minecraftClientGameCoreWindows'
@@ -77,8 +78,8 @@ const CANONICAL_PROFILE_ID = 'ashfall-native-edition'
 const CANONICAL_PROFILE_NAME = 'Ashfall Native Edition'
 const CANONICAL_CHANNEL = 'alpha'
 const CANONICAL_VERSION = 'GitHub latest'
-const OFFICIAL_PACK_IDS = new Set(['ashfall-native-edition', 'standalone-runtime-showcase'])
-const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'standalone-runtime-showcase'])
+const OFFICIAL_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
   {
     id: 'ashfall-native-edition',
@@ -90,11 +91,20 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     neoforge: 'N/A',
   },
   {
-    id: 'standalone-runtime-showcase',
-    name: 'ECHO Standalone Runtime Showcase',
+    id: 'ashfall-neoforge-edition',
+    name: 'Ashfall NeoForge Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channelLabel: 'Alpha',
+    installFolder: 'Ashfall NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'ashfall-standalone-edition',
+    name: 'Ashfall Standalone Edition',
     runtimeMode: 'native-runtime',
     channelLabel: 'Experimental',
-    installFolder: 'ECHO Standalone Runtime Showcase',
+    installFolder: 'Ashfall Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
@@ -106,12 +116,12 @@ const DEFAULT_DESKTOP_SETTINGS = {
   releaseFeed: {
     provider: 'github',
     owner: 'knoxhack',
-    repo: 'ECHO-Native-Platform-Public-Alpha',
+    repo: 'ECHO-Ashfall-Native-Edition',
     includePrereleases: true,
   },
   publisher: {
     owner: 'knoxhack',
-    repo: 'ECHO-Native-Platform-Public-Alpha',
+    repo: 'ECHO-Launcher',
     hasToken: false,
   },
   supportGuideUrl: '',
@@ -225,6 +235,7 @@ function manifestAssetName(channel, version, pack = CANONICAL_PROFILE_ID) {
 function normalizeOfficialPackId(pack) {
   const value = String(pack ?? '').trim().toLowerCase()
   if (value === LEGACY_ASHFALL_PROFILE_ID || value === 'ashfall-stable') return CANONICAL_PROFILE_ID
+  if (value === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
   return OFFICIAL_PACK_IDS.has(value) ? value : undefined
 }
 
@@ -417,6 +428,16 @@ function launcherUpdatesSupported() {
   return launcherUpdatesSupportedForPlatform(getPlatformInfo(), app.isPackaged, Boolean(autoUpdater), process.env)
 }
 
+function assertLauncherUpdateFeedConfig(feed) {
+  if (
+    LAUNCHER_UPDATE_STREAM !== 'public' ||
+    feed?.owner !== LAUNCHER_UPDATE_OWNER ||
+    feed?.repo !== LAUNCHER_UPDATE_REPO
+  ) {
+    throw new Error(`Invalid launcher updater feed: ${feed?.owner ?? '<empty>'}/${feed?.repo ?? '<empty>'}.`)
+  }
+}
+
 function wineManualLauncherUpdateInstall() {
   return getPlatformInfo().compat === 'wine'
 }
@@ -505,11 +526,13 @@ function initializeLauncherUpdates() {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = isPrereleaseVersion(app.getVersion())
-  autoUpdater.setFeedURL({
+  const launcherFeed = {
     provider: 'github',
     owner: LAUNCHER_UPDATE_OWNER,
     repo: LAUNCHER_UPDATE_REPO,
-  })
+  }
+  assertLauncherUpdateFeedConfig(launcherFeed)
+  autoUpdater.setFeedURL(launcherFeed)
 
   autoUpdater.on('checking-for-update', () => {
     setLauncherUpdateState({ status: 'checking', error: undefined, progress: 0 })
@@ -1510,12 +1533,12 @@ function validatePackManifest(manifest, options = {}) {
   if (!CHANNELS.has(manifest.channel)) {
     throw new Error('Pack manifest channel is invalid.')
   }
-  if (normalizedPack === 'standalone-runtime-showcase') {
+  if (normalizedPack === 'ashfall-standalone-edition') {
     if (!manifest.runtime?.requiredJava) {
-      throw new Error('Standalone Runtime manifests must include runtime.requiredJava.')
+      throw new Error('Ashfall Standalone Edition manifests must include runtime.requiredJava.')
     }
     if (!manifest.launch?.mainClass) {
-      throw new Error('Standalone Runtime manifests must include launch metadata.')
+      throw new Error('Ashfall Standalone Edition manifests must include launch metadata.')
     }
   } else if (normalizedPack === 'ashfall-native-edition') {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
@@ -1523,6 +1546,13 @@ function validatePackManifest(manifest, options = {}) {
     }
     if (!manifest.nativeLoader) {
       throw new Error('Ashfall Native Edition manifests must include Native Loader metadata.')
+    }
+  } else if (normalizedPack === 'ashfall-neoforge-edition') {
+    if (!manifest.minecraft && !manifest.minecraftVersion) {
+      throw new Error('Pack manifest requires a Minecraft version.')
+    }
+    if (manifest.loader?.type !== 'neoforge') {
+      throw new Error('Ashfall NeoForge Edition manifests must include NeoForge loader metadata.')
     }
   }
   if (normalizedPack === 'ashfall-native-edition' || manifest.nativeLoader) {
