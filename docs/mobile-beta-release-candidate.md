@@ -7,14 +7,14 @@ This handoff is the beta tester checklist for ECHO Launcher plus the Android ECH
 - Android debug APK:
   `C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHO-Command-Android\app\build\outputs\apk\debug\app-debug.apk`
 - Desktop launcher build output:
-  `C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHOLauncher\dist`
+  `C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHO-Launcher\dist`
 
 ## Verified Checks
 
 Run these before handing a build to testers:
 
 ```powershell
-cd C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHOLauncher
+cd C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHO-Launcher
 npm.cmd run rc:mobile
 ```
 

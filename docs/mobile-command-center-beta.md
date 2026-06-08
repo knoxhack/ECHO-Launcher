@@ -27,7 +27,7 @@ This checklist is for beta testers pairing the Android ECHO Command Center app w
 Use ADB when the phone is visible to the desktop:
 
 ```powershell
-cd C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHOLauncher
+cd C:\Experimental\Codex\ECHONATIVEPLATFORM\ECHO-Launcher
 npm.cmd run rc:mobile:device -- --install --launch
 ```
 
