@@ -45,6 +45,23 @@ export interface ManifestFile {
   side: FileSide
 }
 
+export type ModuleArtifactFamily = 'echo-addon' | 'neoforge' | 'standalone'
+
+export interface ModuleRequirement {
+  id?: string
+  moduleId?: string
+  version: string
+  artifactFamily?: ModuleArtifactFamily
+  family?: ModuleArtifactFamily
+  artifactName?: string
+  assetName?: string
+  path?: string
+  sha256?: string
+  size?: number
+  required?: boolean
+  side?: FileSide
+}
+
 export interface RuntimeManifest {
   requiredJava: string
   minecraftVersion?: string
@@ -74,6 +91,8 @@ export interface PackManifest {
   launch?: LaunchManifest
   ramMb?: number
   modules: string[]
+  moduleRequirements?: ModuleRequirement[]
+  requiredModules?: ModuleRequirement[]
   files: ManifestFile[]
   changelog: string[]
   worldgenWarning: boolean

@@ -102,11 +102,115 @@ function validateZipManifestReleaseAssets(manifest, entryAssets = []) {
   return { reasons, warnings, missingFileAssets }
 }
 
+function moduleArtifactFamilyForPack(pack) {
+  if (pack === 'ashfall-neoforge-edition') return 'neoforge'
+  if (pack === 'ashfall-standalone-edition') return 'standalone'
+  return 'echo-addon'
+}
+
+function moduleArtifactName(moduleId, version, family) {
+  const id = String(moduleId ?? '').trim().toLowerCase()
+  const moduleVersion = String(version ?? '').trim()
+  if (!id || !moduleVersion) return ''
+  if (family === 'neoforge') return `${id}-${moduleVersion}-neoforge.jar`
+  if (family === 'standalone') return `${id}-${moduleVersion}-standalone.jar`
+  return `${id}-${moduleVersion}.echo-addon`
+}
+
+function moduleArtifactPath(assetName, family) {
+  if (!assetName) return ''
+  return family === 'echo-addon' ? `addons/${assetName}` : `mods/${assetName}`
+}
+
+function normalizeModuleRequirement(requirement, manifest = {}) {
+  if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) return null
+  const moduleId = String(requirement.id ?? requirement.moduleId ?? '').trim().toLowerCase()
+  const version = String(requirement.version ?? '').trim()
+  if (!moduleId || !version) return null
+  const family = String(
+    requirement.artifactFamily ?? requirement.family ?? manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(manifest.pack),
+  ).trim().toLowerCase()
+  const assetName = String(requirement.assetName ?? requirement.artifactName ?? moduleArtifactName(moduleId, version, family)).trim()
+  const path = String(requirement.path ?? moduleArtifactPath(assetName, family)).trim()
+  return {
+    moduleId,
+    version,
+    family,
+    assetName,
+    path,
+    required: requirement.required !== false,
+    side: requirement.side ?? 'both',
+    sha256: normalizeSha256(requirement.sha256),
+    size: Number.isFinite(Number(requirement.size)) ? Number(requirement.size) : undefined,
+  }
+}
+
+function normalizeModuleRequirements(manifest = {}) {
+  return (manifest.moduleRequirements ?? manifest.requiredModules ?? [])
+    .map((requirement) => normalizeModuleRequirement(requirement, manifest))
+    .filter(Boolean)
+}
+
+function moduleCatalogFromReleaseAssets(releaseAssets = []) {
+  const byName = new Map()
+  for (const asset of releaseAssets) {
+    if (!asset?.name) continue
+    byName.set(asset.name, asset)
+  }
+  return { byName }
+}
+
+function resolveModuleRequirement(requirement, catalog) {
+  const asset = catalog.byName.get(requirement.assetName)
+  if (!asset) {
+    throw new Error(`Module artifact '${requirement.assetName}' was not found in the ECHO-Modules release feed.`)
+  }
+  const sha256 = requirement.sha256 ?? releaseAssetSha256(asset)
+  if (!sha256) {
+    throw new Error(`Module artifact '${requirement.assetName}' is missing a SHA-256 hash.`)
+  }
+  return {
+    path: requirement.path,
+    assetName: requirement.assetName,
+    url: releaseAssetUrl(asset),
+    sha256,
+    size: requirement.size ?? asset.size ?? 0,
+    required: requirement.required,
+    moduleId: requirement.moduleId,
+    side: requirement.side,
+  }
+}
+
+function resolveModuleRequirements(manifest = {}, releaseAssets = []) {
+  const requirements = normalizeModuleRequirements(manifest)
+  if (!requirements.length) return manifest
+  const catalog = moduleCatalogFromReleaseAssets(releaseAssets)
+  const existingPaths = new Set((manifest.files ?? []).map((file) => releasePathBasename(file?.path ? String(file.path).replace(/\\/g, '/').toLowerCase() : '')))
+  const existingFullPaths = new Set((manifest.files ?? []).map((file) => String(file?.path ?? '').replace(/\\/g, '/').toLowerCase()))
+  const moduleFiles = []
+  for (const requirement of requirements) {
+    const resolved = resolveModuleRequirement(requirement, catalog)
+    const normalizedPath = resolved.path.replace(/\\/g, '/').toLowerCase()
+    if (existingFullPaths.has(normalizedPath) || existingPaths.has(releasePathBasename(normalizedPath))) continue
+    existingFullPaths.add(normalizedPath)
+    moduleFiles.push(resolved)
+  }
+  return {
+    ...manifest,
+    modules: [...new Set([...(manifest.modules ?? []), ...requirements.map((item) => item.moduleId)])],
+    files: [...(manifest.files ?? []), ...moduleFiles],
+  }
+}
+
 module.exports = {
   buildReleaseAssetLookup,
   findReleaseAssetForManifestFile,
   githubAssetSha256,
+  moduleArtifactFamilyForPack,
+  moduleArtifactName,
+  normalizeModuleRequirements,
   releaseAssetSha256,
   releaseAssetUrl,
+  resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 }

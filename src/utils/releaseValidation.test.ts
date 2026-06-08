@@ -7,6 +7,7 @@ import {
   isUsableReleaseCache,
   latestPlayableRelease,
   latestPlayableReleaseForPack,
+  moduleArtifactName,
   nativeLoaderMetadataStatus,
   normalizeGitHubAssetDigest,
   normalizeOfficialPackId,
@@ -140,6 +141,12 @@ describe('releaseValidation', () => {
     expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
   })
 
+  it('builds expected module artifact names', () => {
+    expect(moduleArtifactName('echocore', '1.0.0', 'neoforge')).toBe('echocore-1.0.0-neoforge.jar')
+    expect(moduleArtifactName('echocore', '1.0.0', 'standalone')).toBe('echocore-1.0.0-standalone.jar')
+    expect(moduleArtifactName('echocore', '1.0.0', 'echo-addon')).toBe('echocore-1.0.0.echo-addon')
+  })
+
   it('validates trusted pack manifests', () => {
     const manifest = validatePackManifest({
       pack: 'ashfall',
@@ -221,6 +228,12 @@ describe('releaseValidation', () => {
           installMode: 'client',
         },
       },
+      moduleRequirements: [
+        {
+          id: 'echocore',
+          version: '1.0.0',
+        },
+      ],
       modules: ['echocore'],
       files: [
         {
@@ -239,6 +252,33 @@ describe('releaseValidation', () => {
 
     expect(manifest.pack).toBe('ashfall-neoforge-edition')
     expect(manifest.loader?.type).toBe('neoforge')
+    expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
+  })
+
+  it('rejects unsafe module requirement paths', () => {
+    expect(() =>
+      validatePackManifest({
+        pack: 'ashfall-neoforge-edition',
+        version: '1.0.0',
+        channel: 'alpha',
+        minecraft: '26.1.2',
+        loader: {
+          type: 'neoforge',
+          version: '26.1.2',
+        },
+        moduleRequirements: [
+          {
+            id: 'echocore',
+            version: '1.0.0',
+            path: '../escape.jar',
+          },
+        ],
+        modules: [],
+        files: [],
+        changelog: [],
+        worldgenWarning: false,
+      }),
+    ).toThrow(/Unsafe module artifact path/)
   })
 
   it('accepts valid Native Loader release metadata', () => {

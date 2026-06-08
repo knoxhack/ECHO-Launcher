@@ -5,7 +5,9 @@ const require = createRequire(import.meta.url)
 const {
   buildReleaseAssetLookup,
   findReleaseAssetForManifestFile,
+  moduleArtifactName,
   releaseAssetUrl,
+  resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 } = require('./release-assets.cjs')
 
@@ -117,5 +119,85 @@ describe('release asset resolution', () => {
     expect(validation.reasons).toEqual([
       `Pack artifact SHA-256 mismatch for 'Ashfall-1.0.0.echo-pack.zip': manifest has ${sha('a')}, metadata has ${sha('b')}.`,
     ])
+  })
+
+  it('derives module artifact names by pack family', () => {
+    expect(moduleArtifactName('echocore', '1.2.3', 'neoforge')).toBe('echocore-1.2.3-neoforge.jar')
+    expect(moduleArtifactName('echocore', '1.2.3', 'standalone')).toBe('echocore-1.2.3-standalone.jar')
+    expect(moduleArtifactName('echocore', '1.2.3', 'echo-addon')).toBe('echocore-1.2.3.echo-addon')
+  })
+
+  it('expands module requirements into individually downloadable manifest files', () => {
+    const manifest = {
+      pack: 'ashfall-neoforge-edition',
+      moduleRequirements: [
+        {
+          id: 'echocore',
+          version: '1.2.3',
+        },
+      ],
+      modules: [],
+      files: [],
+    }
+    const resolved = resolveModuleRequirements(manifest, [
+      {
+        name: 'echocore-1.2.3-neoforge.jar',
+        browser_download_url: 'https://example.test/echocore-1.2.3-neoforge.jar',
+        sha256: sha('e'),
+        size: 1234,
+      },
+    ])
+
+    expect(resolved.modules).toEqual(['echocore'])
+    expect(resolved.files).toEqual([
+      {
+        path: 'mods/echocore-1.2.3-neoforge.jar',
+        assetName: 'echocore-1.2.3-neoforge.jar',
+        url: 'https://example.test/echocore-1.2.3-neoforge.jar',
+        sha256: sha('e'),
+        size: 1234,
+        required: true,
+        moduleId: 'echocore',
+        side: 'both',
+      },
+    ])
+  })
+
+  it('lets module requirements override asset names and install paths', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'ashfall-standalone-edition',
+        moduleRequirements: [
+          {
+            moduleId: 'echoai',
+            version: '2.0.0',
+            assetName: 'echoai-runtime.jar',
+            path: 'runtime/modules/echoai.jar',
+            required: false,
+            side: 'client',
+          },
+        ],
+        modules: [],
+        files: [],
+      },
+      [
+        {
+          name: 'echoai-runtime.jar',
+          url: 'https://example.test/echoai-runtime.jar',
+          digest: `sha256:${sha('f')}`,
+          size: 222,
+        },
+      ],
+    )
+
+    expect(resolved.files[0]).toMatchObject({
+      path: 'runtime/modules/echoai.jar',
+      assetName: 'echoai-runtime.jar',
+      url: 'https://example.test/echoai-runtime.jar',
+      sha256: sha('f'),
+      required: false,
+      moduleId: 'echoai',
+      side: 'client',
+    })
   })
 })

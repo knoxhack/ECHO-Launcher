@@ -26,6 +26,19 @@ export function packManifestAssetName(channel: Channel, version: string, pack: O
   return `${pack}-${channel}-${version}.pack.json`
 }
 
+export function moduleArtifactFamilyForPack(pack: OfficialPackId) {
+  if (pack === 'ashfall-neoforge-edition') return 'neoforge'
+  if (pack === 'ashfall-standalone-edition') return 'standalone'
+  return 'echo-addon'
+}
+
+export function moduleArtifactName(moduleId: string, version: string, family: string) {
+  const id = moduleId.trim().toLowerCase()
+  if (family === 'neoforge') return `${id}-${version}-neoforge.jar`
+  if (family === 'standalone') return `${id}-${version}-standalone.jar`
+  return `${id}-${version}.echo-addon`
+}
+
 export function normalizeReleaseFeedConfig(config: Partial<ReleaseFeedConfig>): ReleaseFeedConfig {
   return {
     provider: 'github',
@@ -236,6 +249,28 @@ export function validatePackManifest(value: unknown): PackManifest {
   }
   if (!Array.isArray(manifest.files)) {
     throw new Error('Manifest files must be an array.')
+  }
+  const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
+  if (moduleRequirements !== undefined && !Array.isArray(moduleRequirements)) {
+    throw new Error('Manifest moduleRequirements must be an array.')
+  }
+  for (const requirement of moduleRequirements ?? []) {
+    const moduleId = String(requirement.id ?? requirement.moduleId ?? '').trim()
+    if (!moduleId) {
+      throw new Error('Module requirements must include an id or moduleId.')
+    }
+    if (!requirement.version || typeof requirement.version !== 'string') {
+      throw new Error(`Module requirement ${moduleId} must include a version.`)
+    }
+    const family = requirement.artifactFamily ?? requirement.family ?? moduleArtifactFamilyForPack(normalizedPack)
+    const artifactName = requirement.assetName ?? requirement.artifactName ?? moduleArtifactName(moduleId, requirement.version, family)
+    const artifactPath = requirement.path ?? (family === 'echo-addon' ? `addons/${artifactName}` : `mods/${artifactName}`)
+    if (!isSafeRelativePath(artifactPath)) {
+      throw new Error(`Unsafe module artifact path: ${artifactPath}`)
+    }
+    if (requirement.sha256 && !/^[a-f0-9]{64}$/i.test(requirement.sha256)) {
+      throw new Error(`Module requirement ${moduleId} has an invalid SHA-256 hash.`)
+    }
   }
 
   if (manifest.artifactMode === 'zip') {

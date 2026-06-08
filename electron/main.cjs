@@ -16,7 +16,10 @@ const {
   buildReleaseAssetLookup,
   findReleaseAssetForManifestFile,
   githubAssetSha256,
+  moduleArtifactFamilyForPack,
+  moduleArtifactName,
   releaseAssetUrl,
+  resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 } = require('./release-assets.cjs')
 const {
@@ -64,6 +67,8 @@ const APP_NAME = 'ECHO Launcher'
 const LAUNCHER_UPDATE_OWNER = 'knoxhack'
 const LAUNCHER_UPDATE_REPO = 'ECHO-Launcher'
 const LAUNCHER_UPDATE_STREAM = 'public'
+const MODULE_RELEASE_OWNER = 'knoxhack'
+const MODULE_RELEASE_REPO = 'ECHO-Modules'
 const MINECRAFT_DOWNLOAD_URL = 'https://www.minecraft.net/en-us/download'
 const MINECRAFT_HELP_URL = 'https://help.minecraft.net/hc/en-us/articles/23907917790093-How-to-Download-and-Install-the-Minecraft-Launcher'
 const MINECRAFT_WINDOWS_DOWNLOAD_URL = 'https://aka.ms/minecraftClientGameCoreWindows'
@@ -1574,6 +1579,32 @@ function validatePackManifest(manifest, options = {}) {
       throw new Error('Zip artifact manifests require launch metadata.')
     }
   }
+  const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
+  if (moduleRequirements !== undefined && !Array.isArray(moduleRequirements)) {
+    throw new Error('Manifest moduleRequirements must be an array.')
+  }
+  for (const requirement of moduleRequirements ?? []) {
+    const moduleId = String(requirement?.id ?? requirement?.moduleId ?? '').trim()
+    if (!moduleId) {
+      throw new Error('Module requirements must include an id or moduleId.')
+    }
+    if (!requirement?.version || typeof requirement.version !== 'string') {
+      throw new Error(`Module requirement ${moduleId} must include a version.`)
+    }
+    const family = String(
+      requirement.artifactFamily ?? requirement.family ?? manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(normalizedPack),
+    ).trim().toLowerCase()
+    const assetName = String(requirement.assetName ?? requirement.artifactName ?? moduleArtifactName(moduleId, requirement.version, family)).trim()
+    const artifactPath = String(
+      requirement.path ?? (family === 'echo-addon' ? `addons/${assetName}` : `mods/${assetName}`),
+    )
+    if (!isSafeRelativePath(artifactPath)) {
+      throw new Error(`Unsafe module artifact path: ${artifactPath}`)
+    }
+    if (requirement.sha256 && !/^[a-f0-9]{64}$/i.test(requirement.sha256)) {
+      throw new Error(`Module requirement ${moduleId} has an invalid SHA-256 hash.`)
+    }
+  }
   const manifestPaths = new Set()
   for (const file of manifest.files) {
     if (!isSafeRelativePath(file.path)) {
@@ -2485,6 +2516,50 @@ function metadataShaGetter(metadata) {
   }
 }
 
+let moduleReleaseAssetsCache = null
+let moduleReleaseAssetsInFlight = null
+
+async function fetchModuleReleaseAssets(payload = {}) {
+  if (!payload.refresh && moduleReleaseAssetsCache) return moduleReleaseAssetsCache
+  if (moduleReleaseAssetsInFlight) return moduleReleaseAssetsInFlight
+  moduleReleaseAssetsInFlight = (async () => {
+    const apiUrl = `https://api.github.com/repos/${encodeURIComponent(MODULE_RELEASE_OWNER)}/${encodeURIComponent(MODULE_RELEASE_REPO)}/releases`
+    const releases = await fetchJson(apiUrl)
+    if (!Array.isArray(releases)) throw new Error('ECHO-Modules release feed did not return a release list.')
+    const assets = []
+    const sorted = releases
+      .filter((release) => !release.draft)
+      .sort((a, b) => Date.parse(b.published_at ?? b.created_at ?? 0) - Date.parse(a.published_at ?? a.created_at ?? 0))
+
+    for (const release of sorted) {
+      const releaseAssets = await fetchReleaseAssets(release, Array.isArray(release.assets) ? release.assets : [])
+      const metadataAsset = releaseAssets.find((asset) => asset.name === RELEASE_METADATA_ASSET)
+      let metadataSha = () => undefined
+      if (metadataAsset?.browser_download_url) {
+        try {
+          metadataSha = metadataShaGetter(await fetchJson(metadataAsset.browser_download_url))
+        } catch {
+          metadataSha = () => undefined
+        }
+      }
+      for (const asset of releaseAssets) {
+        if (!asset?.name || asset.name === RELEASE_METADATA_ASSET) continue
+        assets.push({
+          ...asset,
+          sha256: metadataSha(asset.name) ?? githubAssetSha256(asset) ?? asset.sha256,
+          releaseTag: release.tag_name,
+          releasePageUrl: release.html_url,
+        })
+      }
+    }
+    moduleReleaseAssetsCache = assets
+    return assets
+  })().finally(() => {
+    moduleReleaseAssetsInFlight = null
+  })
+  return moduleReleaseAssetsInFlight
+}
+
 function releaseIndexWarnings(diagnostics) {
   return diagnostics
     .filter((diagnostic) => diagnostic.severity !== 'info')
@@ -2860,6 +2935,15 @@ function resolveManifestAssets(manifest, entry) {
   }
 }
 
+async function resolveInstallableManifest(manifest, entry, payload = {}) {
+  const requirements = manifest.moduleRequirements ?? manifest.requiredModules
+  if (Array.isArray(requirements) && requirements.length) {
+    const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
+    return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
+  }
+  return resolveManifestAssets(manifest, entry)
+}
+
 async function resolveReleaseEntry(payload, profile) {
   const channel = payload.channel ?? profile?.channel ?? 'stable'
   const pack = normalizeOfficialPackId(payload.pack) ?? normalizeOfficialPackId(profile?.id) ?? CANONICAL_PROFILE_ID
@@ -2887,7 +2971,7 @@ async function releaseFetchManifest(payload = {}) {
   if (!payload.refresh && (await exists(cachePath))) {
     const cachedHash = await sha256File(cachePath)
     if (cachedHash.toLowerCase() === entry.manifestSha256.toLowerCase()) {
-      const manifest = resolveManifestAssets(validatePackManifest(await readJson(cachePath, null)), entry)
+      const manifest = await resolveInstallableManifest(validatePackManifest(await readJson(cachePath, null)), entry, payload)
       await writeJson(manifestPath, manifest)
       return { entry, manifest, manifestPath, cached: true }
     }
@@ -2900,7 +2984,7 @@ async function releaseFetchManifest(payload = {}) {
   })
   if (!download.verified) throw new Error(`Manifest verification failed for ${entry.manifestAssetName}.`)
 
-  const manifest = resolveManifestAssets(validatePackManifest(await readJson(cachePath, null)), entry)
+  const manifest = await resolveInstallableManifest(validatePackManifest(await readJson(cachePath, null)), entry, payload)
   await writeJson(manifestPath, manifest)
   return { entry, manifest, manifestPath, cached: false }
 }
