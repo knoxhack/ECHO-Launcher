@@ -42,8 +42,6 @@ import type {
   ModpackExportReport,
   RuntimeVerificationResult,
   WorldCompatibilityReport,
-  ReleaseFetchResult,
-  ReleaseIndex,
   DefaultPackExportReport,
   PublisherDiffResult,
   PublisherPublishResult,
@@ -51,6 +49,7 @@ import type {
   PublisherSettingsState,
 } from '../types/native'
 import type { OfficialPackId, PackManifest } from '../types/manifests'
+import type { CanonicalProductUpdate, CanonicalReleaseIndexCatalog, ReleaseFetchResult, ReleaseIndex } from '../types/releases'
 import type { PackOsLauncherState } from '../types/packos'
 import type { LauncherProfile } from '../types/profiles'
 import type { Channel } from '../types/launcher'
@@ -84,6 +83,8 @@ type NativeCommandMap = {
   'mobile-bridge:revoke-device': { payload: { deviceId: string }; result: MobileBridgeState }
   'mobile-bridge:restart': { payload: undefined; result: MobileBridgeState }
   'release:list': { payload: { refresh?: boolean } | undefined; result: ReleaseIndex }
+  'release-index:catalog': { payload: { refresh?: boolean } | undefined; result: CanonicalReleaseIndexCatalog }
+  'release-index:product': { payload: { id: string; compatibility?: string; refresh?: boolean }; result: CanonicalProductUpdate }
   'release:fetch-manifest': {
     payload: { channel: Channel; version?: string; refresh?: boolean; pack?: OfficialPackId }
     result: ReleaseFetchResult & { manifest: PackManifest }

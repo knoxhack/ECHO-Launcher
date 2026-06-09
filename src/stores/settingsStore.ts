@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Channel } from '../types/launcher'
-import type { LaunchMode, LauncherDesktopSettings, PublisherSettings, ReleaseFeedConfig } from '../types/releases'
+import type { LaunchMode, LauncherDesktopSettings, PublisherSettings, ReleaseFeedConfig, ReleaseIndexConfig } from '../types/releases'
 import {
   communityChatSettingsDefaults,
   communityChatUrlsFromStatusUrl,
@@ -32,6 +32,7 @@ interface SettingsStore {
   serverPackProgress: number
   serverPackActive: boolean
   releaseFeed: ReleaseFeedConfig
+  releaseIndex: ReleaseIndexConfig
   publisher: PublisherSettings
   supportGuideUrl: string
   launchMode: LaunchMode
@@ -49,6 +50,7 @@ interface SettingsStore {
   setRamGb: (ramGb: number) => void
   setUpdateChannel: (channel: Channel) => void
   setReleaseFeed: (releaseFeed: ReleaseFeedConfig) => void
+  setReleaseIndex: (releaseIndex: ReleaseIndexConfig) => void
   setPublisher: (publisher: PublisherSettings) => void
   setSupportGuideUrl: (supportGuideUrl: string) => void
   setAdvancedMode: (advancedMode: boolean) => void
@@ -144,6 +146,10 @@ export const useSettingsStore = create<SettingsStore>()(
         repo: 'ECHO-Ashfall-Native-Edition',
         includePrereleases: true,
       },
+      releaseIndex: {
+        enabled: true,
+        channelUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json',
+      },
       publisher: {
         owner: 'knoxhack',
         repo: 'ECHO-Ashfall-Native-Edition',
@@ -159,6 +165,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setRamGb: (ramGb) => set({ ramGb }),
       setUpdateChannel: (updateChannel) => set({ updateChannel }),
       setReleaseFeed: (releaseFeed) => set({ releaseFeed }),
+      setReleaseIndex: (releaseIndex) => set({ releaseIndex }),
       setPublisher: (publisher) => set({ publisher }),
       setSupportGuideUrl: (supportGuideUrl) => set({ supportGuideUrl }),
       setAdvancedMode: (advancedMode) => set({ advancedMode }),
@@ -195,9 +202,12 @@ export const useSettingsStore = create<SettingsStore>()(
       setPackOsReportRoot: (packOsReportRoot) => set({ packOsReportRoot }),
       setDesktopSettings: (settings) =>
         set(() => {
-          const official = normalizeOfficialServerSettings(settings)
+          const official = normalizeOfficialServerSettings(settings, {
+            migrateLegacyDefaults: settings.communityChatPortMigrationVersion !== 2,
+          })
           return {
             releaseFeed: settings.releaseFeed,
+            releaseIndex: settings.releaseIndex,
             publisher: settings.publisher,
             supportGuideUrl: settings.supportGuideUrl,
             launchMode: settings.launchMode,
@@ -206,7 +216,7 @@ export const useSettingsStore = create<SettingsStore>()(
             packOsReportRoot: settings.packOsReportRoot ?? '',
             ...official,
             ...normalizeCommunityChatSettings(settings, official.officialServerStatusUrl, {
-              migrateLegacyLocalDefaults: settings.communityChatPortMigrationVersion !== 1,
+              migrateLegacyLocalDefaults: settings.communityChatPortMigrationVersion !== 2,
             }),
           }
         }),
@@ -244,6 +254,7 @@ export const useSettingsStore = create<SettingsStore>()(
         ambientSounds: state.ambientSounds,
         masterVolume: state.masterVolume,
         releaseFeed: state.releaseFeed,
+        releaseIndex: state.releaseIndex,
         publisher: state.publisher,
         supportGuideUrl: state.supportGuideUrl,
         launchMode: state.launchMode,

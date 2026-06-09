@@ -14,8 +14,10 @@
     "desktop:chat": "concurrently -k \"npm:dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "desktop:prod": "npm run build && electron .",
     "chat:dev": "npm --prefix server/community-chat run dev",
+    "chat:install": "npm --prefix server/community-chat ci",
     "chat:test": "npm --prefix server/community-chat run test",
     "chat:build": "npm --prefix server/community-chat run build",
+    "chat:check": "npm run chat:install && npm run chat:build && npm run chat:test",
     "chat:smoke": "npm --prefix server/community-chat run smoke",
     "chat:migrate": "npm --prefix server/community-chat run migrate",
     "pack:ashfall": "node scripts/pack-ashfall.mjs",
@@ -36,6 +38,7 @@
     "perf:budget": "node scripts/check-perf-budget.mjs",
     "audit:placeholders": "node scripts/check-placeholders.mjs",
     "test": "vitest run",
+    "test:e2e:release-index": "node scripts/release-index-local-e2e.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -79,6 +82,9 @@
     "vitest": "^4.1.6",
     "wait-on": "^9.0.10",
     "zustand": "^5.0.13"
+  },
+  "overrides": {
+    "tmp": "^0.2.7"
   },
   "build": {
     "appId": "com.echo.launcher",

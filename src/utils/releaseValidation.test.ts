@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ReleaseEntry, ReleaseIndex } from '../types/releases'
+import type { CanonicalReleaseIndexEntry, ReleaseEntry, ReleaseIndex } from '../types/releases'
 import {
+  artifactChecksumStatus,
+  artifactForPackTarget,
+  dependencyClosure,
+  parseEchoProtocolUrl,
   isSafeRelativePath,
   isPlayableAshfallRelease,
   isPlayablePackRelease,
@@ -13,7 +17,13 @@ import {
   normalizeOfficialPackId,
   normalizeReleaseFeedConfig,
   packManifestAssetName,
+  productUpdateArtifact,
+  productUpdateEntry,
+  productUpdateSelection,
   releaseFeedConfigured,
+  releaseEntryFromCanonicalModpack,
+  resolveEchoProtocolEntry,
+  rollbackPlanSnapshot,
   selectReleaseEntry,
   validatePackManifest,
 } from './releaseValidation'
@@ -35,6 +45,72 @@ const baseRelease: ReleaseEntry = {
   manifestSha256: 'a'.repeat(64),
   trust: 'verified-metadata',
   assets: [],
+}
+
+const canonicalModule: CanonicalReleaseIndexEntry = {
+  id: 'echoarmory',
+  kind: 'module',
+  version: '1.0.0',
+  channel: 'alpha',
+  publisher: 'knoxhack',
+  sourceRepo: 'knoxhack/ECHO-Modules',
+  releaseTag: 'modules-v1.0.0',
+  commitSha: 'abc1234',
+  artifacts: {
+    native: { file: 'echoarmory-1.0.0.echo-addon', sha256: 'a'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echoarmory-1.0.0.echo-addon' },
+    neoforge: { file: 'echoarmory-1.0.0-neoforge.jar', sha256: 'b'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echoarmory-1.0.0-neoforge.jar' },
+    standalone: { file: 'echoarmory-1.0.0-standalone.jar', sha256: 'c'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echoarmory-1.0.0-standalone.jar' },
+  },
+  dependencies: [{ id: 'echocore', kind: 'module', version: '*' }],
+  compatibility: ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'],
+  trust: 'provenance-attested',
+  validation: 'approved',
+}
+
+const canonicalCore: CanonicalReleaseIndexEntry = {
+  ...canonicalModule,
+  id: 'echocore',
+  artifacts: {
+    native: { file: 'echocore-1.0.0.echo-addon', sha256: 'd'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echocore-1.0.0.echo-addon' },
+  },
+  dependencies: [],
+}
+
+const canonicalPack: CanonicalReleaseIndexEntry = {
+  id: 'ashfall-neoforge-edition',
+  kind: 'modpack',
+  version: '0.1.0',
+  channel: 'alpha',
+  publisher: 'knoxhack',
+  sourceRepo: 'knoxhack/ECHO-Ashfall-NeoForge-Edition',
+  releaseTag: 'v0.1.0',
+  commitSha: 'abc1234',
+  artifacts: {
+    pack: { file: 'ashfall-neoforge-edition-0.1.0.zip', sha256: 'e'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Ashfall-NeoForge-Edition/releases/download/v0.1.0/ashfall-neoforge-edition-0.1.0.zip', size: 100 },
+    manifest: { file: 'ashfall-neoforge-edition-alpha-0.1.0.pack.json', sha256: 'f'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Ashfall-NeoForge-Edition/releases/download/v0.1.0/ashfall-neoforge-edition-alpha-0.1.0.pack.json', size: 10 },
+  },
+  dependencies: [],
+  compatibility: ['neoforge'],
+  trust: 'official',
+  validation: 'approved',
+}
+
+const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
+  id: 'echo-launcher',
+  kind: 'product',
+  version: '1.0.1',
+  channel: 'alpha',
+  publisher: 'knoxhack',
+  sourceRepo: 'knoxhack/ECHO-Launcher',
+  releaseTag: 'v1.0.1',
+  commitSha: 'abc1234',
+  artifacts: {
+    windowsSetup: { file: 'ECHO-Launcher-1.0.1-Setup.exe', sha256: '1'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Launcher/releases/download/v1.0.1/ECHO-Launcher-1.0.1-Setup.exe' },
+  },
+  dependencies: [],
+  compatibility: ['windows-x64'],
+  trust: 'official',
+  validation: 'approved',
 }
 
 function releaseIndex(overrides: Partial<ReleaseIndex>): ReleaseIndex {
@@ -145,6 +221,122 @@ describe('releaseValidation', () => {
     expect(moduleArtifactName('echocore', '1.0.0', 'neoforge')).toBe('echocore-1.0.0-neoforge.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'standalone')).toBe('echocore-1.0.0-standalone.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'echo-addon')).toBe('echocore-1.0.0.echo-addon')
+  })
+
+  it('maps approved Release Index modpacks into strict release entries', () => {
+    const entry = releaseEntryFromCanonicalModpack(canonicalPack, '2026-06-09T00:00:00Z')
+
+    expect(entry).toMatchObject({
+      pack: 'ashfall-neoforge-edition',
+      version: '0.1.0',
+      manifestAssetName: 'ashfall-neoforge-edition-alpha-0.1.0.pack.json',
+      manifestSha256: 'f'.repeat(64),
+      trust: 'verified-metadata',
+    })
+    expect(entry?.assets.map((asset) => asset.name)).toContain('ashfall-neoforge-edition-0.1.0.zip')
+  })
+
+  it('parses and resolves echo protocol links only through approved index entries', () => {
+    expect(parseEchoProtocolUrl('echo://install/addon/echoarmory?pack=ashfall-neoforge-edition')).toEqual({
+      rawUrl: 'echo://install/addon/echoarmory?pack=ashfall-neoforge-edition',
+      action: 'install-addon',
+      id: 'echoarmory',
+      pack: 'ashfall-neoforge-edition',
+    })
+    expect(parseEchoProtocolUrl('echo://update/pack/ashfall-neoforge-edition')).toMatchObject({
+      action: 'update-pack',
+      id: 'ashfall-neoforge-edition',
+    })
+    expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [
+      { ...canonicalModule, validation: 'warning' },
+    ])).toBeNull()
+    const addonInstall = resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule])
+    expect(addonInstall?.entry.id).toBe('echoarmory')
+    expect(addonInstall?.action).toBe('install-addon')
+    if (addonInstall?.action !== 'install-addon') throw new Error('Expected addon install resolution.')
+    expect(addonInstall.artifact.name).toBe('echoarmory-1.0.0.echo-addon')
+    expect(resolveEchoProtocolEntry('echo://update/pack/ashfall-neoforge-edition', [canonicalPack])?.entry.id).toBe('ashfall-neoforge-edition')
+  })
+
+  it('rejects addon install links when the requested pack has no indexed artifact', () => {
+    expect(resolveEchoProtocolEntry('echo://install/addon/echocore?pack=ashfall-neoforge-edition', [canonicalCore])).toBeNull()
+  })
+
+  it('selects module artifacts by pack target', () => {
+    expect(artifactForPackTarget(canonicalModule, 'ashfall-native-edition')?.name).toBe('echoarmory-1.0.0.echo-addon')
+    expect(artifactForPackTarget(canonicalModule, 'ashfall-neoforge-edition')?.name).toBe('echoarmory-1.0.0-neoforge.jar')
+    expect(artifactForPackTarget(canonicalModule, 'ashfall-standalone-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
+  })
+
+  it('builds approved dependency closures and enforces blocks', () => {
+    expect(dependencyClosure([canonicalModule, canonicalCore], ['echoarmory']).map((entry) => entry.id)).toEqual(['echocore', 'echoarmory'])
+    expect(() => dependencyClosure([canonicalModule], ['echoarmory'])).toThrow(/Missing Release Index dependency echocore/)
+    expect(() => dependencyClosure([canonicalModule, { ...canonicalCore, validation: 'blocked' }], ['echoarmory'])).toThrow(/Blocked Release Index dependency echocore/)
+    expect(() => dependencyClosure([canonicalModule, { ...canonicalCore, validation: 'warning' }], ['echoarmory'])).toThrow(/Unapproved Release Index dependency echocore/)
+  })
+
+  it('detects artifact checksum mismatches before install acceptance', () => {
+    expect(artifactChecksumStatus('a'.repeat(64), 'a'.repeat(64))).toMatchObject({ ok: true })
+    expect(artifactChecksumStatus('a'.repeat(64), 'b'.repeat(64))).toMatchObject({
+      ok: false,
+      reason: `SHA-256 mismatch: expected ${'a'.repeat(64)}, got ${'b'.repeat(64)}.`,
+    })
+    expect(artifactChecksumStatus('', 'b'.repeat(64))).toMatchObject({
+      ok: false,
+      reason: 'Expected SHA-256 is missing or invalid.',
+    })
+  })
+
+  it('generates deterministic rollback plan snapshots', () => {
+    expect(rollbackPlanSnapshot({
+      installId: 'install-20260609',
+      operation: 'update',
+      installPath: 'C:\\Games\\Ashfall',
+      backedUp: [
+        { path: 'mods\\echocore.jar', backupPath: 'C:\\Backups\\mods\\echocore.jar' },
+      ],
+      removed: ['config\\old.toml', 'mods\\old.jar'],
+      createdAt: '2026-06-09T00:00:00Z',
+    })).toEqual({
+      installId: 'install-20260609',
+      operation: 'update',
+      installPath: 'C:\\Games\\Ashfall',
+      backedUp: [
+        { path: 'mods/echocore.jar', backupPath: 'C:\\Backups\\mods\\echocore.jar' },
+      ],
+      removed: ['config/old.toml', 'mods/old.jar'],
+      createdAt: '2026-06-09T00:00:00Z',
+    })
+  })
+
+  it('selects approved product updates through Release Index entries', () => {
+    expect(productUpdateEntry([
+      { ...canonicalLauncherProduct, version: '1.0.0', artifacts: {} },
+      canonicalLauncherProduct,
+      { ...canonicalLauncherProduct, version: '1.0.2', validation: 'warning' },
+    ], 'echo-launcher', 'windows-x64')?.version).toBe('1.0.1')
+    expect(productUpdateEntry([
+      { ...canonicalLauncherProduct, validation: 'blocked' },
+    ], 'echo-launcher', 'windows-x64')).toBeNull()
+    expect(productUpdateEntry([canonicalLauncherProduct], 'echo-launcher', 'linux-x64')).toBeNull()
+  })
+
+  it('selects product updates only when an exact indexed updater artifact is available', () => {
+    const staleWithArtifact = { ...canonicalLauncherProduct, version: '1.0.0' }
+    const latestWithoutArtifact = { ...canonicalLauncherProduct, version: '1.0.2', artifacts: {} }
+    const selection = productUpdateSelection([
+      staleWithArtifact,
+      latestWithoutArtifact,
+      { ...canonicalLauncherProduct, version: '1.0.3', validation: 'warning' },
+    ], 'echo-launcher', 'windows-x64')
+
+    expect(selection.entry?.version).toBe('1.0.0')
+    expect(selection.artifact?.name).toBe('ECHO-Launcher-1.0.1-Setup.exe')
+    expect(selection.warnings).toEqual([
+      'Release Index product echo-launcher 1.0.2 has no indexed updater artifact for windows-x64.',
+    ])
+    expect(productUpdateArtifact(canonicalLauncherProduct, 'windows-x64')?.sha256).toBe('1'.repeat(64))
+    expect(productUpdateSelection([latestWithoutArtifact], 'echo-launcher', 'windows-x64').entry).toBeNull()
   })
 
   it('validates trusted pack manifests', () => {

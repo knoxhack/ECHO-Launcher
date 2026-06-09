@@ -69,6 +69,7 @@ const LAUNCHER_UPDATE_REPO = 'ECHO-Launcher'
 const LAUNCHER_UPDATE_STREAM = 'public'
 const MODULE_RELEASE_OWNER = 'knoxhack'
 const MODULE_RELEASE_REPO = 'ECHO-Modules'
+const CANONICAL_RELEASE_INDEX_CHANNEL_URL = 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json'
 const MINECRAFT_DOWNLOAD_URL = 'https://www.minecraft.net/en-us/download'
 const MINECRAFT_HELP_URL = 'https://help.minecraft.net/hc/en-us/articles/23907917790093-How-to-Download-and-Install-the-Minecraft-Launcher'
 const MINECRAFT_WINDOWS_DOWNLOAD_URL = 'https://aka.ms/minecraftClientGameCoreWindows'
@@ -117,12 +118,19 @@ const ASHFALL_PROFILE_DEFINITIONS = [
 const KNOWN_ASHFALL_INSTANCE_PATHS = process.platform === 'win32' ? ['C:\\CurseForge\\Instances\\Ashfall Protocol'] : []
 const CHANNELS = new Set([CANONICAL_CHANNEL, 'experimental'])
 const OFFICIAL_SERVER_STALE_MS = 120_000
+const OFFICIAL_SERVER_STATUS_URL = process.env.ECHO_OFFICIAL_SERVER_STATUS_URL || 'https://api.echoplatform.dev/status.json'
+const OFFICIAL_COMMUNITY_API_URL = process.env.ECHO_COMMUNITY_API_URL || 'https://api.echoplatform.dev'
+const OFFICIAL_COMMUNITY_WEBSOCKET_URL = process.env.ECHO_COMMUNITY_WEBSOCKET_URL || 'wss://api.echoplatform.dev/v1/chat/socket'
 const DEFAULT_DESKTOP_SETTINGS = {
   releaseFeed: {
     provider: 'github',
     owner: 'knoxhack',
     repo: 'ECHO-Ashfall-Native-Edition',
     includePrereleases: true,
+  },
+  releaseIndex: {
+    enabled: true,
+    channelUrl: CANONICAL_RELEASE_INDEX_CHANNEL_URL,
   },
   publisher: {
     owner: 'knoxhack',
@@ -133,13 +141,13 @@ const DEFAULT_DESKTOP_SETTINGS = {
   launchMode: 'minecraft_launcher',
   advancedMode: false,
   creatorMode: false,
-  officialServerStatusUrl: 'http://64.74.111.235:16363/status.json',
+  officialServerStatusUrl: OFFICIAL_SERVER_STATUS_URL,
   officialDiscordInviteUrl: '',
   officialServerName: 'Ashfall Official',
   officialStatusPollSeconds: 30,
-  communityApiUrl: 'http://64.74.111.235:16363',
-  communityWebSocketUrl: 'ws://64.74.111.235:16363/v1/chat/socket',
-  communityChatPortMigrationVersion: 1,
+  communityApiUrl: OFFICIAL_COMMUNITY_API_URL,
+  communityWebSocketUrl: OFFICIAL_COMMUNITY_WEBSOCKET_URL,
+  communityChatPortMigrationVersion: 2,
   chatNickname: 'Launcher Player',
   chatNotifications: true,
   packOsReportRoot: '',
@@ -157,11 +165,13 @@ const operationStatuses = new Map()
 let latestOperationId = null
 let operationSequence = 0
 let releaseRefreshInFlight = null
+let releaseIndexCatalogRefreshInFlight = null
 let launcherUpdatesInitialized = false
 let launcherUpdateCheckPromise = null
 let launcherUpdateState = null
 let mobileBridgeServer = null
 let mobileBridgeStartError = null
+let pendingProtocolAction = null
 
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu-compositing')
@@ -283,17 +293,36 @@ function isLegacyLocalCommunityUrl(value) {
   ].includes(normalized)
 }
 
+function isLegacyOfficialServerStatusUrl(value) {
+  return [
+    'http://64.74.111.235:16363/status.json',
+    'http://64.74.111.235:16363/status.json/',
+  ].includes(String(value ?? '').trim())
+}
+
+function isLegacyOfficialCommunityUrl(value) {
+  return [
+    'http://64.74.111.235:16363',
+    'http://64.74.111.235:16363/',
+    'ws://64.74.111.235:16363/v1/chat/socket',
+  ].includes(String(value ?? '').trim())
+}
+
 function mergeSettings(settings) {
   const safeSettings = { ...(settings ?? {}) }
   delete safeSettings.microsoftClientId
   delete safeSettings.devOfflineLaunch
   delete safeSettings.minecraftLauncherHandoffConfirmed
   delete safeSettings.launchMode
-  const officialServerStatusUrl = String(settings?.officialServerStatusUrl ?? DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl).trim() || DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl
+  const communityChatPortMigrationVersion = Number(settings?.communityChatPortMigrationVersion ?? 0)
+  const rawOfficialServerStatusUrl = String(settings?.officialServerStatusUrl ?? DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl).trim() || DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl
+  const officialServerStatusUrl = communityChatPortMigrationVersion < 2 && isLegacyOfficialServerStatusUrl(rawOfficialServerStatusUrl)
+    ? DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl
+    : rawOfficialServerStatusUrl
   const derivedCommunity = communityChatUrlsFromStatusUrl(officialServerStatusUrl)
   const rawCommunityApiUrl = String(settings?.communityApiUrl ?? derivedCommunity.communityApiUrl).trim() || derivedCommunity.communityApiUrl
   const rawCommunityWebSocketUrl = String(settings?.communityWebSocketUrl ?? derivedCommunity.communityWebSocketUrl).trim() || derivedCommunity.communityWebSocketUrl
-  const migrateLegacyLocalCommunityUrls = Number(settings?.communityChatPortMigrationVersion ?? 0) < 1
+  const migrateLegacyCommunityUrls = communityChatPortMigrationVersion < 2
   return {
     ...DEFAULT_DESKTOP_SETTINGS,
     ...safeSettings,
@@ -304,6 +333,12 @@ function mergeSettings(settings) {
       owner: String(settings?.releaseFeed?.owner ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseFeed.owner,
       repo: String(settings?.releaseFeed?.repo ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseFeed.repo,
       includePrereleases: settings?.releaseFeed?.includePrereleases ?? true,
+    },
+    releaseIndex: {
+      ...DEFAULT_DESKTOP_SETTINGS.releaseIndex,
+      ...(settings?.releaseIndex ?? {}),
+      enabled: settings?.releaseIndex?.enabled ?? true,
+      channelUrl: String(settings?.releaseIndex?.channelUrl ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseIndex.channelUrl,
     },
     publisher: {
       ...DEFAULT_DESKTOP_SETTINGS.publisher,
@@ -320,9 +355,9 @@ function mergeSettings(settings) {
     officialDiscordInviteUrl: String(settings?.officialDiscordInviteUrl ?? DEFAULT_DESKTOP_SETTINGS.officialDiscordInviteUrl).trim(),
     officialServerName: String(settings?.officialServerName ?? DEFAULT_DESKTOP_SETTINGS.officialServerName).trim() || DEFAULT_DESKTOP_SETTINGS.officialServerName,
     officialStatusPollSeconds: Math.max(10, Math.min(300, Number(settings?.officialStatusPollSeconds ?? DEFAULT_DESKTOP_SETTINGS.officialStatusPollSeconds) || DEFAULT_DESKTOP_SETTINGS.officialStatusPollSeconds)),
-    communityApiUrl: migrateLegacyLocalCommunityUrls && isLegacyLocalCommunityUrl(rawCommunityApiUrl) ? derivedCommunity.communityApiUrl : rawCommunityApiUrl,
-    communityWebSocketUrl: migrateLegacyLocalCommunityUrls && isLegacyLocalCommunityUrl(rawCommunityWebSocketUrl) ? derivedCommunity.communityWebSocketUrl : rawCommunityWebSocketUrl,
-    communityChatPortMigrationVersion: 1,
+    communityApiUrl: migrateLegacyCommunityUrls && (isLegacyLocalCommunityUrl(rawCommunityApiUrl) || isLegacyOfficialCommunityUrl(rawCommunityApiUrl)) ? derivedCommunity.communityApiUrl : rawCommunityApiUrl,
+    communityWebSocketUrl: migrateLegacyCommunityUrls && (isLegacyLocalCommunityUrl(rawCommunityWebSocketUrl) || isLegacyOfficialCommunityUrl(rawCommunityWebSocketUrl)) ? derivedCommunity.communityWebSocketUrl : rawCommunityWebSocketUrl,
+    communityChatPortMigrationVersion: 2,
     chatNickname: String(settings?.chatNickname ?? DEFAULT_DESKTOP_SETTINGS.chatNickname).replace(/\s+/g, ' ').trim().slice(0, 32) || DEFAULT_DESKTOP_SETTINGS.chatNickname,
     chatNotifications: settings?.chatNotifications ?? true,
     packOsReportRoot: String(settings?.packOsReportRoot ?? '').trim(),
@@ -2353,6 +2388,359 @@ async function fetchJson(url, options = {}) {
   return JSON.parse(body.toString('utf8'))
 }
 
+function normalizeCanonicalIndexEntry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const required = ['id', 'kind', 'version', 'channel', 'publisher', 'sourceRepo', 'releaseTag', 'commitSha', 'artifacts', 'dependencies', 'compatibility', 'trust', 'validation']
+  if (required.some((field) => value[field] === undefined || value[field] === null || value[field] === '')) return null
+  return {
+    id: String(value.id),
+    kind: String(value.kind),
+    version: String(value.version),
+    channel: String(value.channel),
+    publisher: String(value.publisher),
+    sourceRepo: String(value.sourceRepo),
+    releaseTag: String(value.releaseTag),
+    commitSha: String(value.commitSha),
+    artifacts: value.artifacts,
+    dependencies: Array.isArray(value.dependencies) ? value.dependencies : [],
+    compatibility: Array.isArray(value.compatibility) ? value.compatibility.map((item) => String(item)) : [],
+    trust: String(value.trust),
+    validation: String(value.validation),
+  }
+}
+
+function catalogUrlsFromLauncherChannel(channel) {
+  const urls = []
+  const catalogUrls = channel?.catalogUrls && typeof channel.catalogUrls === 'object' ? channel.catalogUrls : {}
+  for (const value of Object.values(catalogUrls)) {
+    if (Array.isArray(value)) urls.push(...value)
+    else if (typeof value === 'string') urls.push(value)
+  }
+  return [...new Set(urls.map((url) => String(url).trim()).filter((url) => /^https:\/\/raw\.githubusercontent\.com\//.test(url)))]
+}
+
+async function fetchCanonicalReleaseIndexCatalog(config, cachePath) {
+  const channelUrl = String(config?.channelUrl ?? CANONICAL_RELEASE_INDEX_CHANNEL_URL).trim() || CANONICAL_RELEASE_INDEX_CHANNEL_URL
+  const channel = await fetchJson(channelUrl)
+  const warnings = []
+  const entries = []
+  for (const url of catalogUrlsFromLauncherChannel(channel)) {
+    try {
+      const payload = await fetchJson(url)
+      const rows = Array.isArray(payload) ? payload : [payload]
+      for (const row of rows) {
+        const normalized = normalizeCanonicalIndexEntry(row)
+        if (normalized) entries.push(normalized)
+        else warnings.push(`Skipped non-canonical index payload from ${url}.`)
+      }
+    } catch (error) {
+      warnings.push(`Unable to fetch catalog entry ${url}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  const catalog = {
+    sourceUrl: channelUrl,
+    fetchedAt: isoNow(),
+    channel: channel?.channel,
+    entries,
+    warnings,
+  }
+  await writeJson(cachePath, catalog)
+  return catalog
+}
+
+function isReleaseIndexCatalogCacheValid(cached, config) {
+  const fetchedAt = Date.parse(cached?.fetchedAt ?? '')
+  return (
+    cached &&
+    cached.sourceUrl === config.channelUrl &&
+    Array.isArray(cached.entries) &&
+    Number.isFinite(fetchedAt) &&
+    Date.now() - fetchedAt < 15 * 60 * 1000
+  )
+}
+
+async function releaseIndexCatalog(payload = {}) {
+  const settings = await readSettings()
+  const config = settings.releaseIndex ?? DEFAULT_DESKTOP_SETTINGS.releaseIndex
+  const paths = getPaths()
+  const cachePath = path.join(paths.releaseCache, 'canonical-release-index.json')
+  if (!config.enabled) {
+    return { sourceUrl: config.channelUrl, fetchedAt: isoNow(), channel: undefined, entries: [], warnings: ['Canonical Release Index is disabled in settings.'] }
+  }
+  if (!payload.refresh && await exists(cachePath)) {
+    const cached = await readJson(cachePath, null)
+    if (isReleaseIndexCatalogCacheValid(cached, config)) return cached
+  }
+  if (releaseIndexCatalogRefreshInFlight) return releaseIndexCatalogRefreshInFlight
+  releaseIndexCatalogRefreshInFlight = fetchCanonicalReleaseIndexCatalog(config, cachePath).finally(() => {
+    releaseIndexCatalogRefreshInFlight = null
+  })
+  return releaseIndexCatalogRefreshInFlight
+}
+
+async function releaseIndexProduct(payload = {}) {
+  const id = String(payload.id ?? '').trim()
+  if (!id) throw new Error('Release Index product id is required.')
+  const compatibility = payload.compatibility ? String(payload.compatibility) : ''
+  const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
+  const productKinds = new Set(['product', 'runtime', 'studio', 'website'])
+  const candidates = catalog.entries
+    .filter((item) => productKinds.has(item.kind))
+    .filter((item) => item.validation === 'approved')
+    .filter((item) => item.id === id)
+    .filter((item) => !compatibility || item.compatibility.includes(compatibility))
+    .sort((a, b) => String(b.version).localeCompare(String(a.version), undefined, { numeric: true }))
+  const warnings = [...catalog.warnings]
+  for (const entry of candidates) {
+    const artifact = productUpdateArtifact(entry, compatibility)
+    if (artifact) return { entry, artifact, warnings }
+    warnings.push(`Release Index product ${entry.id} ${entry.version} has no indexed updater artifact${compatibility ? ` for ${compatibility}` : ''}.`)
+  }
+  return { entry: null, warnings }
+}
+
+function canonicalArtifactRecords(artifacts) {
+  const records = []
+  const visit = (node, role = 'asset') => {
+    if (Array.isArray(node)) {
+      node.forEach((item) => visit(item, role))
+      return
+    }
+    if (!node || typeof node !== 'object') return
+    if (node.file || node.name || node.filename || node.url || node.sha256) {
+      records.push({
+        role,
+        name: String(node.file ?? node.name ?? node.filename ?? role),
+        url: String(node.url ?? node.downloadUrl ?? ''),
+        size: Number(node.size ?? 0),
+        sha256: node.sha256 ? String(node.sha256) : undefined,
+      })
+    }
+    for (const [key, value] of Object.entries(node)) visit(value, key)
+  }
+  visit(artifacts)
+  return records
+}
+
+function artifactForPackTarget(entry, pack) {
+  const target = normalizeOfficialPackId(pack) ?? 'ashfall-native-edition'
+  const artifacts = canonicalArtifactRecords(entry.artifacts)
+  if (target === 'ashfall-neoforge-edition') return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
+  if (target === 'ashfall-standalone-edition') return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
+  return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
+}
+
+function productUpdateArtifact(entry, compatibility = '') {
+  const usable = canonicalArtifactRecords(entry.artifacts)
+    .map((artifact) => {
+      if (!artifact.url || !artifact.sha256) return null
+      return {
+        artifact,
+        releaseAsset: {
+          name: artifact.name,
+          url: artifact.url,
+          size: artifact.size,
+          sha256: artifact.sha256,
+        },
+      }
+    })
+    .filter(Boolean)
+  if (!usable.length) return null
+  const normalizedCompatibility = String(compatibility ?? '').trim().toLowerCase()
+  if (normalizedCompatibility) {
+    const tokens = normalizedCompatibility.split(/[^a-z0-9]+/u).filter(Boolean)
+    const compatible = usable.find(({ artifact }) => {
+      const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
+      return tokens.every((token) => haystack.includes(token))
+        || (normalizedCompatibility === 'windows-x64' && /(windows|win|setup|installer).*x?64|x?64.*(windows|win|setup|installer)/iu.test(haystack))
+    })
+    if (compatible) return compatible.releaseAsset
+  }
+  return usable[0].releaseAsset
+}
+
+function canonicalReleaseEntryFromModpack(entry, fetchedAt) {
+  if (entry.validation !== 'approved' || entry.kind !== 'modpack') return null
+  const artifacts = canonicalArtifactRecords(entry.artifacts)
+  const manifest = artifacts.find((artifact) => artifact.role === 'manifest' || /\.pack\.json$/i.test(artifact.name))
+  if (!manifest?.url || !manifest.sha256) return null
+  const pack = artifacts.find((artifact) => artifact.role === 'pack' || /\.zip$/i.test(artifact.name))
+  const sourceRepo = String(entry.sourceRepo)
+  const releasePageUrl = `https://github.com/${sourceRepo}/releases/tag/${encodeURIComponent(entry.releaseTag)}`
+  return {
+    id: `release-index:${entry.id}:${entry.version}`,
+    pack: normalizeOfficialPackId(entry.id) ?? entry.id,
+    version: entry.version,
+    channel: entry.channel,
+    tagName: entry.releaseTag,
+    name: `${entry.id} ${entry.version}`,
+    draft: false,
+    prerelease: entry.channel !== 'stable',
+    publishedAt: entry.publishedAt ?? fetchedAt ?? isoNow(),
+    releasePageUrl,
+    releaseNotes: [`Resolved through ECHO Release Index entry ${entry.id}.`],
+    manifestAssetName: manifest.name,
+    manifestUrl: manifest.url,
+    manifestSha256: manifest.sha256,
+    metadataUrl: undefined,
+    trust: 'verified-metadata',
+    assets: artifacts.map((artifact) => ({
+      name: artifact.name,
+      url: artifact.url,
+      browser_download_url: artifact.url,
+      size: artifact.size,
+      sha256: artifact.sha256,
+      releaseTag: entry.releaseTag,
+      releasePageUrl,
+    })),
+  }
+}
+
+async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
+  if (!settings.releaseIndex?.enabled) return index
+  try {
+    const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
+    const canonicalEntries = catalog.entries
+      .map((entry) => canonicalReleaseEntryFromModpack(entry, catalog.fetchedAt))
+      .filter(Boolean)
+    const byKey = new Map()
+    for (const entry of [...canonicalEntries, ...index.releases]) {
+      byKey.set(`${normalizeOfficialPackId(entry.pack) ?? entry.pack}:${entry.channel}:${entry.version}`, entry)
+    }
+    const releases = [...byKey.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    const warnings = [
+      ...catalog.warnings,
+      ...index.warnings,
+    ]
+    return {
+      ...index,
+      fetchedAt: isoNow(),
+      releases,
+      acceptedCount: releases.length,
+      latestPlayableRelease: releases[0] ?? null,
+      warnings,
+      diagnostics: [
+        ...(index.diagnostics ?? []),
+        ...canonicalEntries.map((entry) => ({
+          tagName: entry.tagName,
+          releaseName: entry.name,
+          severity: 'info',
+          reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
+          assets: entry.assets.map((asset) => asset.name),
+        })),
+      ],
+    }
+  } catch (error) {
+    return {
+      ...index,
+      warnings: [
+        `Canonical Release Index unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        ...index.warnings,
+      ],
+    }
+  }
+}
+
+async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWarnings = []) {
+  const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
+  const releases = catalog.entries
+    .map((entry) => canonicalReleaseEntryFromModpack(entry, catalog.fetchedAt))
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+  return {
+    cacheVersion: RELEASE_CACHE_VERSION,
+    source: config,
+    fetchedAt: isoNow(),
+    releases,
+    acceptedCount: releases.length,
+    rejectedReleases: [],
+    diagnostics: releases.map((entry) => ({
+      tagName: entry.tagName,
+      releaseName: entry.name,
+      severity: 'info',
+      reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
+      assets: entry.assets.map((asset) => asset.name),
+    })),
+    latestPlayableRelease: releases[0] ?? null,
+    warnings: [...extraWarnings, ...catalog.warnings],
+  }
+}
+
+function parseEchoProtocolUrl(rawUrl) {
+  let parsed
+  try {
+    parsed = new URL(String(rawUrl))
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'echo:') return null
+  const parts = [parsed.hostname, ...parsed.pathname.split('/').filter(Boolean)].filter(Boolean)
+  if (parts[0] === 'install' && parts[1] === 'addon' && parts[2]) {
+    return {
+      rawUrl: String(rawUrl),
+      action: 'install-addon',
+      id: decodeURIComponent(parts[2]).toLowerCase(),
+      pack: normalizeOfficialPackId(parsed.searchParams.get('pack')),
+    }
+  }
+  if (parts[0] === 'update' && parts[1] === 'pack' && parts[2]) {
+    return {
+      rawUrl: String(rawUrl),
+      action: 'update-pack',
+      id: normalizeOfficialPackId(decodeURIComponent(parts[2])) ?? decodeURIComponent(parts[2]).toLowerCase(),
+    }
+  }
+  return null
+}
+
+async function resolveEchoProtocolUrl(rawUrl) {
+  const request = parseEchoProtocolUrl(rawUrl)
+  if (!request) throw new Error(`Unsupported ECHO protocol URL: ${rawUrl}`)
+  const catalog = await releaseIndexCatalog({ refresh: false })
+  const entry = catalog.entries.find((item) => {
+    if (item.validation !== 'approved') return false
+    if (request.action === 'install-addon') {
+      return (item.kind === 'addon' || item.kind === 'module') && item.id.toLowerCase() === request.id
+    }
+    return item.kind === 'modpack' && item.id.toLowerCase() === String(request.id).toLowerCase()
+  })
+  if (!entry) throw new Error(`No approved Release Index entry found for ${request.action} ${request.id}.`)
+  if (request.action === 'install-addon') {
+    const targetPack = request.pack ?? 'ashfall-native-edition'
+    const artifact = artifactForPackTarget(entry, targetPack)
+    if (!artifact?.url || !artifact.sha256) {
+      throw new Error(`No indexed ${targetPack} artifact found for ${entry.id}.`)
+    }
+    return {
+      ...request,
+      entry,
+      artifact: {
+        name: artifact.name,
+        url: artifact.url,
+        size: artifact.size,
+        sha256: artifact.sha256,
+      },
+    }
+  }
+  return { ...request, entry }
+}
+
+async function handleEchoProtocolUrl(rawUrl) {
+  try {
+    pendingProtocolAction = await resolveEchoProtocolUrl(rawUrl)
+    await appendLauncherLog('INFO', `Resolved ECHO protocol action: ${pendingProtocolAction.action} ${pendingProtocolAction.id}`)
+  } catch (error) {
+    pendingProtocolAction = null
+    await appendLauncherLog('ERROR', `Rejected ECHO protocol URL ${rawUrl}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const window = BrowserWindow.getAllWindows()[0]
+  if (window) {
+    if (window.isMinimized()) window.restore()
+    window.focus()
+  }
+  return pendingProtocolAction
+}
+
 function githubApiUrl(owner, repo, suffix) {
   return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`
 }
@@ -2886,14 +3274,30 @@ async function releaseList(payload = {}) {
 
   if (!payload.refresh) {
     const cached = await readCachedReleaseIndex(config, cachePath)
-    if (cached) return cached
+    if (cached) return mergeCanonicalReleaseEntries(cached, settings, payload)
   }
-  if (releaseRefreshInFlight) return releaseRefreshInFlight
+  if (releaseRefreshInFlight) {
+    try {
+      return mergeCanonicalReleaseEntries(await releaseRefreshInFlight, settings, payload)
+    } catch (error) {
+      if (settings.releaseIndex?.enabled) {
+        return canonicalOnlyReleaseIndex(config, settings, payload, [`Advanced GitHub release feed unavailable: ${error instanceof Error ? error.message : String(error)}`])
+      }
+      throw error
+    }
+  }
   const request = fetchFreshReleaseIndex(config, cachePath)
   releaseRefreshInFlight = request.finally(() => {
     releaseRefreshInFlight = null
   })
-  return releaseRefreshInFlight
+  try {
+    return mergeCanonicalReleaseEntries(await releaseRefreshInFlight, settings, payload)
+  } catch (error) {
+    if (settings.releaseIndex?.enabled) {
+      return canonicalOnlyReleaseIndex(config, settings, payload, [`Advanced GitHub release feed unavailable: ${error instanceof Error ? error.message : String(error)}`])
+    }
+    throw error
+  }
 }
 
 function selectReleaseEntry(index, channel, version, pack) {
@@ -7204,6 +7608,7 @@ async function appBootstrapState() {
   const paths = getPaths()
   const settings = await readSettings()
   let releaseIndex = null
+  let releaseIndexCatalogState = null
   if (settings.releaseFeed?.owner && settings.releaseFeed?.repo) {
     try {
       releaseIndex = await readCachedReleaseIndexForSettings(settings)
@@ -7222,6 +7627,18 @@ async function appBootstrapState() {
       releaseIndex = blankReleaseIndex(settings.releaseFeed, [reason], [diagnostic], [])
     }
   }
+  if (settings.releaseIndex?.enabled) {
+    try {
+      releaseIndexCatalogState = await releaseIndexCatalog({ refresh: false })
+    } catch (error) {
+      releaseIndexCatalogState = {
+        sourceUrl: settings.releaseIndex.channelUrl,
+        fetchedAt: isoNow(),
+        entries: [],
+        warnings: [error instanceof Error ? error.message : String(error)],
+      }
+    }
+  }
   const [profiles, account, launcherUpdate] = await Promise.all([profileList(), authGetState(), launcherUpdateGetState()])
   return {
     protocolVersion: APP_PROTOCOL_VERSION,
@@ -7233,6 +7650,8 @@ async function appBootstrapState() {
     launch: launchState(),
     launcherUpdate,
     releaseIndex,
+    releaseIndexCatalog: releaseIndexCatalogState,
+    pendingProtocolAction,
   }
 }
 
@@ -7970,6 +8389,8 @@ const handlers = {
   'mobile-bridge:revoke-device': mobileBridgeRevokeDevice,
   'mobile-bridge:restart': mobileBridgeRestart,
   'release:list': releaseList,
+  'release-index:catalog': releaseIndexCatalog,
+  'release-index:product': releaseIndexProduct,
   'packos:get-state': packOsGetState,
   'native-loader:get-status': nativeLoaderAshfallStatus,
   'native-loader:launch-ashfall': nativeLoaderLaunchAshfall,
@@ -8134,14 +8555,30 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(async () => {
-  await seedDesktopData()
-  initializeLauncherUpdates()
-  await startMobileBridgeServer().catch((error) => appendLauncherLog('ERROR', `Mobile bridge failed to start: ${error.message}`))
-  createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.whenReady().then(async () => {
+    await seedDesktopData()
+    app.setAsDefaultProtocolClient('echo')
+    initializeLauncherUpdates()
+    await startMobileBridgeServer().catch((error) => appendLauncherLog('ERROR', `Mobile bridge failed to start: ${error.message}`))
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
   })
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  void handleEchoProtocolUrl(url)
+})
+
+app.on('second-instance', (_event, argv) => {
+  const url = argv.find((arg) => String(arg).startsWith('echo://'))
+  if (url) void handleEchoProtocolUrl(url)
 })
 
 app.on('window-all-closed', () => {

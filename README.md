@@ -28,12 +28,17 @@ Run commands from the repository root.
 - `npm run build`
 - `npm run lint`
 - `npm run test`
+- `npm run test:e2e:release-index`
 - `npm run package:win`
 - `npm run package:linux`
 
 ## Artifact Ownership
 
 Launcher installers, AppImages, blockmaps, `latest.yml`, and `latest-linux.yml` belong to GitHub Releases in this repo. Pack/module artifacts do not belong here.
+
+## Release Index E2E Fixture
+
+`npm run test:e2e:release-index` creates local `.echo-addon` module artifacts, locally ingests them into a temporary Release Index catalog, resolves `echo://install/addon/<id>?pack=<pack-id>` and `echo://update/pack/<id>` links, then verifies install, update, repair after corruption, and rollback with SHA-256 checks. Pass `-- --keep-temp` to inspect the generated fixture files.
 
 ## Docs Index
 

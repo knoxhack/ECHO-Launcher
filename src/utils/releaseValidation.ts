@@ -1,6 +1,6 @@
 import type { Channel } from '../types/launcher'
 import type { OfficialPackId, PackManifest } from '../types/manifests'
-import type { ReleaseEntry, ReleaseFeedConfig, ReleaseIndex } from '../types/releases'
+import type { CanonicalProductUpdate, CanonicalReleaseIndexEntry, ReleaseAsset, ReleaseEntry, ReleaseFeedConfig, ReleaseIndex } from '../types/releases'
 
 const channels: Channel[] = ['alpha', 'experimental']
 const RELEASE_CACHE_VERSION = 4
@@ -317,4 +317,268 @@ export function validatePackManifest(value: unknown): PackManifest {
   }
 
   return { ...manifest, pack: normalizedPack }
+}
+
+export type CanonicalArtifactRecord = {
+  role: string
+  name: string
+  url?: string
+  size?: number
+  sha256?: string
+  buildMode?: string
+}
+
+export type ArtifactChecksumStatus = {
+  ok: boolean
+  expected: string
+  actual: string
+  reason?: string
+}
+
+export type RollbackPlanInput = {
+  installId: string
+  operation: 'install' | 'update' | 'repair' | string
+  installPath: string
+  backedUp: Array<{ path: string; backupPath: string }>
+  removed?: string[]
+  createdAt: string
+}
+
+export type RollbackPlanSnapshot = RollbackPlanInput & {
+  removed: string[]
+}
+
+export type EchoProtocolRequest =
+  | { rawUrl: string; action: 'install-addon'; id: string; pack?: OfficialPackId }
+  | { rawUrl: string; action: 'update-pack'; id: string }
+
+export function canonicalArtifactRecords(artifacts: unknown): CanonicalArtifactRecord[] {
+  const records: CanonicalArtifactRecord[] = []
+  const visit = (node: unknown, role = 'asset') => {
+    if (Array.isArray(node)) {
+      node.forEach((item) => visit(item, role))
+      return
+    }
+    if (!node || typeof node !== 'object') return
+    const row = node as Record<string, unknown>
+    if (row.file || row.name || row.filename || row.url || row.sha256) {
+      records.push({
+        role,
+        name: String(row.file ?? row.name ?? row.filename ?? role),
+        url: row.url || row.downloadUrl ? String(row.url ?? row.downloadUrl) : undefined,
+        size: row.size === undefined ? undefined : Number(row.size),
+        sha256: row.sha256 ? String(row.sha256) : undefined,
+        buildMode: row.buildMode ? String(row.buildMode) : undefined,
+      })
+    }
+    for (const [key, value] of Object.entries(row)) visit(value, key)
+  }
+  visit(artifacts)
+  return records
+}
+
+export function releaseEntryFromCanonicalModpack(entry: CanonicalReleaseIndexEntry, fetchedAt: string): ReleaseEntry | null {
+  if (entry.kind !== 'modpack' || entry.validation !== 'approved') return null
+  const artifacts = canonicalArtifactRecords(entry.artifacts)
+  const manifest = artifacts.find((artifact) => artifact.role === 'manifest' || /\.pack\.json$/i.test(artifact.name))
+  if (!manifest?.url || !manifest.sha256) return null
+  const releasePageUrl = `https://github.com/${entry.sourceRepo}/releases/tag/${encodeURIComponent(entry.releaseTag)}`
+  return {
+    id: `release-index:${entry.id}:${entry.version}`,
+    pack: normalizeOfficialPackId(entry.id),
+    version: entry.version,
+    channel: entry.channel as Channel,
+    tagName: entry.releaseTag,
+    name: `${entry.id} ${entry.version}`,
+    draft: false,
+    prerelease: entry.channel !== 'stable',
+    publishedAt: fetchedAt,
+    releasePageUrl,
+    releaseNotes: [`Resolved through ECHO Release Index entry ${entry.id}.`],
+    manifestAssetName: manifest.name,
+    manifestUrl: manifest.url,
+    manifestSha256: manifest.sha256,
+    trust: 'verified-metadata',
+    assets: artifacts.map((artifact) => ({
+      name: artifact.name,
+      url: artifact.url ?? '',
+      size: artifact.size ?? 0,
+      sha256: artifact.sha256,
+    })),
+  }
+}
+
+export function artifactForPackTarget(entry: CanonicalReleaseIndexEntry, pack: string): CanonicalArtifactRecord | null {
+  const target = normalizeOfficialPackId(pack)
+  const artifacts = canonicalArtifactRecords(entry.artifacts)
+  if (target === 'ashfall-neoforge-edition') return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
+  if (target === 'ashfall-standalone-edition') return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
+  return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
+}
+
+export function parseEchoProtocolUrl(rawUrl: string): EchoProtocolRequest | null {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'echo:') return null
+  const parts = [parsed.hostname, ...parsed.pathname.split('/').filter(Boolean)].filter(Boolean)
+  if (parts[0] === 'install' && parts[1] === 'addon' && parts[2]) {
+    return {
+      rawUrl,
+      action: 'install-addon',
+      id: decodeURIComponent(parts[2]).toLowerCase(),
+      pack: normalizeOfficialPackId(parsed.searchParams.get('pack') ?? undefined),
+    }
+  }
+  if (parts[0] === 'update' && parts[1] === 'pack' && parts[2]) {
+    return {
+      rawUrl,
+      action: 'update-pack',
+      id: normalizeOfficialPackId(decodeURIComponent(parts[2])) ?? decodeURIComponent(parts[2]).toLowerCase(),
+    }
+  }
+  return null
+}
+
+export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalReleaseIndexEntry[]) {
+  const request = parseEchoProtocolUrl(rawUrl)
+  if (!request) return null
+  const entry = entries.find((candidate) => {
+    if (candidate.validation !== 'approved') return false
+    if (request.action === 'install-addon') {
+      return (candidate.kind === 'addon' || candidate.kind === 'module') && candidate.id.toLowerCase() === request.id
+    }
+    return candidate.kind === 'modpack' && candidate.id.toLowerCase() === request.id.toLowerCase()
+  })
+  if (!entry) return null
+  if (request.action === 'install-addon') {
+    const targetPack = request.pack ?? 'ashfall-native-edition'
+    const artifact = artifactForPackTarget(entry, targetPack)
+    if (!artifact?.url || !artifact.sha256) return null
+    return {
+      ...request,
+      entry,
+      artifact: {
+        name: artifact.name,
+        url: artifact.url,
+        size: artifact.size ?? 0,
+        sha256: artifact.sha256,
+      },
+    }
+  }
+  return { ...request, entry }
+}
+
+export function dependencyClosure(entries: CanonicalReleaseIndexEntry[], rootIds: string[]): CanonicalReleaseIndexEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  const seen = new Set<string>()
+  const out: CanonicalReleaseIndexEntry[] = []
+  const visit = (id: string) => {
+    if (seen.has(id)) return
+    const entry = byId.get(id)
+    if (!entry) throw new Error(`Missing Release Index dependency ${id}.`)
+    if (entry.validation === 'blocked') throw new Error(`Blocked Release Index dependency ${id}.`)
+    if (entry.validation !== 'approved') throw new Error(`Unapproved Release Index dependency ${id}.`)
+    seen.add(id)
+    for (const dependency of entry.dependencies ?? []) visit(dependency.id)
+    out.push(entry)
+  }
+  rootIds.forEach(visit)
+  return out
+}
+
+export function artifactChecksumStatus(expectedSha256: string | undefined, actualSha256: string | undefined): ArtifactChecksumStatus {
+  const expected = String(expectedSha256 ?? '').trim().toLowerCase()
+  const actual = String(actualSha256 ?? '').trim().toLowerCase()
+  if (!/^[a-f0-9]{64}$/i.test(expected)) {
+    return { ok: false, expected, actual, reason: 'Expected SHA-256 is missing or invalid.' }
+  }
+  if (!/^[a-f0-9]{64}$/i.test(actual)) {
+    return { ok: false, expected, actual, reason: 'Actual SHA-256 is missing or invalid.' }
+  }
+  if (expected !== actual) {
+    return { ok: false, expected, actual, reason: `SHA-256 mismatch: expected ${expected}, got ${actual}.` }
+  }
+  return { ok: true, expected, actual }
+}
+
+function artifactToReleaseAsset(artifact: CanonicalArtifactRecord): ReleaseAsset | null {
+  if (!artifact.url || !artifact.sha256) return null
+  return {
+    name: artifact.name,
+    url: artifact.url,
+    size: artifact.size ?? 0,
+    sha256: artifact.sha256,
+  }
+}
+
+export function productUpdateArtifact(entry: CanonicalReleaseIndexEntry, compatibility?: string): ReleaseAsset | null {
+  const artifacts = canonicalArtifactRecords(entry.artifacts)
+  const usable = artifacts
+    .map((artifact) => ({ artifact, releaseAsset: artifactToReleaseAsset(artifact) }))
+    .filter((row): row is { artifact: CanonicalArtifactRecord; releaseAsset: ReleaseAsset } => Boolean(row.releaseAsset))
+  if (!usable.length) return null
+  const normalizedCompatibility = String(compatibility ?? '').trim().toLowerCase()
+  if (normalizedCompatibility) {
+    const compatibilityTokens = normalizedCompatibility.split(/[^a-z0-9]+/u).filter(Boolean)
+    const compatible = usable.find(({ artifact }) => {
+      const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
+      return compatibilityTokens.every((token) => haystack.includes(token))
+        || (normalizedCompatibility === 'windows-x64' && /(windows|win|setup|installer).*x?64|x?64.*(windows|win|setup|installer)/iu.test(haystack))
+    })
+    if (compatible) return compatible.releaseAsset
+  }
+  return usable[0].releaseAsset
+}
+
+export function rollbackPlanSnapshot(input: RollbackPlanInput): RollbackPlanSnapshot {
+  if (!input.installId.trim()) throw new Error('Rollback plan requires an installId.')
+  if (!input.installPath.trim()) throw new Error('Rollback plan requires an installPath.')
+  const backedUp = input.backedUp.map((item) => {
+    if (!item.path.trim() || !item.backupPath.trim()) throw new Error('Rollback backup entries require path and backupPath.')
+    return {
+      path: item.path.replace(/\\/g, '/'),
+      backupPath: item.backupPath,
+    }
+  })
+  return {
+    installId: input.installId,
+    operation: input.operation,
+    installPath: input.installPath,
+    backedUp,
+    removed: (input.removed ?? []).map((item) => item.replace(/\\/g, '/')).sort(),
+    createdAt: input.createdAt,
+  }
+}
+
+export function productUpdateEntry(entries: CanonicalReleaseIndexEntry[], id: string, compatibility?: string): CanonicalReleaseIndexEntry | null {
+  const productKinds = new Set(['product', 'runtime', 'studio', 'website'])
+  const candidates = entries
+    .filter((entry) => productKinds.has(entry.kind))
+    .filter((entry) => entry.validation === 'approved')
+    .filter((entry) => entry.id === id)
+    .filter((entry) => !compatibility || entry.compatibility.includes(compatibility))
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+  return candidates[0] ?? null
+}
+
+export function productUpdateSelection(entries: CanonicalReleaseIndexEntry[], id: string, compatibility?: string): CanonicalProductUpdate {
+  const productKinds = new Set(['product', 'runtime', 'studio', 'website'])
+  const candidates = entries
+    .filter((entry) => productKinds.has(entry.kind))
+    .filter((entry) => entry.validation === 'approved')
+    .filter((entry) => entry.id === id)
+    .filter((entry) => !compatibility || entry.compatibility.includes(compatibility))
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+
+  const warnings: string[] = []
+  for (const entry of candidates) {
+    const artifact = productUpdateArtifact(entry, compatibility)
+    if (artifact) return { entry, artifact, warnings }
+    warnings.push(`Release Index product ${entry.id} ${entry.version} has no indexed updater artifact${compatibility ? ` for ${compatibility}` : ''}.`)
+  }
+  return { entry: null, warnings }
 }

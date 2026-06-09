@@ -11,6 +11,11 @@ export interface ReleaseFeedConfig {
   includePrereleases: boolean
 }
 
+export interface ReleaseIndexConfig {
+  enabled: boolean
+  channelUrl: string
+}
+
 export interface PublisherSettings {
   owner: string
   repo: string
@@ -62,6 +67,7 @@ export interface MobileBridgeState extends MobileBridgeSettings {
 
 export interface LauncherDesktopSettings {
   releaseFeed: ReleaseFeedConfig
+  releaseIndex: ReleaseIndexConfig
   publisher: PublisherSettings
   supportGuideUrl: string
   launchMode: LaunchMode
@@ -85,6 +91,58 @@ export interface ReleaseAsset {
   url: string
   size: number
   sha256?: string
+}
+
+export type ReleaseIndexEntryKind = 'product' | 'modpack' | 'module' | 'addon' | 'runtime' | 'studio' | 'website'
+export type ReleaseIndexTrust =
+  | 'official'
+  | 'reproducible-build'
+  | 'echo-workflow-built'
+  | 'provenance-attested'
+  | 'source-linked'
+  | 'community'
+  | 'unverified'
+  | 'deprecated'
+  | 'blocked'
+export type ReleaseIndexValidationState = 'approved' | 'warning' | 'rejected' | 'blocked'
+
+export interface CanonicalReleaseIndexEntry {
+  id: string
+  kind: ReleaseIndexEntryKind
+  version: string
+  channel: string
+  publisher: string
+  sourceRepo: string
+  releaseTag: string
+  commitSha: string
+  artifacts: Record<string, unknown> | unknown[]
+  dependencies: Array<{ id: string; kind?: string; version?: string }>
+  compatibility: string[]
+  trust: ReleaseIndexTrust
+  validation: ReleaseIndexValidationState
+}
+
+export interface CanonicalReleaseIndexCatalog {
+  sourceUrl: string
+  fetchedAt: string
+  channel?: string
+  entries: CanonicalReleaseIndexEntry[]
+  warnings: string[]
+}
+
+export interface CanonicalProductUpdate {
+  entry: CanonicalReleaseIndexEntry | null
+  artifact?: ReleaseAsset
+  warnings: string[]
+}
+
+export interface EchoProtocolAction {
+  rawUrl: string
+  action: 'install-addon' | 'update-pack'
+  id: string
+  pack?: OfficialPackId
+  entry: CanonicalReleaseIndexEntry
+  artifact?: ReleaseAsset
 }
 
 export interface ReleaseEntry {

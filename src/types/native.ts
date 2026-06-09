@@ -1,6 +1,6 @@
 import type { PackManifest } from './manifests'
 import type { LauncherProfile } from './profiles'
-import type { LauncherDesktopSettings, MobileBridgeDeviceRole, MobileBridgeState, ReleaseEntry, ReleaseFetchResult, ReleaseIndex } from './releases'
+import type { CanonicalReleaseIndexCatalog, EchoProtocolAction, LauncherDesktopSettings, MobileBridgeDeviceRole, MobileBridgeState, ReleaseEntry, ReleaseFetchResult, ReleaseIndex } from './releases'
 import type { AccountState } from './auth'
 import type { LaunchPreflightReport, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from './launch'
 import type { AssetValidationReport, WorldCompatibilityReport } from './diagnostics'
@@ -171,6 +171,8 @@ export interface NativeBootstrapState {
   launch: LaunchProcessState
   launcherUpdate?: NativeLauncherUpdateState
   releaseIndex?: ReleaseIndex | null
+  releaseIndexCatalog?: CanonicalReleaseIndexCatalog | null
+  pendingProtocolAction?: EchoProtocolAction | null
 }
 
 export interface NativeAppState extends NativeBootstrapState {
