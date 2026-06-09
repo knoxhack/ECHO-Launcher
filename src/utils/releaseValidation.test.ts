@@ -315,6 +315,25 @@ describe('releaseValidation', () => {
     expect(artifactForPackTarget(canonicalModule, 'ashfall-standalone-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
   })
 
+  it('rejects development visibility source-packaged module artifacts', () => {
+    const sourcePackagedModule: CanonicalReleaseIndexEntry = {
+      ...canonicalModule,
+      artifacts: {
+        native: { ...(canonicalModule.artifacts as Record<string, Record<string, unknown>>).native, buildMode: 'source-packaged' },
+        neoforge: { ...(canonicalModule.artifacts as Record<string, Record<string, unknown>>).neoforge, buildMode: 'source-packaged' },
+        standalone: { ...(canonicalModule.artifacts as Record<string, Record<string, unknown>>).standalone, buildMode: 'source-packaged' },
+      },
+    }
+
+    expect(artifactForPackTarget(sourcePackagedModule, 'ashfall-native-edition')).toBeNull()
+    expect(artifactForPackTarget(sourcePackagedModule, 'ashfall-neoforge-edition')).toBeNull()
+    expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [
+      sourcePackagedModule,
+      canonicalCore,
+      canonicalNativePack,
+    ])).toBeNull()
+  })
+
   it('builds approved dependency closures and enforces blocks', () => {
     expect(dependencyClosure([canonicalModule, canonicalCore], ['echoarmory']).map((entry) => entry.id)).toEqual(['echocore', 'echoarmory'])
     expect(() => dependencyClosure([canonicalModule], ['echoarmory'])).toThrow(/Missing Release Index dependency echocore/)

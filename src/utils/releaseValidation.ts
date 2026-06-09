@@ -411,6 +411,7 @@ export function releaseEntryFromCanonicalModpack(entry: CanonicalReleaseIndexEnt
 export function artifactForPackTarget(entry: CanonicalReleaseIndexEntry, pack: string): CanonicalArtifactRecord | null {
   const target = normalizeOfficialPackId(pack)
   const artifacts = canonicalArtifactRecords(entry.artifacts)
+    .filter((artifact) => artifact.buildMode !== 'source-packaged')
   if (target === 'ashfall-neoforge-edition') return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
   if (target === 'ashfall-standalone-edition') return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
   return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
