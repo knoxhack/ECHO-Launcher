@@ -454,19 +454,30 @@ export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalRelea
     return candidate.kind === 'modpack' && candidate.id.toLowerCase() === request.id.toLowerCase()
   })
   if (!entry) return null
-  let dependencies: CanonicalReleaseIndexEntry[]
-  try {
-    dependencies = dependencyClosure(entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
-  } catch {
-    return null
-  }
   if (request.action === 'install-addon') {
     const targetPack = request.pack ?? 'ashfall-native-edition'
+    const packEntry = entries.find((candidate) =>
+      candidate.kind === 'modpack' &&
+      candidate.validation === 'approved' &&
+      candidate.id.toLowerCase() === targetPack,
+    )
+    if (!packEntry) return null
+    const packAllowsEntry = (packEntry.dependencies ?? []).some((dependency) => dependency.id.toLowerCase() === entry.id.toLowerCase())
+      || (entry.compatibility ?? []).map((item) => item.toLowerCase()).includes(targetPack)
+    if (!packAllowsEntry) return null
     const artifact = artifactForPackTarget(entry, targetPack)
     if (!artifact?.url || !artifact.sha256) return null
+    let dependencies: CanonicalReleaseIndexEntry[]
+    try {
+      dependencies = dependencyClosure(entries, [entry.id, packEntry.id])
+        .filter((dependency) => dependency.id !== entry.id && dependency.id !== packEntry.id)
+    } catch {
+      return null
+    }
     return {
       ...request,
       entry,
+      packEntry,
       dependencies,
       artifact: {
         name: artifact.name,
@@ -475,6 +486,12 @@ export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalRelea
         sha256: artifact.sha256,
       },
     }
+  }
+  let dependencies: CanonicalReleaseIndexEntry[]
+  try {
+    dependencies = dependencyClosure(entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
+  } catch {
+    return null
   }
   return { ...request, entry, dependencies }
 }

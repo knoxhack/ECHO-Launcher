@@ -95,6 +95,22 @@ const canonicalPack: CanonicalReleaseIndexEntry = {
   validation: 'approved',
 }
 
+const canonicalNativePack: CanonicalReleaseIndexEntry = {
+  ...canonicalPack,
+  id: 'ashfall-native-edition',
+  sourceRepo: 'knoxhack/ECHO-Ashfall-Native-Edition',
+  artifacts: {
+    manifest: {
+      file: 'ashfall-native-edition-alpha-0.1.0.pack.json',
+      sha256: '9'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Ashfall-Native-Edition/releases/download/v0.1.0/ashfall-native-edition-alpha-0.1.0.pack.json',
+      size: 10,
+    },
+  },
+  dependencies: [{ id: 'echoarmory', kind: 'module', version: '*' }],
+  compatibility: ['ashfall-native-edition'],
+}
+
 const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
   id: 'echo-launcher',
   kind: 'product',
@@ -254,11 +270,14 @@ describe('releaseValidation', () => {
     expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [
       canonicalModule,
       { ...canonicalCore, validation: 'blocked' },
+      canonicalNativePack,
     ])).toBeNull()
-    const addonInstall = resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule, canonicalCore])
+    expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule, canonicalCore])).toBeNull()
+    const addonInstall = resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule, canonicalCore, canonicalNativePack])
     expect(addonInstall?.entry.id).toBe('echoarmory')
     expect(addonInstall?.action).toBe('install-addon')
     if (addonInstall?.action !== 'install-addon') throw new Error('Expected addon install resolution.')
+    expect(addonInstall.packEntry?.id).toBe('ashfall-native-edition')
     expect(addonInstall.artifact.name).toBe('echoarmory-1.0.0.echo-addon')
     expect(addonInstall.dependencies?.map((entry) => entry.id)).toEqual(['echocore'])
     expect(resolveEchoProtocolEntry('echo://update/pack/ashfall-neoforge-edition', [canonicalPack])?.entry.id).toBe('ashfall-neoforge-edition')
