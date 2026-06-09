@@ -129,6 +129,28 @@ const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
   validation: 'approved',
 }
 
+const canonicalStudioProduct: CanonicalReleaseIndexEntry = {
+  ...canonicalLauncherProduct,
+  id: 'echo-addons-studio',
+  kind: 'studio',
+  sourceRepo: 'knoxhack/ECHO-Addons-Studio',
+  artifacts: {
+    latestYml: { file: 'latest.yml', sha256: '2'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Addons-Studio/releases/download/v0.1.0/latest.yml' },
+    windowsSetup: { file: 'ECHO.Addon.Studio-Setup-0.1.0.exe', sha256: '3'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Addons-Studio/releases/download/v0.1.0/ECHO.Addon.Studio-Setup-0.1.0.exe' },
+  },
+}
+
+const canonicalNativeRuntimeProduct: CanonicalReleaseIndexEntry = {
+  ...canonicalLauncherProduct,
+  id: 'echo-native-platform',
+  kind: 'runtime',
+  sourceRepo: 'knoxhack/ECHO-Native-Platform',
+  artifacts: {
+    archive: { file: 'echo-native-product-1.0.0-existing-layout-rc.zip', sha256: '4'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v0.1.0-native-platform-alpha/echo-native-product-1.0.0-existing-layout-rc.zip' },
+  },
+  compatibility: ['ashfall-native-edition'],
+}
+
 function releaseIndex(overrides: Partial<ReleaseIndex>): ReleaseIndex {
   return {
     cacheVersion: 4,
@@ -362,6 +384,24 @@ describe('releaseValidation', () => {
     ])
     expect(productUpdateArtifact(canonicalLauncherProduct, 'windows-x64')?.sha256).toBe('1'.repeat(64))
     expect(productUpdateSelection([latestWithoutArtifact], 'echo-launcher', 'windows-x64').entry).toBeNull()
+  })
+
+  it('selects studio and runtime updates through exact indexed product entries', () => {
+    expect(productUpdateSelection([
+      { ...canonicalStudioProduct, validation: 'warning' },
+      canonicalStudioProduct,
+    ], 'echo-addons-studio', 'windows-x64')).toMatchObject({
+      entry: { id: 'echo-addons-studio', kind: 'studio' },
+      artifact: { name: 'ECHO.Addon.Studio-Setup-0.1.0.exe', sha256: '3'.repeat(64) },
+    })
+
+    expect(productUpdateSelection([
+      { ...canonicalNativeRuntimeProduct, validation: 'warning' },
+      canonicalNativeRuntimeProduct,
+    ], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
+      entry: { id: 'echo-native-platform', kind: 'runtime' },
+      artifact: { name: 'echo-native-product-1.0.0-existing-layout-rc.zip', sha256: '4'.repeat(64) },
+    })
   })
 
   it('validates trusted pack manifests', () => {

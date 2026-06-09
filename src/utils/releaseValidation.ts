@@ -539,23 +539,45 @@ function artifactToReleaseAsset(artifact: CanonicalArtifactRecord): ReleaseAsset
   }
 }
 
+function isMetadataProductArtifact(artifact: CanonicalArtifactRecord): boolean {
+  return /(?:latest\.ya?ml|\.blockmap|checksums?\.sha256|checksums?\.txt|license(?:\.|$))/iu.test(artifact.name)
+}
+
 export function productUpdateArtifact(entry: CanonicalReleaseIndexEntry, compatibility?: string): ReleaseAsset | null {
   const artifacts = canonicalArtifactRecords(entry.artifacts)
   const usable = artifacts
     .map((artifact) => ({ artifact, releaseAsset: artifactToReleaseAsset(artifact) }))
     .filter((row): row is { artifact: CanonicalArtifactRecord; releaseAsset: ReleaseAsset } => Boolean(row.releaseAsset))
   if (!usable.length) return null
+  const installable = usable.filter(({ artifact }) => !isMetadataProductArtifact(artifact))
   const normalizedCompatibility = String(compatibility ?? '').trim().toLowerCase()
   if (normalizedCompatibility) {
+    const pools = [installable, usable].filter((pool) => pool.length)
+    for (const pool of pools) {
+      if (normalizedCompatibility === 'windows-x64') {
+        const windowsArtifact = pool.find(({ artifact }) => {
+          const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
+          return /(?:windows|win|setup|installer|portable|\.exe)/iu.test(haystack)
+        })
+        if (windowsArtifact) return windowsArtifact.releaseAsset
+      }
+      if (normalizedCompatibility === 'linux-x64') {
+        const linuxArtifact = pool.find(({ artifact }) => {
+          const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
+          return /(?:linux|appimage|\.appimage)/iu.test(haystack)
+        })
+        if (linuxArtifact) return linuxArtifact.releaseAsset
+      }
+    }
     const compatibilityTokens = normalizedCompatibility.split(/[^a-z0-9]+/u).filter(Boolean)
-    const compatible = usable.find(({ artifact }) => {
+    const compatible = installable.find(({ artifact }) => {
       const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
       return compatibilityTokens.every((token) => haystack.includes(token))
         || (normalizedCompatibility === 'windows-x64' && /(windows|win|setup|installer).*x?64|x?64.*(windows|win|setup|installer)/iu.test(haystack))
     })
     if (compatible) return compatible.releaseAsset
   }
-  return usable[0].releaseAsset
+  return (installable[0] ?? usable[0]).releaseAsset
 }
 
 export function rollbackPlanSnapshot(input: RollbackPlanInput): RollbackPlanSnapshot {
