@@ -438,6 +438,7 @@ async function updateModule(entries, installRoot, previousInstall, newEntry) {
 
   await fs.mkdir(path.dirname(backupPath), { recursive: true })
   await fs.copyFile(previousInstall.installedPath, backupPath)
+  assert(await sha256File(backupPath) === previousInstall.artifact.sha256, 'Rollback backup does not match the original artifact.')
   await fs.rm(previousInstall.installedPath)
   await copyVerifiedArtifact(newArtifact, newPath)
 
@@ -449,7 +450,11 @@ async function updateModule(entries, installRoot, previousInstall, newEntry) {
     removed: [newRelativePath],
     createdAt: now,
   }
-  await fs.writeFile(path.join(backupDir, 'rollback-plan.json'), jsonBuffer(rollbackPlan))
+  const rollbackPlanPath = path.join(backupDir, 'rollback-plan.json')
+  await fs.writeFile(rollbackPlanPath, jsonBuffer(rollbackPlan))
+  const savedRollbackPlan = JSON.parse(await fs.readFile(rollbackPlanPath, 'utf8'))
+  assert(savedRollbackPlan.backedUp?.[0]?.path === oldRelativePath, 'Rollback plan did not persist the backed up artifact path.')
+  assert(savedRollbackPlan.removed?.[0] === newRelativePath, 'Rollback plan did not persist the updated artifact path.')
   await fs.writeFile(path.join(installRoot, '.echo', 'installed.json'), jsonBuffer({
     id: newEntry.id,
     version: newEntry.version,
