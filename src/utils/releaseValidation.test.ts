@@ -250,11 +250,17 @@ describe('releaseValidation', () => {
     expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [
       { ...canonicalModule, validation: 'warning' },
     ])).toBeNull()
-    const addonInstall = resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule])
+    expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule])).toBeNull()
+    expect(resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [
+      canonicalModule,
+      { ...canonicalCore, validation: 'blocked' },
+    ])).toBeNull()
+    const addonInstall = resolveEchoProtocolEntry('echo://install/addon/echoarmory?pack=ashfall-native-edition', [canonicalModule, canonicalCore])
     expect(addonInstall?.entry.id).toBe('echoarmory')
     expect(addonInstall?.action).toBe('install-addon')
     if (addonInstall?.action !== 'install-addon') throw new Error('Expected addon install resolution.')
     expect(addonInstall.artifact.name).toBe('echoarmory-1.0.0.echo-addon')
+    expect(addonInstall.dependencies?.map((entry) => entry.id)).toEqual(['echocore'])
     expect(resolveEchoProtocolEntry('echo://update/pack/ashfall-neoforge-edition', [canonicalPack])?.entry.id).toBe('ashfall-neoforge-edition')
   })
 

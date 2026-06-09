@@ -454,6 +454,12 @@ export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalRelea
     return candidate.kind === 'modpack' && candidate.id.toLowerCase() === request.id.toLowerCase()
   })
   if (!entry) return null
+  let dependencies: CanonicalReleaseIndexEntry[]
+  try {
+    dependencies = dependencyClosure(entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
+  } catch {
+    return null
+  }
   if (request.action === 'install-addon') {
     const targetPack = request.pack ?? 'ashfall-native-edition'
     const artifact = artifactForPackTarget(entry, targetPack)
@@ -461,6 +467,7 @@ export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalRelea
     return {
       ...request,
       entry,
+      dependencies,
       artifact: {
         name: artifact.name,
         url: artifact.url,
@@ -469,7 +476,7 @@ export function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalRelea
       },
     }
   }
-  return { ...request, entry }
+  return { ...request, entry, dependencies }
 }
 
 export function dependencyClosure(entries: CanonicalReleaseIndexEntry[], rootIds: string[]): CanonicalReleaseIndexEntry[] {

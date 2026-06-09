@@ -2530,6 +2530,24 @@ function artifactForPackTarget(entry, pack) {
   return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
 }
 
+function dependencyClosure(entries, rootIds) {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  const seen = new Set()
+  const out = []
+  const visit = (id) => {
+    if (seen.has(id)) return
+    const entry = byId.get(id)
+    if (!entry) throw new Error(`Missing Release Index dependency ${id}.`)
+    if (entry.validation === 'blocked') throw new Error(`Blocked Release Index dependency ${id}.`)
+    if (entry.validation !== 'approved') throw new Error(`Unapproved Release Index dependency ${id}.`)
+    seen.add(id)
+    for (const dependency of entry.dependencies ?? []) visit(dependency.id)
+    out.push(entry)
+  }
+  rootIds.forEach(visit)
+  return out
+}
+
 function productUpdateArtifact(entry, compatibility = '') {
   const usable = canonicalArtifactRecords(entry.artifacts)
     .map((artifact) => {
@@ -2705,6 +2723,7 @@ async function resolveEchoProtocolUrl(rawUrl) {
     return item.kind === 'modpack' && item.id.toLowerCase() === String(request.id).toLowerCase()
   })
   if (!entry) throw new Error(`No approved Release Index entry found for ${request.action} ${request.id}.`)
+  const dependencies = dependencyClosure(catalog.entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
   if (request.action === 'install-addon') {
     const targetPack = request.pack ?? 'ashfall-native-edition'
     const artifact = artifactForPackTarget(entry, targetPack)
@@ -2714,6 +2733,7 @@ async function resolveEchoProtocolUrl(rawUrl) {
     return {
       ...request,
       entry,
+      dependencies,
       artifact: {
         name: artifact.name,
         url: artifact.url,
@@ -2722,7 +2742,7 @@ async function resolveEchoProtocolUrl(rawUrl) {
       },
     }
   }
-  return { ...request, entry }
+  return { ...request, entry, dependencies }
 }
 
 async function handleEchoProtocolUrl(rawUrl) {

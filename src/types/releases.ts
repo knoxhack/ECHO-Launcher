@@ -142,6 +142,7 @@ export interface EchoProtocolAction {
   id: string
   pack?: OfficialPackId
   entry: CanonicalReleaseIndexEntry
+  dependencies?: CanonicalReleaseIndexEntry[]
   artifact?: ReleaseAsset
 }
 
