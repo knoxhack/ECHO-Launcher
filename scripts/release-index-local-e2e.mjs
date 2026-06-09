@@ -29,6 +29,17 @@ async function sha256File(filePath) {
   return sha256(await fs.readFile(filePath))
 }
 
+function filePathFromUrl(url) {
+  const parsed = new URL(url)
+  assert(parsed.protocol === 'file:', `Local E2E only accepts file URLs: ${url}`)
+  const pathname = decodeURIComponent(parsed.pathname)
+  return process.platform === 'win32' && /^\/[a-z]:/i.test(pathname) ? pathname.slice(1) : pathname
+}
+
+async function readJsonUrl(url) {
+  return JSON.parse(await fs.readFile(filePathFromUrl(url), 'utf8'))
+}
+
 function crc32(buffer) {
   let value = 0xffffffff
   for (const byte of buffer) value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8)
@@ -176,7 +187,23 @@ function resolveEchoProtocolEntry(rawUrl, entries) {
     }
     return candidate.kind === 'modpack' && candidate.id.toLowerCase() === request.id
   })
-  return entry ? { ...request, entry } : null
+  if (!entry) return null
+
+  if (request.action === 'install-addon') {
+    const targetPack = request.pack || packId
+    const packEntry = entries.find((candidate) => candidate.kind === 'modpack' && candidate.validation === 'approved' && candidate.id.toLowerCase() === targetPack)
+    if (!packEntry) return null
+    const packAllowsModule = (packEntry.dependencies ?? []).some((dependency) => String(dependency.id).toLowerCase() === entry.id.toLowerCase())
+      || (entry.compatibility ?? []).map((item) => String(item).toLowerCase()).includes(targetPack)
+    if (!packAllowsModule) return null
+    const artifact = artifactForPackTarget(entry, targetPack)
+    if (!artifact?.url || !artifact.sha256) return null
+    return { ...request, entry, packEntry, artifact }
+  }
+
+  const manifest = artifactRecords(entry).find((record) => record.role === 'manifest' || /\.pack\.json$/i.test(record.name))
+  if (!manifest?.url || !manifest.sha256) return null
+  return { ...request, entry, artifact: manifest }
 }
 
 function artifactRecords(entry) {
@@ -335,23 +362,44 @@ async function writeIndex(root, entries) {
   await fs.writeFile(path.join(root, 'modules', `${moduleId}.json`), jsonBuffer(entries.find((entry) => entry.id === moduleId)))
   await fs.writeFile(path.join(root, 'modpacks', `${packId}.json`), jsonBuffer(entries.find((entry) => entry.id === packId)))
   await fs.writeFile(path.join(root, 'channels', 'alpha', 'launcher-channel.json'), jsonBuffer({
-    schemaVersion: 'echo.release.channel.v1',
+    schemaVersion: 1,
     channel: 'alpha',
     generatedAt: now,
-    catalogUrls: [
-      pathToFileURL(path.join(root, 'modules', `${moduleId}.json`)).href,
-      pathToFileURL(path.join(root, 'modpacks', `${packId}.json`)).href,
-    ],
+    releaseManifestUrl: pathToFileURL(path.join(root, 'channels', 'alpha', 'release-manifest.json')).href,
+    repositoryCatalogUrl: pathToFileURL(path.join(root, 'channels', 'alpha', 'repositories.json')).href,
+    catalogUrls: {
+      products: [],
+      modpacks: [
+        pathToFileURL(path.join(root, 'modpacks', `${packId}.json`)).href,
+      ],
+      modules: [
+        pathToFileURL(path.join(root, 'modules', `${moduleId}.json`)).href,
+      ],
+      addons: [],
+    },
   }))
+}
+
+async function loadCatalogFromChannel(channelUrl) {
+  const channel = await readJsonUrl(channelUrl)
+  assert(channel.schemaVersion === 1, 'Launcher channel schemaVersion mismatch.')
+  assert(channel.channel === 'alpha', 'Launcher channel mismatch.')
+  const catalogUrls = channel.catalogUrls ?? {}
+  const urls = Array.isArray(catalogUrls)
+    ? catalogUrls
+    : Object.values(catalogUrls).flatMap((value) => (Array.isArray(value) ? value : [value]))
+  const entries = []
+  for (const url of urls.filter(Boolean)) {
+    const payload = await readJsonUrl(url)
+    entries.push(...(Array.isArray(payload) ? payload : [payload]))
+  }
+  assert(entries.length >= 2, 'Release Index channel did not load module and modpack entries.')
+  return entries
 }
 
 async function copyVerifiedArtifact(record, destinationPath) {
   assert(record?.url, 'Selected artifact is missing a URL.')
-  const sourceUrl = new URL(record.url)
-  assert(sourceUrl.protocol === 'file:', 'The local E2E fixture only accepts file URL artifacts.')
-  const sourcePath = sourceUrl
-  const sourceFile = decodeURIComponent(sourcePath.pathname)
-  const normalizedSource = process.platform === 'win32' && /^\/[a-z]:/i.test(sourceFile) ? sourceFile.slice(1) : sourceFile
+  const normalizedSource = filePathFromUrl(record.url)
   const actualSha256 = await sha256File(normalizedSource)
   assert(actualSha256 === record.sha256, `Artifact checksum mismatch: expected ${record.sha256}, got ${actualSha256}.`)
   await fs.mkdir(path.dirname(destinationPath), { recursive: true })
@@ -362,9 +410,9 @@ async function copyVerifiedArtifact(record, destinationPath) {
 async function installFromDeepLink(entries, installRoot, rawUrl) {
   const resolved = resolveEchoProtocolEntry(rawUrl, entries)
   assert(resolved, `Deep link did not resolve through an approved index entry: ${rawUrl}`)
-  const closure = dependencyClosure(entries, [resolved.entry.id])
+  const closure = dependencyClosure(entries, [resolved.entry.id, resolved.packEntry?.id].filter(Boolean))
   assert(closure.map((entry) => entry.id).includes(moduleId), 'Dependency closure did not include the target module.')
-  const artifact = artifactForPackTarget(resolved.entry, resolved.pack ?? packId)
+  const artifact = resolved.artifact
   assert(artifact, 'No playable native artifact selected for install.')
 
   const installedPath = path.join(installRoot, 'addons', artifact.name)
@@ -444,19 +492,32 @@ async function main() {
     const artifactV2 = await createModuleArtifact(releasesDir, '1.1.0')
     const moduleV1 = await ingestLocalModuleArtifact(artifactV1, '1.0.0')
     const moduleV2 = await ingestLocalModuleArtifact(artifactV2, '1.1.0')
-    const manifestPath = path.join(releasesDir, `${packId}-alpha-1.1.0.pack.json`)
-    await fs.writeFile(manifestPath, jsonBuffer({
+    const manifestV1Path = path.join(releasesDir, `${packId}-alpha-1.0.0.pack.json`)
+    await fs.writeFile(manifestV1Path, jsonBuffer({
+      pack: packId,
+      version: '1.0.0',
+      channel: 'alpha',
+      moduleRequirements: [{ id: moduleId, version: '1.0.0' }],
+      files: [{ path: `addons/${artifactV1.fileName}`, sha256: artifactV1.sha256, size: artifactV1.size, required: true }],
+    }))
+    const manifestV2Path = path.join(releasesDir, `${packId}-alpha-1.1.0.pack.json`)
+    await fs.writeFile(manifestV2Path, jsonBuffer({
       pack: packId,
       version: '1.1.0',
       channel: 'alpha',
       moduleRequirements: [{ id: moduleId, version: '1.1.0' }],
       files: [{ path: `addons/${artifactV2.fileName}`, sha256: artifactV2.sha256, size: artifactV2.size, required: true }],
     }))
-    const packEntry = createPackEntry(manifestPath, '1.1.0', await sha256File(manifestPath))
-    await writeIndex(releaseRoot, [moduleV2, packEntry])
+    const packV1 = createPackEntry(manifestV1Path, '1.0.0', await sha256File(manifestV1Path))
+    const packV2 = createPackEntry(manifestV2Path, '1.1.0', await sha256File(manifestV2Path))
+    await writeIndex(releaseRoot, [moduleV1, packV1])
+    const channelUrl = pathToFileURL(path.join(releaseRoot, 'channels', 'alpha', 'launcher-channel.json')).href
+    const installEntries = await loadCatalogFromChannel(channelUrl)
 
-    const installed = await installFromDeepLink([moduleV1, packEntry], installRoot, `echo://install/addon/${moduleId}?pack=${packId}`)
-    const updated = await updateModule([moduleV2, packEntry], installRoot, installed, moduleV2)
+    const installed = await installFromDeepLink(installEntries, installRoot, `echo://install/addon/${moduleId}?pack=${packId}`)
+    await writeIndex(releaseRoot, [moduleV2, packV2])
+    const updateEntries = await loadCatalogFromChannel(channelUrl)
+    const updated = await updateModule(updateEntries, installRoot, installed, moduleV2)
     await repairCorruptInstall(updated)
     await rollbackUpdate(updated.rollbackPlan)
 

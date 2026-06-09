@@ -64,6 +64,7 @@ jobs:
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
 
       - run: npm run test
+      - run: npm run test:e2e:release-index
       - run: npm run lint
       - run: npm run build
       - run: npm run chat:check

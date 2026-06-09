@@ -13,3 +13,4 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/docs-audit.mjs
+      - run: npm run test:e2e:release-index
