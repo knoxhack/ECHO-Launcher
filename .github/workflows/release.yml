@@ -67,6 +67,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run chat:check
+      - run: node scripts/validate-release-feed.mjs --track public --stream echo-launcher --builder package.json --tag "${{ steps.metadata.outputs.tag }}"
 
   release:
     needs: validate

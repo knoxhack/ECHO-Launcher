@@ -8,7 +8,7 @@ inputs, or GitHub repository settings do not match this table exactly.
 
 | Track | Stream | GitHub owner | GitHub repo | Tag prefix |
 | --- | --- | --- | --- | --- |
-| public | echo-launcher | knoxhack | ECHO-Launcher | launcher-v |
+| public | echo-launcher | knoxhack | ECHO-Launcher | v |
 | public | echo-addons-studio | knoxhack | ECHO-Addons-Studio | v |
 | public | echo-developers-studio | knoxhack | ECHO-Developer-Studio | v |
 | public | echo-sdk | knoxhack | ECHO-SDK | sdk-v |

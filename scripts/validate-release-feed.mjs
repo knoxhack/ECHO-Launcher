@@ -9,7 +9,7 @@ const POLICY = {
     stream: 'echo-launcher',
     owner: 'knoxhack',
     repo: 'ECHO-Launcher',
-    tagPrefix: 'launcher-v',
+    tagPrefix: 'v',
     packageNames: ['echo-launcher'],
     sourcePairs: [['LAUNCHER_UPDATE_OWNER', 'LAUNCHER_UPDATE_REPO']],
     publicOnly: true,
