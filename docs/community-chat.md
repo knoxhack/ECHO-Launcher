@@ -1,6 +1,6 @@
 # ECHO Community Chat
 
-The launcher Community page connects directly to the official Minecraft server mod, `echocommunitybridge`. The mod owns the official chat API, history, and WebSocket fanout on the same public HTTP port used for `/status.json`.
+The launcher Community page connects directly to the official Minecraft server mod, `echocommunitybridge`. The mod owns the official chat API, history, and WebSocket fanout behind the public HTTPS/WSS ECHO API domain.
 
 ## Mod-Hosted Service
 
@@ -8,12 +8,12 @@ Official launcher and Android builds use the same public base URL as official se
 
 Default official URLs:
 
-| Setting key | Local value |
+| Setting key | Default |
 | --- | --- |
-| `communityApiUrl` | `http://64.74.111.235:16363` |
-| `communityWebSocketUrl` | `ws://64.74.111.235:16363/v1/chat/socket` |
+| `communityApiUrl` | `https://api.echoplatform.dev` |
+| `communityWebSocketUrl` | `wss://api.echoplatform.dev/v1/chat/socket` |
 
-For local Minecraft server testing, manually use `http://127.0.0.1:47870` and `ws://127.0.0.1:47870/v1/chat/socket`. The mod may still bind internally to `47870`; public players must use the forwarded public status port `16363`.
+For local Minecraft server testing, manually use `http://127.0.0.1:47870` and `ws://127.0.0.1:47870/v1/chat/socket`. The mod may still bind internally to `47870`; public players use the official HTTPS/WSS API domain.
 
 ## Browser Preview Workflow
 

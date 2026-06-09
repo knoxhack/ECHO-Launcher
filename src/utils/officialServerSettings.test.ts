@@ -33,6 +33,32 @@ describe('official server settings helpers', () => {
     })
   })
 
+  it('migrates the legacy raw-IP default when requested', () => {
+    expect(
+      normalizeOfficialServerSettings(
+        {
+          officialServerName: 'Ashfall Official',
+          officialServerStatusUrl: 'http://64.74.111.235:16363/status.json',
+          officialDiscordInviteUrl: '',
+          officialStatusPollSeconds: 30,
+        },
+        { migrateLegacyDefaults: true },
+      ).officialServerStatusUrl,
+    ).toBe('https://api.echoplatform.dev/status.json')
+
+    expect(
+      normalizeOfficialServerSettings(
+        {
+          officialServerName: 'Ashfall Official',
+          officialServerStatusUrl: 'http://64.74.111.235:17000/status.json',
+          officialDiscordInviteUrl: '',
+          officialStatusPollSeconds: 30,
+        },
+        { migrateLegacyDefaults: true },
+      ).officialServerStatusUrl,
+    ).toBe('http://64.74.111.235:17000/status.json')
+  })
+
   it('builds the status parser fallback from normalized settings', () => {
     expect(
       officialServerFallbackFromSettings({

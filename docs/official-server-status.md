@@ -9,7 +9,7 @@ The bundled launcher defaults are:
 | Setting key | Default |
 | --- | --- |
 | `officialServerName` | `Ashfall Official` |
-| `officialServerStatusUrl` | `http://64.74.111.235:16363/status.json` |
+| `officialServerStatusUrl` | `https://api.echoplatform.dev/status.json` |
 | `officialDiscordInviteUrl` | blank |
 | `officialStatusPollSeconds` | `30` |
 
@@ -81,7 +81,7 @@ Controls:
 
 - `Save Settings`: normalizes values, clears the current Home-card status, saves through desktop settings when Electron is available, and saves to the browser store in preview mode.
 - `Test Status`: fetches the configured URL once, updates the shared Home-card status store, and shows a success or failure toast.
-- `Reset Defaults`: restores `Ashfall Official`, `http://64.74.111.235:16363/status.json`, blank invite, and `30` seconds.
+- `Reset Defaults`: restores `Ashfall Official`, `https://api.echoplatform.dev/status.json`, blank invite, and `30` seconds.
 
 Poll seconds are normalized to the supported range of 10 to 300 seconds.
 
@@ -106,6 +106,6 @@ The status endpoint must allow browser CORS. The bridge default `public_status.c
 1. Run the launcher in browser preview and confirm the Home card does not overlap at the desktop viewport.
 2. Confirm Settings > General > Official Server shows all four fields.
 3. Use `Test Status` with a valid schema version `1` response and confirm the Home card updates.
-4. Use `Reset Defaults` and confirm the Home card returns to the local default URL and fallback state.
+4. Use `Reset Defaults` and confirm the Home card returns to the official HTTPS default URL and fallback state.
 5. Stop or block the status endpoint and confirm the Home page remains usable, showing stale or unavailable state.
 6. Configure a Discord invite URL and confirm the Home card button changes to `Join Discord`.

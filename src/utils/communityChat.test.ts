@@ -47,8 +47,37 @@ describe('community chat helpers', () => {
         migrateLegacyLocalDefaults: true,
       }),
     ).toMatchObject({
-      communityApiUrl: 'http://64.74.111.235:16363',
-      communityWebSocketUrl: 'ws://64.74.111.235:16363/v1/chat/socket',
+      communityApiUrl: 'https://api.echoplatform.dev',
+      communityWebSocketUrl: 'wss://api.echoplatform.dev/v1/chat/socket',
+    })
+  })
+
+  it('migrates old raw-IP official chat defaults without changing custom URLs', () => {
+    expect(
+      normalizeCommunityChatSettings(
+        {
+          communityApiUrl: 'http://64.74.111.235:16363',
+          communityWebSocketUrl: 'ws://64.74.111.235:16363/v1/chat/socket',
+        },
+        'https://api.echoplatform.dev/status.json',
+        { migrateLegacyLocalDefaults: true },
+      ),
+    ).toMatchObject({
+      communityApiUrl: 'https://api.echoplatform.dev',
+      communityWebSocketUrl: 'wss://api.echoplatform.dev/v1/chat/socket',
+    })
+    expect(
+      normalizeCommunityChatSettings(
+        {
+          communityApiUrl: 'http://64.74.111.235:17000',
+          communityWebSocketUrl: 'ws://64.74.111.235:17000/v1/chat/socket',
+        },
+        'https://api.echoplatform.dev/status.json',
+        { migrateLegacyLocalDefaults: true },
+      ),
+    ).toMatchObject({
+      communityApiUrl: 'http://64.74.111.235:17000',
+      communityWebSocketUrl: 'ws://64.74.111.235:17000/v1/chat/socket',
     })
   })
 

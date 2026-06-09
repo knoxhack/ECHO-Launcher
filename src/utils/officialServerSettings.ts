@@ -1,9 +1,17 @@
 import type { LauncherDesktopSettings } from '../types/releases'
 import type { OfficialServerStatusFallback } from '../types/serverStatus'
 
+export const OFFICIAL_SERVER_STATUS_URL =
+  import.meta.env.VITE_ECHO_OFFICIAL_SERVER_STATUS_URL?.trim() || 'https://api.echoplatform.dev/status.json'
+
+const LEGACY_OFFICIAL_SERVER_STATUS_URLS = new Set([
+  'http://64.74.111.235:16363/status.json',
+  'http://64.74.111.235:16363/status.json/',
+])
+
 export const officialServerSettingsDefaults = {
   officialServerName: 'Ashfall Official',
-  officialServerStatusUrl: 'http://64.74.111.235:16363/status.json',
+  officialServerStatusUrl: OFFICIAL_SERVER_STATUS_URL,
   officialDiscordInviteUrl: '',
   officialStatusPollSeconds: 30,
 } satisfies Pick<
@@ -13,11 +21,18 @@ export const officialServerSettingsDefaults = {
 
 export type OfficialServerSettingsPatch = typeof officialServerSettingsDefaults
 
-export function normalizeOfficialServerSettings(input: Partial<OfficialServerSettingsPatch> = {}): OfficialServerSettingsPatch {
+export function normalizeOfficialServerSettings(
+  input: Partial<OfficialServerSettingsPatch> = {},
+  options: { migrateLegacyDefaults?: boolean } = {},
+): OfficialServerSettingsPatch {
   const pollSeconds = Number(input.officialStatusPollSeconds)
+  const rawStatusUrl = String(input.officialServerStatusUrl ?? '').trim() || officialServerSettingsDefaults.officialServerStatusUrl
   return {
     officialServerName: String(input.officialServerName ?? '').trim() || officialServerSettingsDefaults.officialServerName,
-    officialServerStatusUrl: String(input.officialServerStatusUrl ?? '').trim() || officialServerSettingsDefaults.officialServerStatusUrl,
+    officialServerStatusUrl:
+      options.migrateLegacyDefaults && LEGACY_OFFICIAL_SERVER_STATUS_URLS.has(rawStatusUrl)
+        ? officialServerSettingsDefaults.officialServerStatusUrl
+        : rawStatusUrl,
     officialDiscordInviteUrl: String(input.officialDiscordInviteUrl ?? '').trim(),
     officialStatusPollSeconds: Math.max(
       10,

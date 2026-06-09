@@ -16,7 +16,13 @@ export const COMMUNITY_CHAT_MAX_BODY_LENGTH = 2000
 export const COMMUNITY_CHAT_MAX_CHANNEL_MESSAGES = 10_000
 export const LOCAL_COMMUNITY_CHAT_API_URL = 'http://127.0.0.1:47870'
 export const LOCAL_COMMUNITY_CHAT_WEBSOCKET_URL = 'ws://127.0.0.1:47870/v1/chat/socket'
-export const OFFICIAL_COMMUNITY_CHAT_URLS = communityChatUrlsFromStatusUrl(officialServerSettingsDefaults.officialServerStatusUrl)
+export const OFFICIAL_COMMUNITY_API_URL = import.meta.env.VITE_ECHO_COMMUNITY_API_URL?.trim() || 'https://api.echoplatform.dev'
+export const OFFICIAL_COMMUNITY_WEBSOCKET_URL =
+  import.meta.env.VITE_ECHO_COMMUNITY_WEBSOCKET_URL?.trim() || 'wss://api.echoplatform.dev/v1/chat/socket'
+export const OFFICIAL_COMMUNITY_CHAT_URLS = {
+  communityApiUrl: OFFICIAL_COMMUNITY_API_URL,
+  communityWebSocketUrl: OFFICIAL_COMMUNITY_WEBSOCKET_URL,
+}
 const LEGACY_LOCAL_API_URLS = new Set([
   'http://127.0.0.1:47870',
   'http://127.0.0.1:47870/',
@@ -26,6 +32,17 @@ const LEGACY_LOCAL_API_URLS = new Set([
 const LEGACY_LOCAL_SOCKET_URLS = new Set([
   'ws://127.0.0.1:47870/v1/chat/socket',
   'ws://10.0.2.2:47870/v1/chat/socket',
+])
+const LEGACY_OFFICIAL_API_URLS = new Set([
+  'http://64.74.111.235:16363',
+  'http://64.74.111.235:16363/',
+])
+const LEGACY_OFFICIAL_SOCKET_URLS = new Set([
+  'ws://64.74.111.235:16363/v1/chat/socket',
+])
+const LEGACY_OFFICIAL_STATUS_URLS = new Set([
+  'http://64.74.111.235:16363/status.json',
+  'http://64.74.111.235:16363/status.json/',
 ])
 
 export const communityChatSettingsDefaults = {
@@ -47,8 +64,8 @@ export function communityChatUrlsFromStatusUrl(statusUrl: string): Pick<Communit
     }
   } catch {
     return {
-      communityApiUrl: 'http://64.74.111.235:16363',
-      communityWebSocketUrl: 'ws://64.74.111.235:16363/v1/chat/socket',
+      communityApiUrl: OFFICIAL_COMMUNITY_API_URL,
+      communityWebSocketUrl: OFFICIAL_COMMUNITY_WEBSOCKET_URL,
     }
   }
 }
@@ -58,11 +75,14 @@ export function normalizeCommunityChatSettings(
   officialServerStatusUrl = officialServerSettingsDefaults.officialServerStatusUrl,
   options: { migrateLegacyLocalDefaults?: boolean } = {},
 ): CommunityChatSettings {
-  const derivedDefaults = communityChatUrlsFromStatusUrl(officialServerStatusUrl)
+  const shouldMigrateOfficialStatus = options.migrateLegacyLocalDefaults && LEGACY_OFFICIAL_STATUS_URLS.has(officialServerStatusUrl.trim())
+  const derivedDefaults = shouldMigrateOfficialStatus ? OFFICIAL_COMMUNITY_CHAT_URLS : communityChatUrlsFromStatusUrl(officialServerStatusUrl)
   const rawApiUrl = String(input.communityApiUrl ?? derivedDefaults.communityApiUrl).trim()
   const rawSocketUrl = String(input.communityWebSocketUrl ?? derivedDefaults.communityWebSocketUrl).trim()
-  const shouldMigrateApi = options.migrateLegacyLocalDefaults && LEGACY_LOCAL_API_URLS.has(rawApiUrl)
-  const shouldMigrateSocket = options.migrateLegacyLocalDefaults && LEGACY_LOCAL_SOCKET_URLS.has(rawSocketUrl)
+  const shouldMigrateApi =
+    options.migrateLegacyLocalDefaults && (LEGACY_LOCAL_API_URLS.has(rawApiUrl) || LEGACY_OFFICIAL_API_URLS.has(rawApiUrl))
+  const shouldMigrateSocket =
+    options.migrateLegacyLocalDefaults && (LEGACY_LOCAL_SOCKET_URLS.has(rawSocketUrl) || LEGACY_OFFICIAL_SOCKET_URLS.has(rawSocketUrl))
   return {
     communityApiUrl: shouldMigrateApi ? derivedDefaults.communityApiUrl : rawApiUrl,
     communityWebSocketUrl: shouldMigrateSocket ? derivedDefaults.communityWebSocketUrl : rawSocketUrl,
@@ -78,7 +98,9 @@ export function shouldFollowOfficialChatUrl(currentUrl: string, previousOfficial
     normalized === previous.communityApiUrl ||
     normalized === previous.communityWebSocketUrl ||
     LEGACY_LOCAL_API_URLS.has(normalized) ||
-    LEGACY_LOCAL_SOCKET_URLS.has(normalized)
+    LEGACY_LOCAL_SOCKET_URLS.has(normalized) ||
+    LEGACY_OFFICIAL_API_URLS.has(normalized) ||
+    LEGACY_OFFICIAL_SOCKET_URLS.has(normalized)
   )
 }
 
