@@ -765,7 +765,8 @@ function getPlatformInfo() {
 
 function getPaths() {
   const root = path.join(app.getPath('userData'), 'ECHO')
-  const playerContentRoot = path.join(app.getPath('home') || os.homedir(), 'ECHOLauncher')
+  const launcherPlayerContentPath = String(process.env.ECHO_LAUNCHER_PLAYER_CONTENT_ROOT ?? '').trim()
+  const playerContentRoot = launcherPlayerContentPath ? path.resolve(launcherPlayerContentPath) : path.join(app.getPath('home') || os.homedir(), 'ECHOLauncher')
   return {
     root,
     playerContentRoot,
@@ -2406,11 +2407,15 @@ function normalizeCanonicalIndexEntry(value) {
 function catalogUrlsFromLauncherChannel(channel) {
   const urls = []
   const catalogUrls = channel?.catalogUrls && typeof channel.catalogUrls === 'object' ? channel.catalogUrls : {}
+  const allowLocalUrls = process.env.ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS === '1'
   for (const value of Object.values(catalogUrls)) {
     if (Array.isArray(value)) urls.push(...value)
     else if (typeof value === 'string') urls.push(value)
   }
-  return [...new Set(urls.map((url) => String(url).trim()).filter((url) => /^https:\/\/raw\.githubusercontent\.com\//.test(url)))]
+  return [...new Set(urls.map((url) => String(url).trim()).filter((url) => {
+    if (/^https:\/\/raw\.githubusercontent\.com\//.test(url)) return true
+    return allowLocalUrls && /^http:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url)
+  }))]
 }
 
 async function fetchCanonicalReleaseIndexCatalog(config, cachePath) {
@@ -3192,7 +3197,8 @@ function resolveManifestAssets(manifest, entry) {
 
 async function resolveInstallableManifest(manifest, entry, payload = {}) {
   const requirements = manifest.moduleRequirements ?? manifest.requiredModules
-  if (Array.isArray(requirements) && requirements.length) {
+  const zipManifestHasConcreteFiles = manifest.artifactMode === 'zip' && Array.isArray(manifest.files) && manifest.files.length > 0
+  if (!zipManifestHasConcreteFiles && Array.isArray(requirements) && requirements.length) {
     const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
     return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
   }
@@ -6348,7 +6354,7 @@ async function repairZipPackArtifact(payload, profile, manifest) {
   const skipped = []
   const warnings = []
   const backedUp = []
-  let runtime = null
+  let runtime = { ok: true, warnings: ['Internal Minecraft runtime repair skipped for Minecraft Launcher handoff mode.'] }
 
   await ensureDir(installPath)
   await ensureDir(path.join(installPath, '.echo'))
@@ -6361,10 +6367,13 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     return zipArtifact
   }
 
-  try {
-    runtime = await minecraftRepairRuntime({ manifest })
-  } catch (error) {
-    warnings.push(`Minecraft runtime repair failed: ${error instanceof Error ? error.message : String(error)}`)
+  if (payload.installRuntime === true) {
+    try {
+      runtime = await minecraftRepairRuntime({ manifest })
+    } catch (error) {
+      runtime = { ok: false, warnings: [error instanceof Error ? error.message : String(error)] }
+      warnings.push(`Minecraft runtime repair failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   for (const file of manifest.files ?? []) {
