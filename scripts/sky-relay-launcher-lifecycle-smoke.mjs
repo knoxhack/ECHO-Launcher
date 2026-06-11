@@ -186,6 +186,7 @@ async function preparePreviousInstallFixture(manifest, installRoot) {
   const targetPath = path.join(installRoot, targetFile.path)
   await fs.writeFile(targetPath, Buffer.from('previous version placeholder for launcher update smoke\n', 'utf8'))
   const previousTargetSha = await sha256File(targetPath)
+  const previousTargetStat = await fs.stat(targetPath)
   const obsoletePath = manifest.pack.endsWith('native-edition')
     ? 'addons/sky-relay-obsolete-smoke.echo-addon'
     : 'mods/sky-relay-obsolete-smoke.jar'
@@ -193,11 +194,19 @@ async function preparePreviousInstallFixture(manifest, installRoot) {
   await fs.mkdir(path.dirname(obsoleteAbsolute), { recursive: true })
   await fs.writeFile(obsoleteAbsolute, Buffer.from('obsolete launcher update smoke file\n', 'utf8'))
   const obsoleteStat = await fs.stat(obsoleteAbsolute)
+  const previousVersion = `${manifest.version}-previous-smoke`
   const previousManifest = {
     ...manifest,
-    version: `${manifest.version}-previous-smoke`,
+    version: previousVersion,
     files: [
-      ...(manifest.files ?? []),
+      ...(manifest.files ?? []).map((file) => file.path === targetFile.path
+        ? {
+            ...file,
+            version: `${file.version ?? manifest.version}-previous-smoke`,
+            sha256: previousTargetSha,
+            size: previousTargetStat.size,
+          }
+        : file),
       {
         path: obsoletePath,
         sha256: await sha256File(obsoleteAbsolute),
@@ -208,7 +217,9 @@ async function preparePreviousInstallFixture(manifest, installRoot) {
     ],
   }
   await writeJson(path.join(installRoot, '.echo', 'installed-manifest.json'), previousManifest)
-  return { targetFile, previousTargetSha, obsoletePath }
+  const previousVerification = await verifyInstall(previousManifest, installRoot)
+  if (!previousVerification.ok) throw new Error(`${manifest.pack}: previous-version update fixture did not verify`)
+  return { targetFile, previousTargetSha, obsoletePath, previousManifest, previousVersion, previousVerification }
 }
 
 async function updateFromPackZip(manifest, zip, installRoot, fixture) {
@@ -244,6 +255,8 @@ async function updateFromPackZip(manifest, zip, installRoot, fixture) {
   const rollbackPlan = {
     operation: 'update',
     installPath: installRoot,
+    fromVersion: fixture.previousVersion,
+    toVersion: manifest.version,
     backedUp,
     removed: updated,
     createdAt: new Date().toISOString(),
@@ -389,15 +402,19 @@ async function smokeEdition(args, edition) {
       verifiedAfterInstall: installed.after.valid.length,
     },
     update: {
+      fromVersion: fixture.previousVersion,
+      toVersion: manifest.version,
+      versionTransition: true,
       updated: update.updated.length,
       verified: update.verified.length,
       removed: update.removed.length,
       verifiedAfterUpdate: update.after.valid.length,
-      sameVersionReconciliation: true,
+      sameVersionReconciliation: false,
     },
     rollback: {
       restoredPreviousTarget: fixture.targetFile.path,
       restoredObsoletePath: fixture.obsoletePath,
+      restoredPreviousVersion: fixture.previousVersion,
     },
     postRollbackUpdate: {
       updated: updateAfterRollback.updated.length,
@@ -435,15 +452,17 @@ async function main() {
       launcherReleaseIndexDeepLinks: 'passed',
       launcherInstallFromPackZip: 'passed',
       launcherUpdateReconciliation: 'passed',
+      launcherVersionTransitionUpdate: 'passed',
       launcherRepairCorruptFile: 'passed',
       launcherRollbackSimulatedUpdate: 'passed',
-      realVersionToVersionUpdate: 'blocked',
+      realVersionToVersionUpdate: 'passed_with_previous_version_fixture',
       packagedElectronCardUiSmoke: 'covered_separately',
       electronInstallUpdateRepairClickThrough: 'covered_by_packaged_electron_ui_smoke',
       electronRollbackClickThrough: 'not_available_no_visible_ui_command',
     },
-    blockers: [
-      'Only one Sky Relay pack version exists, so this smoke uses same-version manifest reconciliation plus rollback instead of a real version-to-version update.',
+    blockers: [],
+    residualRisks: [
+      'The previous Sky Relay version is a fixture-local manifest generated from current public assets plus an older module placeholder; it proves launcher update mechanics without claiming a second public Sky Relay release exists.',
       'This script uses Launcher-owned resolver and lifecycle contracts from Node; packaged Electron install/update/repair click-through is covered by release-readiness/sky-relay-electron-ui-smoke.json, while rollback has no visible packaged UI command yet.',
     ],
   }

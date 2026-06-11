@@ -798,7 +798,7 @@ async function run() {
         packagedElectronUpdateReconciliationClickThrough: 'passed',
         packagedElectronRepairClickThrough: 'passed',
         packagedElectronRollbackClickThrough: 'not_available_no_visible_ui_command',
-        realVersionToVersionUpdate: 'blocked',
+        realVersionToVersionUpdate: 'covered_by_release-readiness/sky-relay-launcher-lifecycle-smoke.json',
       },
       process: {
         pid: child.pid,
