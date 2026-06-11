@@ -12,10 +12,10 @@ const readiness = {
     status: 'healthy',
     installPath: 'C:\\Games\\Ashfall',
   },
-  releaseFeed: {
+  catalog: {
     configured: true,
     ok: true,
-    source: 'knoxhack/ECHO-Ashfall-Native-Edition',
+    source: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json',
     releases: 1,
     latestVersion: '1.0.0',
     fetchedAt: '2026-05-24T12:00:00.000Z',

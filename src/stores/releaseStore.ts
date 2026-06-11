@@ -50,7 +50,7 @@ export const useReleaseStore = create<ReleaseStore>()((set, get) => ({
         return index
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Configure the GitHub release feed in Settings.'
+        const message = error instanceof Error ? error.message : 'Check the Release Index channel in Settings.'
         set({ loadingReleases: false, releaseError: message, inFlight: null })
         throw error
       })

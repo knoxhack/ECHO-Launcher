@@ -21,32 +21,18 @@ import { getVisibleNavItems } from '../components/shell/navigation'
 type PageComponent = ComponentType | LazyExoticComponent<ComponentType>
 
 const HomePage = lazy(() => import('../components/dashboard/HomePage').then((module) => ({ default: module.HomePage })))
-const StandaloneRuntimePage = lazy(() => import('../components/runtime/StandaloneRuntimePage').then((module) => ({ default: module.StandaloneRuntimePage })))
-const DownloadsPage = lazy(() => import('../components/downloads/DownloadsPage').then((module) => ({ default: module.DownloadsPage })))
-const EcosystemHealthPage = lazy(() => import('../components/ecosystem/EcosystemHealthPage').then((module) => ({ default: module.EcosystemHealthPage })))
-const ChatPage = lazy(() => import('../components/chat/ChatPage').then((module) => ({ default: module.ChatPage })))
-const LogsPage = lazy(() => import('../components/logs/LogsPage').then((module) => ({ default: module.LogsPage })))
-const ModpacksPage = lazy(() => import('../components/dashboard/ModpacksPage').then((module) => ({ default: module.ModpacksPage })))
-const ProfilesPage = lazy(() => import('../components/profiles/ProfilesPage').then((module) => ({ default: module.ProfilesPage })))
-const PublisherPage = lazy(() => import('../components/publisher/PublisherPage').then((module) => ({ default: module.PublisherPage })))
-const ServerPackPage = lazy(() => import('../components/server/ServerPackPage').then((module) => ({ default: module.ServerPackPage })))
+const LibraryPage = lazy(() => import('../components/library/LibraryPage').then((module) => ({ default: module.LibraryPage })))
+const CommunityPage = lazy(() => import('../components/community/CommunityPage').then((module) => ({ default: module.CommunityPage })))
 const SettingsPage = lazy(() => import('../components/settings/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const ToolsPage = lazy(() => import('../components/tools/ToolsPage').then((module) => ({ default: module.ToolsPage })))
 const WebLauncherUpdateExporter = lazy(() => import('../components/shell/WebLauncherUpdateExporter').then((module) => ({ default: module.WebLauncherUpdateExporter })))
 
 const pages: Record<PageId, PageComponent> = {
   home: HomePage,
-  runtime: StandaloneRuntimePage,
-  modpacks: ModpacksPage,
-  profiles: ProfilesPage,
-  servers: ServerPackPage,
-  chat: ChatPage,
-  ecosystem: EcosystemHealthPage,
-  publisher: PublisherPage,
+  library: LibraryPage,
+  community: CommunityPage,
   tools: ToolsPage,
   settings: SettingsPage,
-  downloads: DownloadsPage,
-  logs: LogsPage,
 }
 
 export function EchoLauncher() {
@@ -122,8 +108,8 @@ export function EchoLauncher() {
         addToast(
           'Desktop backend connected',
           latestRelease
-            ? `GitHub release ${latestRelease.version} loaded from ${state.releaseIndex?.source.owner}/${state.releaseIndex?.source.repo}.`
-            : `Ashfall installs: ${state.paths.instances}. GitHub releases accepted: ${accepted}, rejected: ${rejected}.`,
+            ? `Approved release ${latestRelease.version} loaded from the ECHO Catalog.`
+            : `Ashfall installs: ${state.paths.instances}. Catalog entries accepted: ${accepted}, diagnostics: ${rejected}.`,
           latestRelease ? 'success' : 'warning',
         )
         cancelStartupTasks = scheduleStartupTask(() => {

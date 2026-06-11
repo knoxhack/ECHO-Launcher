@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Channel } from '../types/launcher'
-import type { LaunchMode, LauncherDesktopSettings, PublisherSettings, ReleaseFeedConfig, ReleaseIndexConfig } from '../types/releases'
+import type { LaunchMode, LauncherDesktopSettings, ReleaseIndexConfig } from '../types/releases'
 import {
   communityChatSettingsDefaults,
   communityChatUrlsFromStatusUrl,
@@ -31,9 +31,7 @@ interface SettingsStore {
   masterVolume: number
   serverPackProgress: number
   serverPackActive: boolean
-  releaseFeed: ReleaseFeedConfig
   releaseIndex: ReleaseIndexConfig
-  publisher: PublisherSettings
   supportGuideUrl: string
   launchMode: LaunchMode
   advancedMode: boolean
@@ -49,9 +47,7 @@ interface SettingsStore {
   packOsReportRoot: string
   setRamGb: (ramGb: number) => void
   setUpdateChannel: (channel: Channel) => void
-  setReleaseFeed: (releaseFeed: ReleaseFeedConfig) => void
   setReleaseIndex: (releaseIndex: ReleaseIndexConfig) => void
-  setPublisher: (publisher: PublisherSettings) => void
   setSupportGuideUrl: (supportGuideUrl: string) => void
   setAdvancedMode: (advancedMode: boolean) => void
   setCreatorMode: (creatorMode: boolean) => void
@@ -119,6 +115,21 @@ const presetSettings: Record<PerformancePreset, Partial<SettingsStore>> = {
   },
 }
 
+export function migrateSettingsStoreState(persistedState: unknown) {
+  if (!persistedState || typeof persistedState !== 'object') return persistedState
+  const state = { ...(persistedState as Record<string, unknown>) }
+  delete state.releaseFeed
+  delete state.publisher
+  delete state.publisherToken
+  if (state.releaseIndex && typeof state.releaseIndex === 'object') {
+    state.releaseIndex = {
+      ...(state.releaseIndex as Record<string, unknown>),
+      enabled: true,
+    }
+  }
+  return state
+}
+
 export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set) => ({
@@ -140,20 +151,9 @@ export const useSettingsStore = create<SettingsStore>()(
       masterVolume: 78,
       serverPackProgress: 0,
       serverPackActive: false,
-      releaseFeed: {
-        provider: 'github',
-        owner: 'knoxhack',
-        repo: 'ECHO-Ashfall-Native-Edition',
-        includePrereleases: true,
-      },
       releaseIndex: {
         enabled: true,
         channelUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json',
-      },
-      publisher: {
-        owner: 'knoxhack',
-        repo: 'ECHO-Ashfall-Native-Edition',
-        hasToken: false,
       },
       supportGuideUrl: '',
       launchMode: 'minecraft_launcher',
@@ -164,9 +164,7 @@ export const useSettingsStore = create<SettingsStore>()(
       ...communityChatSettingsDefaults,
       setRamGb: (ramGb) => set({ ramGb }),
       setUpdateChannel: (updateChannel) => set({ updateChannel }),
-      setReleaseFeed: (releaseFeed) => set({ releaseFeed }),
       setReleaseIndex: (releaseIndex) => set({ releaseIndex }),
-      setPublisher: (publisher) => set({ publisher }),
       setSupportGuideUrl: (supportGuideUrl) => set({ supportGuideUrl }),
       setAdvancedMode: (advancedMode) => set({ advancedMode }),
       setCreatorMode: (creatorMode) => set({ creatorMode }),
@@ -206,9 +204,7 @@ export const useSettingsStore = create<SettingsStore>()(
             migrateLegacyDefaults: settings.communityChatPortMigrationVersion !== 2,
           })
           return {
-            releaseFeed: settings.releaseFeed,
             releaseIndex: settings.releaseIndex,
-            publisher: settings.publisher,
             supportGuideUrl: settings.supportGuideUrl,
             launchMode: settings.launchMode,
             advancedMode: settings.advancedMode,
@@ -253,9 +249,7 @@ export const useSettingsStore = create<SettingsStore>()(
         positionalAudio: state.positionalAudio,
         ambientSounds: state.ambientSounds,
         masterVolume: state.masterVolume,
-        releaseFeed: state.releaseFeed,
         releaseIndex: state.releaseIndex,
-        publisher: state.publisher,
         supportGuideUrl: state.supportGuideUrl,
         launchMode: state.launchMode,
         advancedMode: state.advancedMode,
@@ -270,6 +264,8 @@ export const useSettingsStore = create<SettingsStore>()(
         chatNickname: state.chatNickname,
         chatNotifications: state.chatNotifications,
       }),
+      version: 2,
+      migrate: migrateSettingsStoreState,
     },
   ),
 )

@@ -13,14 +13,11 @@ import {
   latestPlayableReleaseForPack,
   moduleArtifactName,
   nativeLoaderMetadataStatus,
-  normalizeGitHubAssetDigest,
   normalizeOfficialPackId,
-  normalizeReleaseFeedConfig,
   packManifestAssetName,
   productUpdateArtifact,
   productUpdateEntry,
   productUpdateSelection,
-  releaseFeedConfigured,
   releaseEntryFromCanonicalModpack,
   resolveEchoProtocolEntry,
   rollbackPlanSnapshot,
@@ -155,10 +152,8 @@ function releaseIndex(overrides: Partial<ReleaseIndex>): ReleaseIndex {
   return {
     cacheVersion: 4,
     source: {
-      provider: 'github',
-      owner: 'knoxhack',
-      repo: 'ECHO-Ashfall-Native-Edition',
-      includePrereleases: true,
+      provider: 'release-index',
+      channelUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json',
     },
     fetchedAt: '2026-05-10T12:00:00Z',
     releases: [baseRelease],
@@ -177,27 +172,6 @@ describe('releaseValidation', () => {
     expect(isSafeRelativePath('/tmp/escape.jar')).toBe(false)
   })
 
-  it('normalizes and validates release feed configuration', () => {
-    const config = normalizeReleaseFeedConfig({
-      owner: '  AshfallOrg ',
-      repo: ' echo-releases ',
-    })
-    expect(config).toEqual({
-      provider: 'github',
-      owner: 'AshfallOrg',
-      repo: 'echo-releases',
-      includePrereleases: true,
-    })
-    expect(releaseFeedConfigured(config)).toBe(true)
-    expect(releaseFeedConfigured({ ...config, repo: '' })).toBe(false)
-  })
-
-  it('normalizes GitHub asset SHA-256 digests', () => {
-    expect(normalizeGitHubAssetDigest(`sha256:${'a'.repeat(64)}`)).toBe('a'.repeat(64))
-    expect(normalizeGitHubAssetDigest('md5:abc')).toBeUndefined()
-    expect(normalizeGitHubAssetDigest(undefined)).toBeUndefined()
-  })
-
   it('selects the latest release for a channel', () => {
     const selected = selectReleaseEntry(
       [
@@ -210,7 +184,7 @@ describe('releaseValidation', () => {
     expect(selected?.version).toBe('0.1.1')
   })
 
-  it('uses the latest accepted GitHub release instead of bundled fallback versions', () => {
+  it('uses the latest approved Catalog release instead of bundled fallback versions', () => {
     const bundledFallback = { ...baseRelease, id: 'fallback', version: '0.1.0-alpha.0', publishedAt: '2026-05-01T12:00:00Z' }
     const liveRelease = { ...baseRelease, id: 'live', version: '0.1.0-alpha.1', tagName: '0.1.0-alpha.1', publishedAt: '2026-05-23T16:35:13Z' }
     const selected = latestPlayableRelease(

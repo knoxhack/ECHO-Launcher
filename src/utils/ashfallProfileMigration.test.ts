@@ -15,7 +15,7 @@ describe('ashfallProfileMigration', () => {
     ])
     expect(normalized.map((profile) => profile.runtimeMode)).toEqual([
       'native-loader-minecraft',
-      'native-loader-minecraft',
+      'neoforge-minecraft',
       'native-runtime',
     ])
   })

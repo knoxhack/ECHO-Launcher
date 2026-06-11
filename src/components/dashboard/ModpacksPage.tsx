@@ -7,13 +7,13 @@ import { useLauncherStore } from '../../stores/launcherStore'
 import { usePackOsStore } from '../../stores/packOsStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReleaseStore } from '../../stores/releaseStore'
-import { useSettingsStore } from '../../stores/settingsStore'
+
 import type { NativeImportCandidate } from '../../types/native'
-import type { ToolsTabId } from '../../types/launcher'
+import type { PageId, ToolsTabId } from '../../types/launcher'
 import type { PackOsLauncherPackState } from '../../types/packos'
 import type { ReleaseEntry, ReleaseIndex } from '../../types/releases'
 import { packOsHealthStatus, packOsUiStateLabel } from '../../utils/packosStatus'
-import { latestPlayableReleaseForPack, releaseAcceptedCount, releaseFeedConfigured, releaseRejectedCount } from '../../utils/releaseValidation'
+import { latestPlayableReleaseForPack, releaseAcceptedCount, releaseRejectedCount } from '../../utils/releaseValidation'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
 import { MetricCard } from '../cyber/MetricCard'
@@ -35,7 +35,6 @@ export function ModpacksPage() {
   const setActivePage = useLauncherStore((state) => state.setActivePage)
   const setActiveToolsTab = useLauncherStore((state) => state.setActiveToolsTab)
   const setSelectedProfileId = useLauncherStore((state) => state.setSelectedProfileId)
-  const releaseFeed = useSettingsStore((state) => state.releaseFeed)
   const setProfiles = useProfileStore((state) => state.setProfiles)
   const releaseIndex = useReleaseStore((state) => state.releaseIndex)
   const loadingReleases = useReleaseStore((state) => state.loadingReleases)
@@ -60,14 +59,14 @@ export function ModpacksPage() {
       const rejected = releaseRejectedCount(index)
       if (announce) {
         addToast(
-          hasPlayableRelease ? 'Ashfall release loaded' : 'Release feed checked',
-          `${accepted} accepted and ${rejected} rejected in ${index.source.owner}/${index.source.repo}.`,
+          hasPlayableRelease ? 'Approved release loaded' : 'Catalog checked',
+          `${accepted} approved release${accepted === 1 ? '' : 's'} loaded; ${rejected} catalog diagnostic${rejected === 1 ? '' : 's'} tracked.`,
           accepted ? 'success' : 'warning',
         )
       }
     } catch (error) {
       if (announce) {
-        addToast('Release feed unavailable', error instanceof Error ? error.message : 'Configure the GitHub release feed in Settings.', 'warning')
+        addToast('Catalog unavailable', error instanceof Error ? error.message : 'Check the Release Index channel in Settings.', 'warning')
       }
     }
   }, [addToast, loadReleases])
@@ -77,11 +76,9 @@ export function ModpacksPage() {
   }, [refreshPackOs])
 
   useEffect(() => {
-    if (releaseFeedConfigured(releaseFeed)) {
-      const timer = window.setTimeout(() => void refreshReleases(false, false), 0)
-      return () => window.clearTimeout(timer)
-    }
-  }, [refreshReleases, releaseFeed])
+    const timer = window.setTimeout(() => void refreshReleases(false, false), 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshReleases])
 
   const importManifest = async () => {
     if (!isNativeAvailable()) {
@@ -149,11 +146,11 @@ export function ModpacksPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <CyberButton icon={DownloadCloud} onClick={() => setActivePage('downloads')} variant="primary">
+            <CyberButton icon={DownloadCloud} onClick={() => setActivePage('library')} variant="primary">
               Install / Update
             </CyberButton>
             <CyberButton disabled={loadingReleases} icon={RadioTower} onClick={() => void refreshReleases(true, true)} variant="secondary">
-              {loadingReleases ? 'Refreshing...' : 'Refresh Feed'}
+              {loadingReleases ? 'Refreshing...' : 'Refresh Catalog'}
             </CyberButton>
             <CyberButton disabled={scanningImports} icon={FolderSearch} onClick={() => void scanImports(false)} variant="secondary">
               {scanningImports ? 'Scanning...' : 'Scan Imports'}
@@ -165,9 +162,9 @@ export function ModpacksPage() {
       <GlassCard tone={playableRelease ? 'success' : 'amber'}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase text-cyan-soft">GitHub Releases</p>
+            <p className="text-xs font-semibold uppercase text-cyan-soft">ECHO Catalog</p>
             <h3 className="mt-1 text-lg font-semibold text-white">
-              {releaseFeedConfigured(releaseFeed) ? `${releaseFeed.owner}/${releaseFeed.repo}` : 'Release feed not configured'}
+              {'ECHO Catalog'}
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-300">
               {playableRelease
@@ -183,7 +180,7 @@ export function ModpacksPage() {
         </div>
         {rejectedCount > 0 ? (
           <div className="mt-4 rounded-lg border border-amber-echo/30 bg-amber-echo/10 p-3 text-sm leading-6 text-amber-100">
-            {rejectedCount} GitHub release{rejectedCount === 1 ? '' : 's'} rejected. {releaseIndex?.warnings[0] ?? 'Open Downloads for exact asset diagnostics.'}
+            {rejectedCount} Catalog diagnostic{rejectedCount === 1 ? '' : 's'} tracked. {releaseIndex?.warnings[0] ?? 'Open Downloads for exact asset diagnostics.'}
           </div>
         ) : null}
       </GlassCard>
@@ -265,7 +262,7 @@ function OfficialPackCard({
   pack: OfficialModpack
   packOsState?: PackOsLauncherPackState
   releaseIndex: ReleaseIndex | null
-  setActivePage: (page: 'home' | 'downloads' | 'tools') => void
+  setActivePage: (page: PageId) => void
   setSelectedProfileId: (profileId: string) => void
   setActiveToolsTab: (tab: ToolsTabId) => void
 }) {
@@ -317,7 +314,7 @@ function OfficialPackCard({
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
             <PackStat icon={Boxes} label="Version" value={version} />
-            <PackStat icon={Archive} label="Repo" value={pack.repo} />
+            <PackStat icon={Archive} label="Catalog ID" value={pack.catalogId} />
             <PackStat icon={isPlayable ? Archive : Eye} label={isPlayable ? 'Manifest' : 'Mode'} value={isPlayable ? (ready ? 'Verified' : 'Missing') : 'View-only'} />
             <PackStat icon={RadioTower} label="Channel" value={packOsState?.channel ?? pack.channel} />
             <PackStat icon={ShieldAlert} label="PackOS" value={packOsLabel} />
@@ -344,7 +341,7 @@ function OfficialPackCard({
               icon={RotateCcw}
               onClick={() => {
                 if (pack.runtimeMode) setSelectedProfileId(pack.id)
-                setActivePage('downloads')
+                setActivePage('library')
               }}
               size="sm"
               variant="secondary"

@@ -1,7 +1,6 @@
 import ashfallCardImage from '../assets/modpacks/ashfall-card.webp'
 import orbitalCardImage from '../assets/modpacks/orbital-card.webp'
 import type { OfficialPackId } from '../types/manifests'
-import type { ReleaseFeedConfig } from '../types/releases'
 import type { LauncherRuntimeModeId } from '../types/standaloneRuntime'
 
 export type OfficialModpackStatus = 'playable' | 'preview'
@@ -12,8 +11,7 @@ export interface OfficialModpack {
   name: string
   runtimeMode?: LauncherRuntimeModeId
   betaGate?: OfficialModpackBetaGate
-  repo: string
-  releaseFeed: ReleaseFeedConfig
+  catalogId: OfficialPackId
   status: OfficialModpackStatus
   phase: string
   version: string
@@ -25,26 +23,16 @@ export interface OfficialModpack {
   moduleCount: number | null
 }
 
-function githubFeed(repo: string): ReleaseFeedConfig {
-  return {
-    provider: 'github',
-    owner: 'knoxhack',
-    repo,
-    includePrereleases: true,
-  }
-}
-
 export const officialModpacks: OfficialModpack[] = [
   {
     id: 'ashfall-native-edition',
     name: 'Ashfall Native Edition',
     runtimeMode: 'native-loader-minecraft',
     betaGate: 'open',
-    repo: 'knoxhack/ECHO-Ashfall-Native-Edition',
-    releaseFeed: githubFeed('ECHO-Ashfall-Native-Edition'),
+    catalogId: 'ashfall-native-edition',
     status: 'playable',
     phase: 'Public Alpha',
-    version: 'GitHub latest',
+    version: 'Catalog latest',
     minecraft: '26.1.2',
     channel: 'alpha',
     summary: 'The main playable Ashfall experience through ECHO Native Loader.',
@@ -55,17 +43,16 @@ export const officialModpacks: OfficialModpack[] = [
   {
     id: 'ashfall-neoforge-edition',
     name: 'Ashfall NeoForge Edition',
-    runtimeMode: 'native-loader-minecraft',
+    runtimeMode: 'neoforge-minecraft',
     betaGate: 'metadata',
-    repo: 'knoxhack/ECHO-Ashfall-NeoForge-Edition',
-    releaseFeed: githubFeed('ECHO-Ashfall-NeoForge-Edition'),
+    catalogId: 'ashfall-neoforge-edition',
     status: 'preview',
     phase: 'Release Prep',
-    version: 'GitHub latest',
+    version: 'Catalog latest',
     minecraft: '26.1.2',
     channel: 'alpha',
-    summary: 'Minecraft/NeoForge Ashfall distribution built from ECHO module NeoForge jars.',
-    detail: 'Uses per-module -neoforge.jar artifacts from ECHO-Modules and NeoForge-specific pack configuration.',
+    summary: 'Minecraft/NeoForge Ashfall distribution built from approved Catalog install packages.',
+    detail: 'Uses Catalog-selected NeoForge package artifacts and NeoForge-specific pack configuration.',
     image: ashfallCardImage,
     moduleCount: 99,
   },
@@ -74,14 +61,13 @@ export const officialModpacks: OfficialModpack[] = [
     name: 'Ashfall Standalone Edition',
     runtimeMode: 'native-runtime',
     betaGate: 'runtime',
-    repo: 'knoxhack/ECHO-Ashfall-Standalone-Edition',
-    releaseFeed: githubFeed('ECHO-Ashfall-Standalone-Edition'),
+    catalogId: 'ashfall-standalone-edition',
     status: 'playable',
     phase: 'Experimental Alpha',
-    version: 'GitHub latest',
+    version: 'Catalog latest',
     minecraft: 'Standalone',
     channel: 'experimental',
-    summary: 'Standalone Ashfall runtime distribution built from ECHO module standalone jars.',
+    summary: 'Standalone Ashfall runtime distribution built from approved runtime install packages.',
     detail: 'Downloads Ashfall Standalone Edition packages and provides the non-Minecraft runtime path for Ashfall modules.',
     image: orbitalCardImage,
     moduleCount: 99,

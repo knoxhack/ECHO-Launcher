@@ -5,14 +5,11 @@ import {
   Gamepad2,
   MessageSquare,
   Monitor,
-  RadioTower,
-  RotateCcw,
   ShieldAlert,
   Terminal,
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { backupService } from '../../services/BackupService'
 import { installService } from '../../services/InstallService'
@@ -29,11 +26,11 @@ import { useReleaseStore } from '../../stores/releaseStore'
 import { useServerStatusStore } from '../../stores/serverStatusStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useStandaloneRuntimeStore } from '../../stores/standaloneRuntimeStore'
-import type { LauncherRuntimeModeId, MinecraftRuntimeModeId, StandaloneRuntimeModeCard } from '../../types/standaloneRuntime'
+import type { HealthStatus } from '../../types/launcher'
+import type { LauncherRuntimeModeId, MinecraftRuntimeModeId } from '../../types/standaloneRuntime'
 import type { NativeHandoffPreparationResult, NativeInstallResult } from '../../types/native'
 import { formatOfficialServerUpdatedAt, getOfficialServerRuntimeState } from '../../types/serverStatus'
-import { getAshfallHomeActions } from '../../utils/ashfallHomeActions'
-import { cn } from '../../utils/cn'
+import { getAshfallHomeActions, getAshfallHomeRoute } from '../../utils/ashfallHomeActions'
 import { OFFICIAL_ASHFALL_CHAT_CHANNEL_ID } from '../../utils/communityChat'
 import { officialServerSettingsDefaults } from '../../utils/officialServerSettings'
 import {
@@ -44,7 +41,7 @@ import {
   selectedPackOsPack,
 } from '../../utils/packosStatus'
 import { latestPlayableReleaseForPack, nativeLoaderMetadataStatus } from '../../utils/releaseValidation'
-import { buildRuntimeLaunchButtonState, buildRuntimeModeCards } from '../../utils/standaloneRuntimeShell'
+import { buildRuntimeLaunchButtonState, runtimeSummaryStatus } from '../../utils/standaloneRuntimeShell'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
 import { ProgressBar } from '../cyber/ProgressBar'
@@ -56,85 +53,17 @@ const runtimeModeIcons: Record<LauncherRuntimeModeId, LucideIcon> = {
   'native-runtime': Monitor,
 }
 
-const runtimeModeBadges: Record<LauncherRuntimeModeId, string> = {
-  'neoforge-minecraft': 'Uses Minecraft Launcher',
-  'native-loader-minecraft': 'ECHO Native Loader',
-  'native-runtime': 'Standalone beta',
-}
-
-const runtimeModeSkin: Record<LauncherRuntimeModeId, {
-  number: string
-  routeName: string
-  selectedClass: string
-  idleClass: string
-  iconClass: string
-  accentClass: string
-  panelClass: string
-}> = {
-  'neoforge-minecraft': {
-    number: '01',
-    routeName: 'Compatibility fallback',
-    selectedClass: 'border-cyan-echo/80 bg-cyan-echo/15 shadow-[0_0_34px_rgba(37,232,255,0.18)]',
-    idleClass: 'border-cyan-echo/20 bg-cyan-echo/[0.04] hover:border-cyan-echo/45 hover:bg-cyan-echo/10',
-    iconClass: 'border-cyan-echo/35 bg-cyan-echo/10 text-cyan-soft',
-    accentClass: 'bg-cyan-echo',
-    panelClass: 'border-cyan-echo/35 bg-cyan-echo/[0.07]',
-  },
-  'native-loader-minecraft': {
-    number: '02',
-    routeName: 'Primary Native lane',
-    selectedClass: 'border-amber-echo/80 bg-amber-echo/15 shadow-[0_0_34px_rgba(255,184,77,0.16)]',
-    idleClass: 'border-amber-echo/20 bg-amber-echo/[0.04] hover:border-amber-echo/45 hover:bg-amber-echo/10',
-    iconClass: 'border-amber-echo/35 bg-amber-echo/10 text-amber-echo',
-    accentClass: 'bg-amber-echo',
-    panelClass: 'border-amber-echo/35 bg-amber-echo/[0.07]',
-  },
-  'native-runtime': {
-    number: '03',
-    routeName: 'Standalone ECHO path',
-    selectedClass: 'border-success-echo/75 bg-success-echo/15 shadow-[0_0_34px_rgba(93,255,179,0.14)]',
-    idleClass: 'border-success-echo/20 bg-success-echo/[0.04] hover:border-success-echo/45 hover:bg-success-echo/10',
-    iconClass: 'border-success-echo/35 bg-success-echo/10 text-success-echo',
-    accentClass: 'bg-success-echo',
-    panelClass: 'border-success-echo/35 bg-success-echo/[0.07]',
-  },
-}
-
-const runtimeModeRoutes: Record<LauncherRuntimeModeId, {
-  title: string
-  subtitle: string
-  steps: Array<{ label: string; detail: string }>
-}> = {
-  'neoforge-minecraft': {
-    title: 'Minecraft opens through NeoForge',
-    subtitle: 'Compatibility fallback: Ashfall prepares NeoForge metadata, then hands off to the official Minecraft Launcher when fallback is selected or Native Loader is blocked.',
-    steps: [
-      { label: 'Ashfall files', detail: 'Install and verify pack content' },
-      { label: 'NeoForge profile', detail: 'Preserve the existing launcher profile' },
-      { label: 'Minecraft Launcher', detail: 'Player signs in and presses Play' },
-    ],
-  },
-  'native-loader-minecraft': {
-    title: 'Minecraft opens through ECHO Native Loader',
-    subtitle: 'Primary lane: Ashfall uses verified Native Loader metadata before handoff and does not silently launch NeoForge.',
-    steps: [
-      { label: 'Fixture runtime', detail: 'Verify local Minecraft artifacts' },
-      { label: 'Native launcher', detail: 'Run the ECHO Native handoff' },
-      { label: 'Ashfall client', detail: 'Start isolated Minecraft process' },
-    ],
-  },
-  'native-runtime': {
-    title: 'Standalone runtime beta checks',
-    subtitle: 'Parity harness: launch stays gated until standalone runtime metadata and local verification pass.',
-    steps: [
-      { label: 'Runtime checks', detail: 'Verify standalone ECHO runtime' },
-      { label: 'Native process', detail: 'Launch ECHO directly' },
-      { label: 'Beta gate', detail: 'Do not claim a finished standalone engine' },
-    ],
-  },
-}
-
 const minecraftRuntimeModes = new Set<LauncherRuntimeModeId>(['neoforge-minecraft', 'native-loader-minecraft'])
+
+interface HomeBlockerItem {
+  id: string
+  label: string
+  title: string
+  detail: string
+  status: HealthStatus
+  actionLabel?: string
+  action?: () => void | Promise<void>
+}
 
 export function HomePage() {
   const [launching, setLaunching] = useState(false)
@@ -376,7 +305,7 @@ export function HomePage() {
     setLastUpdate(null)
     addToast(
       'Preparing Ashfall',
-      installIntent ? `Installing the latest GitHub Ashfall release and preparing ${runtimeLabel}.` : `Checking Ashfall and preparing ${runtimeLabel}.`,
+      installIntent ? `Installing the latest approved Ashfall release and preparing ${runtimeLabel}.` : `Checking Ashfall and preparing ${runtimeLabel}.`,
       'info',
     )
     try {
@@ -430,13 +359,13 @@ export function HomePage() {
     }
   }
 
-  const updateAshfall = async () => {
+  const installOrUpdateAshfall = async (operation: 'install' | 'update') => {
     if (!latestRelease?.version) {
-      addToast('Update unavailable', 'Refresh the release feed before updating Ashfall.', 'warning')
+      addToast(`${operation === 'install' ? 'Install' : 'Update'} unavailable`, 'Refresh the Catalog before continuing.', 'warning')
       return
     }
     if (!isNativeAvailable()) {
-      addToast('Desktop app required', 'Ashfall updates require the Electron desktop app.', 'warning')
+      addToast('Desktop app required', 'Ashfall install and update actions require the Electron desktop app.', 'warning')
       return
     }
 
@@ -444,11 +373,11 @@ export function HomePage() {
     setLastPreparation(null)
     setLastUpdate(null)
     setHandoffProgress(4)
-    setHandoffStage('Preparing Ashfall update')
+    setHandoffStage(operation === 'install' ? 'Preparing Ashfall install' : 'Preparing Ashfall update')
     setHandoffDetail('')
-    addToast('Updating Ashfall', `Installing Ashfall ${latestRelease.version} without launching Minecraft.`, 'info')
+    addToast(operation === 'install' ? 'Installing Ashfall' : 'Updating Ashfall', `Installing Ashfall ${latestRelease.version}.`, 'info')
 
-    const operationId = launchService.createOperationId('update')
+    const operationId = launchService.createOperationId(operation)
     let pollTimer: number | undefined
     const pollStatus = async () => {
       try {
@@ -475,7 +404,7 @@ export function HomePage() {
       })
       setLastUpdate(result)
       setHandoffProgress(result.ok ? 100 : 96)
-      setHandoffStage(result.ok ? 'Update complete' : 'Update needs attention')
+      setHandoffStage(result.ok ? (operation === 'install' ? 'Install complete' : 'Update complete') : `${operation === 'install' ? 'Install' : 'Update'} needs attention`)
       setHandoffDetail(
         result.ok
           ? result.installPath
@@ -486,15 +415,15 @@ export function HomePage() {
         .catch(() => undefined)
       void refreshReadiness()
       addToast(
-        result.ok ? 'Ashfall updated' : 'Ashfall update needs attention',
+        result.ok ? (operation === 'install' ? 'Ashfall installed' : 'Ashfall updated') : `Ashfall ${operation} needs attention`,
         result.ok ? `Updated ${result.updated?.length ?? 0} and verified ${result.verified.length} files.` : 'Open Downloads for the full install report.',
         result.ok ? 'success' : 'danger',
       )
     } catch (error) {
       setHandoffProgress(96)
-      setHandoffStage('Update failed')
-      setHandoffDetail(error instanceof Error ? error.message : 'Unable to update Ashfall.')
-      addToast('Update failed', error instanceof Error ? error.message : 'Unable to update Ashfall.', 'danger')
+      setHandoffStage(operation === 'install' ? 'Install failed' : 'Update failed')
+      setHandoffDetail(error instanceof Error ? error.message : `Unable to ${operation} Ashfall.`)
+      addToast(operation === 'install' ? 'Install failed' : 'Update failed', error instanceof Error ? error.message : `Unable to ${operation} Ashfall.`, 'danger')
     } finally {
       if (pollTimer) window.clearInterval(pollTimer)
       setUpdating(false)
@@ -588,16 +517,7 @@ export function HomePage() {
       ? 'Standalone runtime verification controls launch readiness.'
       : 'Minecraft Launcher profile and Ashfall files are verified before handoff.')
   const minecraftReady = readiness?.minecraftLauncher?.ok ?? true
-  const runtimeCards = useMemo(
-    () =>
-      buildRuntimeModeCards(standaloneRuntimeState, {
-        minecraftReady,
-        nativeLoaderReady: nativeLoaderMetadata.ready,
-        nativeLoaderDisabledReason: nativeLoaderMetadata.checking ? 'Checking Native Loader metadata...' : nativeLoaderMetadata.reason,
-      }),
-    [minecraftReady, nativeLoaderMetadata.checking, nativeLoaderMetadata.ready, nativeLoaderMetadata.reason, standaloneRuntimeState],
-  )
-  const selectedRuntimeCard = runtimeCards.find((card) => card.id === selectedRuntimeMode) ?? runtimeCards[0]
+  const selectedRoute = getAshfallHomeRoute(selectedProfile)
   const selectedLaunchButton = buildRuntimeLaunchButtonState({
     mode: selectedRuntimeMode,
     state: standaloneRuntimeState,
@@ -609,146 +529,278 @@ export function HomePage() {
   })
   const selectedRuntimeIsMinecraft = minecraftRuntimeModes.has(selectedRuntimeMode)
   const selectedRuntimeBlocked = selectedLaunchButton.disabled || (selectedRuntimeIsMinecraft && packOsBlocked)
-  const selectedRuntimeActionLabel = selectedRuntimeIsMinecraft && installIntent && !selectedLaunchButton.disabled
-    ? homeActions.primaryActionLabel
-    : selectedLaunchButton.label
-  const selectedRuntimeRoute = runtimeModeRoutes[selectedRuntimeMode]
-
+  const primaryBusy = launching || updating || standaloneLaunching
+  const primaryDisabled =
+    primaryBusy ||
+    (homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
+      ? !isNativeAvailable() || !latestRelease?.version
+      : selectedRuntimeBlocked)
+  const cockpitStatus = homeActions.needsInstall
+    ? 'Not installed'
+    : homeActions.needsUpdate
+      ? 'Update available'
+      : selectedRuntimeBlocked
+        ? 'Blocked'
+        : 'Ready to play'
+  const cockpitStatusTone: HealthStatus = homeActions.needsInstall
+    ? 'missing'
+    : homeActions.needsUpdate
+      ? 'update_available'
+      : selectedRuntimeBlocked
+        ? 'critical'
+        : 'healthy'
+  const routeReadiness: { status: HealthStatus; detail: string } =
+    selectedRuntimeMode === 'native-runtime'
+      ? {
+          status: runtimeSummaryStatus(standaloneRuntimeState),
+          detail: standaloneRuntimeState?.ok ? 'Standalone runtime checks passed.' : standaloneRuntimeState?.warnings[0] ?? selectedLaunchButton.detail ?? 'Standalone runtime verification is required.',
+        }
+      : selectedRuntimeMode === 'native-loader-minecraft'
+        ? {
+            status: nativeLoaderMetadata.ready ? 'healthy' : 'warning',
+            detail: nativeLoaderMetadata.checking ? 'Checking Native Loader metadata.' : nativeLoaderMetadata.reason,
+          }
+        : {
+            status: minecraftReady ? 'healthy' : 'warning',
+            detail: readiness?.minecraftLauncher.warnings.join(' ') || 'Minecraft Launcher profile is ready.',
+          }
   const officialRuntimeState = getOfficialServerRuntimeState(officialStatus, officialStatusLoading, officialStatusError)
-  const officialRuntimeLabel: Record<typeof officialRuntimeState, string> = {
-    loading: 'Loading',
-    online: 'Online',
-    offline: 'Offline',
-    stale: 'Stale',
-    unavailable: 'Unavailable',
-  }
+  const officialRuntimeLabel = officialRuntimeState === 'online' ? 'Online' : officialRuntimeState === 'unavailable' ? 'Unavailable' : officialRuntimeState === 'offline' ? 'Offline' : 'Checking'
   const officialServerTitle = officialStatus?.serverName || officialServerName || officialServerSettingsDefaults.officialServerName
   const officialPlayerText = officialStatus ? `${officialStatus.playerCount} / ${officialStatus.maxPlayers || '--'}` : '-- / --'
-  const selectedRuntimeSkin = runtimeModeSkin[selectedRuntimeMode]
   const openOfficialServerChat = () => {
     setActiveChatChannel(OFFICIAL_ASHFALL_CHAT_CHANNEL_ID)
-    setActivePage('chat')
+    setActivePage('community')
   }
+  const openDiagnostics = () => {
+    setActiveToolsTab('diagnostics')
+    setActivePage('tools')
+  }
+  const openLibrary = () => {
+    setActivePage('library')
+  }
+  const handlePrimaryAction = async () => {
+    if (homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update') {
+      await installOrUpdateAshfall(homeActions.primaryActionKind)
+      return
+    }
+    await launchSelectedRuntime()
+  }
+  const primaryActionDetail = primaryDisabled
+    ? homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
+      ? !isNativeAvailable()
+        ? 'Desktop app required to install approved packages.'
+        : 'Catalog must load an approved release before this action is available.'
+      : packOsBlocked
+        ? packOsReason
+        : selectedLaunchButton.detail ?? 'This pack needs attention before launch.'
+    : homeActions.primaryActionKind === 'install'
+      ? 'Installs the approved package for the selected pack.'
+      : homeActions.primaryActionKind === 'update'
+        ? 'Updates installed files from the approved package.'
+        : `Starts ${selectedRoute.label} for the selected pack.`
+  const primaryButtonVariant =
+    primaryDisabled
+      ? 'ghost'
+      : homeActions.primaryActionKind === 'update'
+        ? 'warning'
+        : homeActions.primaryActionKind === 'launch-standalone'
+          ? 'success'
+          : 'primary'
+  const primaryButtonIcon =
+    homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
+      ? DownloadCloud
+      : runtimeModeIcons[selectedRuntimeMode]
+  const RouteIcon = runtimeModeIcons[selectedRuntimeMode]
+  const blockerItems: HomeBlockerItem[] = [
+    {
+      id: 'packos',
+      label: 'PackOS',
+      title: packOsBlocked ? 'Launch blocked' : packOsUiStateLabel(selectedPackOs?.uiState),
+      detail: packOsReason,
+      status: packOsStatus,
+      actionLabel: packOsBlocked ? 'Diagnostics' : undefined,
+      action: packOsBlocked ? openDiagnostics : undefined,
+    },
+    {
+      id: 'catalog',
+      label: 'Catalog',
+      title: latestRelease?.version ? `Approved ${latestRelease.version}` : 'No approved release loaded',
+      detail: latestRelease?.manifestSha256 ? 'Install package includes verified checksum metadata.' : 'Refresh the Catalog or open Library for release diagnostics.',
+      status: latestRelease?.version ? 'healthy' : 'warning',
+      actionLabel: 'Library',
+      action: openLibrary,
+    },
+    {
+      id: 'install',
+      label: 'Install',
+      title: readiness?.install.installed ? 'Installed' : 'Not installed yet',
+      detail: readiness?.install.installed ? readiness.install.installPath ?? selectedProfile.installPath ?? 'Install path ready.' : 'Use the primary action to install this pack.',
+      status: readiness?.install.installed ? 'healthy' : 'missing',
+      actionLabel: readiness?.install.installed ? undefined : 'Library',
+      action: readiness?.install.installed ? undefined : openLibrary,
+    },
+    {
+      id: 'route',
+      label: 'Launch route',
+      title: selectedRoute.label,
+      detail: routeReadiness.detail,
+      status: routeReadiness.status,
+      actionLabel: routeReadiness.status === 'healthy' || routeReadiness.status === 'operational' ? undefined : 'Diagnostics',
+      action: routeReadiness.status === 'healthy' || routeReadiness.status === 'operational' ? undefined : openDiagnostics,
+    },
+    {
+      id: 'backup',
+      label: 'Backup',
+      title: selectedProfile.installPath ? 'World backup available' : 'Install first',
+      detail: selectedProfile.installPath ? 'Create a save backup before major updates.' : 'Backups are available after the pack has an install folder.',
+      status: selectedProfile.installPath ? 'operational' : 'warning',
+      actionLabel: 'Backup',
+      action: handleBackup,
+    },
+    {
+      id: 'server',
+      label: 'Community',
+      title: `${officialServerTitle} ${officialRuntimeLabel}`,
+      detail: `${officialPlayerText} players / updated ${formatOfficialServerUpdatedAt(officialStatus)}`,
+      status: officialRuntimeState === 'online' ? 'operational' : officialRuntimeState === 'unavailable' ? 'critical' : 'warning',
+      actionLabel: 'Chat',
+      action: openOfficialServerChat,
+    },
+  ]
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_76px] gap-3 overflow-hidden">
-      <GlassCard className="grid min-h-0 grid-rows-[auto_160px_minmax(0,1fr)] gap-4 p-5" tone="cyan">
-        <div className="flex min-h-0 items-center justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-soft">Runtime</p>
-            <h1 className="truncate text-2xl font-semibold text-white">How should Ashfall launch?</h1>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <StatusChip compact label={selectedRuntimeCard.label} status={selectedLaunchButton.status} />
-            {homeActions.updateActionLabel ? (
-              <CyberButton disabled={launching || updating} icon={RotateCcw} onClick={() => void updateAshfall()} size="sm" variant="secondary">
-                {updating ? 'Updating...' : 'Update'}
-              </CyberButton>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid min-h-0 grid-cols-3 gap-3">
-          {runtimeCards.map((card) => (
-            <RuntimeChoiceCard
-              card={card}
-              key={card.id}
-              onSelect={() => {
-                const matchingProfile = profileForRuntimeMode[card.id] as typeof selectedProfile | undefined
-                if (matchingProfile) setSelectedProfileId(matchingProfile.id)
-              }}
-              selected={selectedRuntimeMode === card.id}
-            />
-          ))}
-        </div>
-
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px] gap-3">
-          <section className={cn('relative flex min-h-0 flex-col overflow-hidden rounded-lg border bg-black/20 p-4', selectedRuntimeSkin.panelClass)}>
-            <div className={cn('absolute left-0 top-0 h-full w-1', selectedRuntimeSkin.accentClass)} />
-            <div className="flex min-w-0 items-start justify-between gap-3 pl-2">
+    <>
+      <div className="grid h-full min-h-0 gap-3 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_360px] xl:overflow-hidden">
+        <section className="min-h-0 space-y-3 xl:overflow-y-auto">
+          <GlassCard className="space-y-5 p-5" tone="cyan">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">{runtimeModeBadges[selectedRuntimeMode]}</p>
-                <h2 className="mt-1 truncate text-xl font-semibold text-white">{selectedRuntimeCard.label}</h2>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-soft">Home</p>
+                <h1 className="mt-1 text-3xl font-semibold text-white">Can I play?</h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                  Select a modpack. ECHO derives the launch route from that pack and keeps the main action focused on getting you in.
+                </p>
               </div>
-              <StatusChip compact status={selectedRuntimeCard.status} />
+              <StatusChip label={cockpitStatus} status={cockpitStatusTone} />
             </div>
-            <p className="mt-3 line-clamp-3 pl-2 text-sm leading-5 text-slate-300">{selectedRuntimeRoute.subtitle}</p>
-            <div className="mt-auto grid grid-cols-3 gap-2 pl-2">
-              {selectedRuntimeRoute.steps.map((step, index) => (
-                <div className="min-w-0 rounded-md border border-white/10 bg-black/25 p-2" key={step.label}>
-                  <p className="font-mono text-[10px] font-bold text-cyan-soft">{String(index + 1).padStart(2, '0')}</p>
-                  <p className="mt-1 truncate text-xs font-semibold text-white">{step.label}</p>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
+              <label className="min-w-0 space-y-2" htmlFor="home-pack-select">
+                <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Select modpack</span>
+                <select
+                  className="h-12 w-full rounded-lg border border-cyan-echo/25 bg-black/35 px-3 text-sm font-semibold text-white outline-none transition focus:border-cyan-echo focus:ring-2 focus:ring-cyan-echo/20"
+                  id="home-pack-select"
+                  onChange={(event) => setSelectedProfileId(event.target.value)}
+                  value={selectedProfile.id}
+                >
+                  {profiles.map((profile) => (
+                    <option className="bg-slate-950 text-white" key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="rounded-lg border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Selected pack</p>
+                <p className="mt-2 truncate text-base font-semibold text-white" title={selectedProfile.name}>
+                  {selectedProfile.name}
+                </p>
+                <p className="mt-1 truncate text-xs text-slate-400" title={selectedProfile.version}>
+                  Installed {selectedProfile.version}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Primary action</p>
+                  <p className="mt-1 text-sm leading-5 text-slate-300" title={primaryActionDetail}>
+                    {primaryActionDetail}
+                  </p>
                 </div>
+                <CyberButton
+                  className="w-full shrink-0 sm:w-auto"
+                  disabled={primaryDisabled}
+                  icon={primaryButtonIcon}
+                  onClick={() => void handlePrimaryAction()}
+                  size="lg"
+                  variant={primaryButtonVariant}
+                >
+                  {primaryBusy ? homeActions.primaryBusyLabel : homeActions.primaryActionLabel}
+                </CyberButton>
+              </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+              <section className="min-w-0 rounded-lg border border-cyan-echo/20 bg-cyan-echo/[0.045] p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyan-echo/25 bg-black/35 text-cyan-soft">
+                    <RouteIcon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Launch route</p>
+                    <h2 className="mt-1 text-xl font-semibold text-white">{selectedRoute.label}</h2>
+                    <p className="mt-2 text-sm leading-5 text-slate-300">{selectedRoute.detail}</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {selectedRoute.steps.map((step, index) => (
+                    <RouteStep index={index} key={step} label={step} />
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-white/10 bg-black/30 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Readiness</p>
+                    <h2 className="mt-1 truncate text-base font-semibold text-white">{visibleStage}</h2>
+                  </div>
+                  <span className="font-mono text-xs text-slate-300">{Math.round(visibleProgress)}%</span>
+                </div>
+                <div className="mt-3">
+                  <ProgressBar tone={progressTone} value={visibleProgress} />
+                </div>
+                <p className="mt-3 line-clamp-4 text-xs leading-5 text-slate-300" title={visibleDetail}>
+                  {visibleDetail}
+                </p>
+              </section>
+            </div>
+          </GlassCard>
+        </section>
+
+        <aside className="min-h-0 space-y-3 xl:overflow-y-auto">
+          <GlassCard className="space-y-3 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Blockers first</p>
+                <h2 className="mt-1 text-lg font-semibold text-white">What needs attention</h2>
+              </div>
+              <StatusChip compact label={officialRuntimeLabel} status={officialRuntimeState === 'online' ? 'operational' : officialRuntimeState === 'unavailable' ? 'critical' : 'warning'} />
+            </div>
+            <div className="space-y-2">
+              {blockerItems.map((item) => (
+                <BlockerRow item={item} key={item.id} />
               ))}
             </div>
-          </section>
+          </GlassCard>
 
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-black/30 p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Ready Check</p>
-                <h2 className="truncate text-base font-semibold text-white">{visibleStage}</h2>
-              </div>
-              <span className="font-mono text-xs text-slate-300">{Math.round(visibleProgress)}%</span>
-            </div>
-            <div className="mt-3">
-              <ProgressBar tone={progressTone} value={visibleProgress} />
-            </div>
-            <p className="mt-3 line-clamp-3 text-xs leading-5 text-slate-300" title={visibleDetail}>{visibleDetail}</p>
-            <div className="mt-auto space-y-2">
-              <CyberButton
-                className="w-full"
-                disabled={selectedRuntimeBlocked}
-                icon={selectedRuntimeMode === 'native-runtime' ? Monitor : installIntent ? DownloadCloud : runtimeModeIcons[selectedRuntimeMode]}
-                onClick={() => void launchSelectedRuntime()}
-                size="lg"
-                variant={selectedRuntimeBlocked ? 'ghost' : selectedRuntimeMode === 'native-loader-minecraft' ? 'warning' : selectedRuntimeMode === 'native-runtime' ? 'success' : 'primary'}
-              >
-                {selectedRuntimeActionLabel}
-              </CyberButton>
-              <p className="line-clamp-2 text-xs leading-4 text-slate-500" title={selectedLaunchButton.detail ?? selectedRuntimeCard.detail}>
-                {selectedLaunchButton.detail ?? selectedRuntimeCard.detail}
-              </p>
-            </div>
-          </section>
-        </div>
-      </GlassCard>
-
-      <GlassCard className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-4 p-3">
-        <SupportLine
-          detail={`${officialPlayerText} players / updated ${formatOfficialServerUpdatedAt(officialStatus)}`}
-          icon={RadioTower}
-          label="Server"
-          status={<StatusChip compact label={officialRuntimeLabel[officialRuntimeState]} status={officialRuntimeState === 'online' ? 'operational' : officialRuntimeState === 'unavailable' ? 'critical' : 'warning'} />}
-          title={officialServerTitle}
-        />
-        <SupportLine
-          detail={packOsReason}
-          icon={ShieldAlert}
-          label="PackOS"
-          status={<StatusChip compact label={packOsUiStateLabel(selectedPackOs?.uiState)} status={packOsStatus} />}
-          title={selectedPackOs?.name ?? 'Ashfall'}
-        />
-        <div className="flex shrink-0 items-center gap-2">
-          <CyberButton icon={MessageSquare} onClick={openOfficialServerChat} size="sm" variant="secondary">
-            Chat
-          </CyberButton>
-          <CyberButton
-            icon={ShieldAlert}
-            onClick={() => {
-              setActiveToolsTab('diagnostics')
-              setActivePage('tools')
-            }}
-            size="sm"
-            variant={packOsBlocked ? 'warning' : 'secondary'}
-          >
-            Diagnostics
-          </CyberButton>
-          <CyberButton icon={Archive} onClick={handleBackup} size="sm" variant="warning">
-            Backup
-          </CyberButton>
-        </div>
-      </GlassCard>
+          <GlassCard className="grid gap-2 p-3">
+            <CyberButton icon={MessageSquare} onClick={openOfficialServerChat} size="sm" variant="secondary">
+              Community
+            </CyberButton>
+            <CyberButton icon={ShieldAlert} onClick={openDiagnostics} size="sm" variant={packOsBlocked ? 'warning' : 'secondary'}>
+              Diagnostics
+            </CyberButton>
+            <CyberButton icon={Archive} onClick={() => void handleBackup()} size="sm" variant="warning">
+              Backup
+            </CyberButton>
+          </GlassCard>
+        </aside>
+      </div>
 
       <Dialog.Root onOpenChange={setWorldgenOpen} open={worldgenOpen}>
         <Dialog.Portal>
@@ -769,84 +821,48 @@ export function HomePage() {
               Back up your world before updating. ECHO never includes saves in modpack exports.
             </div>
             <div className="mt-5 flex flex-wrap gap-2">
-              <CyberButton icon={Archive} onClick={handleBackup} variant="secondary">
+              <CyberButton icon={Archive} onClick={() => void handleBackup()} variant="secondary">
                 Backup World
               </CyberButton>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+    </>
+  )
+}
+
+function RouteStep({ index, label }: { index: number; label: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-white/10 bg-black/25 p-3">
+      <p className="font-mono text-[10px] font-bold text-cyan-soft">{String(index + 1).padStart(2, '0')}</p>
+      <p className="mt-1 text-xs font-semibold leading-4 text-white">{label}</p>
     </div>
   )
 }
 
-function RuntimeChoiceCard({
-  card,
-  onSelect,
-  selected,
-}: {
-  card: StandaloneRuntimeModeCard
-  onSelect: () => void
-  selected: boolean
-}) {
-  const Icon = runtimeModeIcons[card.id]
-  const skin = runtimeModeSkin[card.id]
-
+function BlockerRow({ item }: { item: HomeBlockerItem }) {
   return (
-    <button
-      aria-pressed={selected}
-      className={cn(
-        'group relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border p-4 text-left transition hover:-translate-y-px',
-        selected ? skin.selectedClass : skin.idleClass,
-      )}
-      onClick={onSelect}
-      type="button"
-    >
-      <div className={cn('absolute left-0 top-0 h-full w-1', skin.accentClass, selected ? 'opacity-100' : 'opacity-45')} />
+    <div className="rounded-lg border border-white/10 bg-black/25 p-3">
       <div className="flex items-start justify-between gap-3">
-        <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border', skin.iconClass)}>
-          <Icon className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <StatusChip compact status={card.status} />
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-soft">{item.label}</p>
+          <p className="mt-1 text-sm font-semibold text-white" title={item.title}>
+            {item.title}
+          </p>
+        </div>
+        <StatusChip compact status={item.status} />
       </div>
-      <div className="mt-3 min-w-0">
-        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{card.eyebrow}</p>
-        <h2 className="mt-1 line-clamp-2 text-base font-semibold leading-5 text-white">{card.label}</h2>
-        <p className="mt-2 line-clamp-2 text-xs leading-4 text-slate-300">{card.detail}</p>
-      </div>
-      <div className="mt-auto pt-3">
-        <p className={cn('truncate text-[10px] font-bold uppercase', card.id === 'native-runtime' ? 'text-success-echo' : 'text-amber-echo')}>
-          {runtimeModeBadges[card.id]}
-        </p>
-      </div>
-    </button>
-  )
-}
-
-function SupportLine({
-  detail,
-  icon: Icon,
-  label,
-  status,
-  title,
-}: {
-  detail: string
-  icon: LucideIcon
-  label: string
-  status?: ReactNode
-  title: string
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-echo/20 bg-black/30 text-cyan-soft">
-        <Icon className="h-4 w-4" aria-hidden="true" />
-      </span>
-      <div className="min-w-0">
-        <p className="truncate text-[10px] font-bold uppercase tracking-[0.12em] text-cyan-soft">{label}</p>
-        <p className="truncate text-sm font-semibold text-white" title={title}>{title}</p>
-        <p className="truncate text-xs text-slate-400" title={detail}>{detail}</p>
-      </div>
-      {status}
+      <p className="mt-2 text-xs leading-5 text-slate-400" title={item.detail}>
+        {item.detail}
+      </p>
+      {item.action && item.actionLabel ? (
+        <div className="mt-3">
+          <CyberButton onClick={() => void item.action?.()} size="sm" variant="ghost">
+            {item.actionLabel}
+          </CyberButton>
+        </div>
+      ) : null}
     </div>
   )
 }

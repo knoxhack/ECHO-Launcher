@@ -1,33 +1,39 @@
 import {
-  Activity,
-  Boxes,
-  DownloadCloud,
-  FileText,
   Home,
   MessageSquare,
-  Monitor,
   PackageOpen,
-  UploadCloud,
-  Server,
   Settings,
   Wrench,
 } from 'lucide-react'
-import type { NavItem, PageId } from '../../types/launcher'
+import type { LegacyPageId, NavItem, PageId } from '../../types/launcher'
 
 export const navItems: NavItem[] = [
   { id: 'home', label: 'Home', icon: Home },
-  { id: 'runtime', label: 'Runtime', icon: Monitor },
-  { id: 'modpacks', label: 'Official Packs', icon: PackageOpen },
-  { id: 'profiles', label: 'Loadout', icon: Boxes },
-  { id: 'servers', label: 'Servers', icon: Server },
-  { id: 'chat', label: 'Community', icon: MessageSquare },
-  { id: 'ecosystem', label: 'ECHO Ecosystem', icon: Activity },
-  { id: 'publisher', label: 'Publisher', icon: UploadCloud, requiresCreator: true },
+  { id: 'library', label: 'Library', icon: PackageOpen },
+  { id: 'community', label: 'Community', icon: MessageSquare },
   { id: 'tools', label: 'Tools', icon: Wrench },
   { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'downloads', label: 'Downloads', icon: DownloadCloud },
-  { id: 'logs', label: 'Logs', icon: FileText },
 ]
+
+const legacyPageMap: Record<Exclude<LegacyPageId, PageId>, PageId> = {
+  runtime: 'library',
+  modpacks: 'library',
+  downloads: 'library',
+  profiles: 'library',
+  logs: 'tools',
+  ecosystem: 'tools',
+  servers: 'community',
+  chat: 'community',
+  publisher: 'home',
+}
+
+const currentPageIds = new Set<PageId>(navItems.map((item) => item.id))
+
+export function normalizePageId(pageId?: string | null): PageId {
+  if (!pageId) return 'home'
+  if (currentPageIds.has(pageId as PageId)) return pageId as PageId
+  return legacyPageMap[pageId as Exclude<LegacyPageId, PageId>] ?? 'home'
+}
 
 export function getVisibleNavItems(settings: { advancedMode?: boolean; creatorMode?: boolean }) {
   return navItems.filter((item) => {
@@ -38,5 +44,5 @@ export function getVisibleNavItems(settings: { advancedMode?: boolean; creatorMo
 }
 
 export function getPageLabel(pageId: PageId) {
-  return navItems.find((item) => item.id === pageId)?.label ?? 'ECHO Launcher'
+  return navItems.find((item) => item.id === normalizePageId(pageId))?.label ?? 'ECHO Launcher'
 }

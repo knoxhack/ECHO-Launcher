@@ -36,8 +36,8 @@ export function DesktopRequiredScreen() {
                 </div>
               </div>
               <p className="max-w-2xl text-sm leading-7 text-slate-300">
-                Version 3 is a strict desktop launcher. Minecraft Launcher handoff, install, repair, GitHub
-                release feeds, verified downloads, NeoForge handling, imports, backups, diagnostics, and server exports
+                Version 3 is a strict desktop launcher. Minecraft Launcher handoff, install, repair, Catalog
+                releases, verified downloads, NeoForge handling, imports, backups, diagnostics, and server exports
                 require the Electron native bridge.
               </p>
               <div className="mt-6 rounded-lg border border-amber-echo/40 bg-amber-echo/10 p-4 text-sm leading-6 text-amber-100">
@@ -53,7 +53,7 @@ export function DesktopRequiredScreen() {
 
             <div className="space-y-3">
               {[
-                { icon: DownloadCloud, label: 'GitHub release manifests', value: 'blocked in browser' },
+                { icon: DownloadCloud, label: 'Catalog install packages', value: 'blocked in browser' },
                 { icon: ShieldCheck, label: 'SHA-256 install repair', value: 'desktop only' },
                 { icon: MonitorCog, label: 'NeoForge installer path', value: 'allowlisted native flow' },
               ].map((item) => {

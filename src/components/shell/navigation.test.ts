@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { getVisibleNavItems } from './navigation'
+import { getVisibleNavItems, normalizePageId } from './navigation'
 
 describe('navigation visibility', () => {
-  it('hides creator tooling in default tester mode', () => {
+  it('shows the catalog-first player flow', () => {
     const ids = getVisibleNavItems({ advancedMode: false, creatorMode: false }).map((item) => item.id)
-    expect(ids).toContain('home')
-    expect(ids).toContain('runtime')
-    expect(ids).toContain('chat')
-    expect(ids).toContain('modpacks')
-    expect(ids).not.toContain('publisher')
+    expect(ids).toEqual(['home', 'library', 'community', 'tools', 'settings'])
   })
 
-  it('shows publisher tooling only in creator mode', () => {
-    expect(getVisibleNavItems({ advancedMode: true, creatorMode: false }).map((item) => item.id)).not.toContain('publisher')
-    expect(getVisibleNavItems({ advancedMode: true, creatorMode: true }).map((item) => item.id)).toContain('publisher')
+  it('maps legacy pages into the new top-level pages', () => {
+    expect(normalizePageId('runtime')).toBe('library')
+    expect(normalizePageId('modpacks')).toBe('library')
+    expect(normalizePageId('downloads')).toBe('library')
+    expect(normalizePageId('profiles')).toBe('library')
+    expect(normalizePageId('logs')).toBe('tools')
+    expect(normalizePageId('ecosystem')).toBe('tools')
+    expect(normalizePageId('servers')).toBe('community')
+    expect(normalizePageId('chat')).toBe('community')
+    expect(normalizePageId('publisher')).toBe('home')
+    expect(normalizePageId('unknown')).toBe('home')
   })
 })

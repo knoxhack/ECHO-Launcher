@@ -1,26 +1,18 @@
 import type { Channel } from './launcher'
 import type { OfficialPackId } from './manifests'
 
-export type ReleaseProvider = 'github'
 export type LaunchMode = 'minecraft_launcher'
-
-export interface ReleaseFeedConfig {
-  provider: ReleaseProvider
-  owner: string
-  repo: string
-  includePrereleases: boolean
-}
 
 export interface ReleaseIndexConfig {
   enabled: boolean
   channelUrl: string
 }
 
-export interface PublisherSettings {
-  owner: string
-  repo: string
-  hasToken: boolean
+export interface ReleaseIndexSource {
+  provider: 'release-index'
+  channelUrl: string
 }
+
 
 export type MobileBridgeDeviceRole = 'VIEWER' | 'PLAYER' | 'DEVELOPER' | 'ADMIN'
 
@@ -66,9 +58,7 @@ export interface MobileBridgeState extends MobileBridgeSettings {
 }
 
 export interface LauncherDesktopSettings {
-  releaseFeed: ReleaseFeedConfig
   releaseIndex: ReleaseIndexConfig
-  publisher: PublisherSettings
   supportGuideUrl: string
   launchMode: LaunchMode
   advancedMode: boolean
@@ -188,7 +178,7 @@ export interface RejectedRelease {
 
 export interface ReleaseIndex {
   cacheVersion?: number
-  source: ReleaseFeedConfig
+  source: ReleaseIndexSource
   fetchedAt: string
   releases: ReleaseEntry[]
   acceptedCount?: number

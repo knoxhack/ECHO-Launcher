@@ -24,7 +24,7 @@ export class DownloadService {
   }
 
   async verifyHash(downloadId: string) {
-    return { downloadId, verified: downloadId !== 'download-configs' }
+    return { downloadId, verified: false }
   }
 
   async downloadFile(url: string, destination?: string, sha256?: string) {

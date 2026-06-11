@@ -325,7 +325,7 @@ describe('mobile bridge helpers', () => {
     const snapshot = mobileBridge.buildAndroidCommandCenterSnapshot({
       role: 'PLAYER',
       bridgeUrl: 'http://192.168.1.25:4177/api/',
-      profile: { version: 'GitHub latest', status: 'missing' },
+      profile: { version: 'Catalog latest', status: 'missing' },
     })
 
     expect((snapshot.homeStatus as { server: string; minecraftChatBridge: string; ashfall: string }).server).toBe('Unknown')

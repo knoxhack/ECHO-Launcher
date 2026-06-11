@@ -54,6 +54,17 @@ const {
   minecraftLauncherExecutableCandidatesForPlatform,
   minecraftLauncherRootsForPlatform,
 } = require('./platform-support.cjs')
+const {
+  normalizeOfficialPackId,
+  canonicalArtifactRecords,
+  artifactForPackTarget,
+  dependencyClosure,
+  parseEchoProtocolUrl,
+  resolveEchoProtocolEntry,
+  releaseEntryFromCanonicalModpack,
+  productUpdateArtifact,
+  productUpdateSelection,
+} = require('./release-index-resolver.mjs')
 let autoUpdater = null
 try {
   autoUpdater = require('electron-updater').autoUpdater
@@ -83,7 +94,7 @@ const LEGACY_ASHFALL_PROFILE_ID = 'ashfall'
 const CANONICAL_PROFILE_ID = 'ashfall-native-edition'
 const CANONICAL_PROFILE_NAME = 'Ashfall Native Edition'
 const CANONICAL_CHANNEL = 'alpha'
-const CANONICAL_VERSION = 'GitHub latest'
+const CANONICAL_VERSION = 'Catalog latest'
 const OFFICIAL_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
@@ -99,7 +110,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
   {
     id: 'ashfall-neoforge-edition',
     name: 'Ashfall NeoForge Edition',
-    runtimeMode: 'native-loader-minecraft',
+    runtimeMode: 'neoforge-minecraft',
     channelLabel: 'Alpha',
     installFolder: 'Ashfall NeoForge Edition',
     minecraft: '26.1.2',
@@ -122,20 +133,9 @@ const OFFICIAL_SERVER_STATUS_URL = process.env.ECHO_OFFICIAL_SERVER_STATUS_URL |
 const OFFICIAL_COMMUNITY_API_URL = process.env.ECHO_COMMUNITY_API_URL || 'https://api.echoplatform.dev'
 const OFFICIAL_COMMUNITY_WEBSOCKET_URL = process.env.ECHO_COMMUNITY_WEBSOCKET_URL || 'wss://api.echoplatform.dev/v1/chat/socket'
 const DEFAULT_DESKTOP_SETTINGS = {
-  releaseFeed: {
-    provider: 'github',
-    owner: 'knoxhack',
-    repo: 'ECHO-Ashfall-Native-Edition',
-    includePrereleases: true,
-  },
   releaseIndex: {
     enabled: true,
     channelUrl: CANONICAL_RELEASE_INDEX_CHANNEL_URL,
-  },
-  publisher: {
-    owner: 'knoxhack',
-    repo: 'ECHO-Launcher',
-    hasToken: false,
   },
   supportGuideUrl: '',
   launchMode: 'minecraft_launcher',
@@ -247,12 +247,6 @@ function manifestAssetName(channel, version, pack = CANONICAL_PROFILE_ID) {
   return `${pack}-${channel}-${version}.pack.json`
 }
 
-function normalizeOfficialPackId(pack) {
-  const value = String(pack ?? '').trim().toLowerCase()
-  if (value === LEGACY_ASHFALL_PROFILE_ID || value === 'ashfall-stable') return CANONICAL_PROFILE_ID
-  if (value === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
-  return OFFICIAL_PACK_IDS.has(value) ? value : undefined
-}
 
 function profileDefinition(profileId) {
   const normalized = normalizeOfficialPackId(profileId) ?? CANONICAL_PROFILE_ID
@@ -314,6 +308,9 @@ function mergeSettings(settings) {
   delete safeSettings.devOfflineLaunch
   delete safeSettings.minecraftLauncherHandoffConfirmed
   delete safeSettings.launchMode
+  delete safeSettings.releaseFeed
+  delete safeSettings.publisher
+  delete safeSettings.publisherToken
   const communityChatPortMigrationVersion = Number(settings?.communityChatPortMigrationVersion ?? 0)
   const rawOfficialServerStatusUrl = String(settings?.officialServerStatusUrl ?? DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl).trim() || DEFAULT_DESKTOP_SETTINGS.officialServerStatusUrl
   const officialServerStatusUrl = communityChatPortMigrationVersion < 2 && isLegacyOfficialServerStatusUrl(rawOfficialServerStatusUrl)
@@ -326,26 +323,11 @@ function mergeSettings(settings) {
   return {
     ...DEFAULT_DESKTOP_SETTINGS,
     ...safeSettings,
-    releaseFeed: {
-      ...DEFAULT_DESKTOP_SETTINGS.releaseFeed,
-      ...(settings?.releaseFeed ?? {}),
-      provider: 'github',
-      owner: String(settings?.releaseFeed?.owner ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseFeed.owner,
-      repo: String(settings?.releaseFeed?.repo ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseFeed.repo,
-      includePrereleases: settings?.releaseFeed?.includePrereleases ?? true,
-    },
     releaseIndex: {
       ...DEFAULT_DESKTOP_SETTINGS.releaseIndex,
       ...(settings?.releaseIndex ?? {}),
-      enabled: settings?.releaseIndex?.enabled ?? true,
+      enabled: true,
       channelUrl: String(settings?.releaseIndex?.channelUrl ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.releaseIndex.channelUrl,
-    },
-    publisher: {
-      ...DEFAULT_DESKTOP_SETTINGS.publisher,
-      ...(settings?.publisher ?? {}),
-      owner: String(settings?.publisher?.owner ?? settings?.releaseFeed?.owner ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.publisher.owner,
-      repo: String(settings?.publisher?.repo ?? settings?.releaseFeed?.repo ?? '').trim() || DEFAULT_DESKTOP_SETTINGS.publisher.repo,
-      hasToken: Boolean(settings?.publisher?.hasToken),
     },
     supportGuideUrl: String(settings?.supportGuideUrl ?? ''),
     launchMode: DEFAULT_DESKTOP_SETTINGS.launchMode,
@@ -718,7 +700,6 @@ async function readSettings() {
   const paths = getPaths()
   const settings = await readJson(paths.settings, DEFAULT_DESKTOP_SETTINGS)
   const merged = mergeSettings(settings)
-  merged.publisher.hasToken = await exists(publisherTokenPath())
   return merged
 }
 
@@ -727,21 +708,9 @@ async function writeSettings(patch) {
   const next = mergeSettings({
     ...current,
     ...(patch ?? {}),
-    releaseFeed: {
-      ...current.releaseFeed,
-      ...(patch?.releaseFeed ?? {}),
-    },
-    publisher: {
-      ...current.publisher,
-      ...(patch?.publisher ?? {}),
-    },
   })
   await writeJson(getPaths().settings, next)
   return next
-}
-
-function publisherTokenPath() {
-  return path.join(getPaths().auth, 'github-publisher-token')
 }
 
 function getPlatformInfo() {
@@ -751,22 +720,6 @@ function getPlatformInfo() {
     env: process.env,
     packaged: app.isPackaged,
   })
-}
-
-async function readPublisherToken() {
-  const tokenPath = publisherTokenPath()
-  if (!(await exists(tokenPath))) return ''
-  return (await fs.readFile(tokenPath, 'utf8')).trim()
-}
-
-async function writePublisherToken(token) {
-  const tokenPath = publisherTokenPath()
-  await ensureDir(path.dirname(tokenPath))
-  await fs.writeFile(tokenPath, String(token ?? '').trim(), { encoding: 'utf8', mode: 0o600 })
-}
-
-async function deletePublisherToken() {
-  await fs.rm(publisherTokenPath(), { force: true }).catch(() => undefined)
 }
 
 function getPaths() {
@@ -1541,7 +1494,7 @@ async function manifestLoad(payload = {}) {
     const manifestPath = normalizePath(payload.manifestPath)
     const manifest = await readJson(manifestPath, null)
     if (!manifest) {
-      throw new Error(`Pack manifest was not found at ${manifestPath}. Install or refresh the latest strict GitHub release.`)
+      throw new Error(`Pack manifest was not found at ${manifestPath}. Install or refresh the latest approved Catalog release.`)
     }
     return validatePackManifest(manifest, { allowLocalPlaceholders: false })
   }
@@ -2499,127 +2452,13 @@ async function releaseIndexProduct(payload = {}) {
   return { entry: null, warnings }
 }
 
-function canonicalArtifactRecords(artifacts) {
-  const records = []
-  const visit = (node, role = 'asset') => {
-    if (Array.isArray(node)) {
-      node.forEach((item) => visit(item, role))
-      return
-    }
-    if (!node || typeof node !== 'object') return
-    if (node.file || node.name || node.filename || node.url || node.sha256) {
-      records.push({
-        role,
-        name: String(node.file ?? node.name ?? node.filename ?? role),
-        url: String(node.url ?? node.downloadUrl ?? ''),
-        size: Number(node.size ?? 0),
-        sha256: node.sha256 ? String(node.sha256) : undefined,
-      })
-    }
-    for (const [key, value] of Object.entries(node)) visit(value, key)
-  }
-  visit(artifacts)
-  return records
-}
-
-function artifactForPackTarget(entry, pack) {
-  const target = normalizeOfficialPackId(pack) ?? 'ashfall-native-edition'
-  const artifacts = canonicalArtifactRecords(entry.artifacts)
-  if (target === 'ashfall-neoforge-edition') return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
-  if (target === 'ashfall-standalone-edition') return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
-  return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
-}
-
-function dependencyClosure(entries, rootIds) {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]))
-  const seen = new Set()
-  const out = []
-  const visit = (id) => {
-    if (seen.has(id)) return
-    const entry = byId.get(id)
-    if (!entry) throw new Error(`Missing Release Index dependency ${id}.`)
-    if (entry.validation === 'blocked') throw new Error(`Blocked Release Index dependency ${id}.`)
-    if (entry.validation !== 'approved') throw new Error(`Unapproved Release Index dependency ${id}.`)
-    seen.add(id)
-    for (const dependency of entry.dependencies ?? []) visit(dependency.id)
-    out.push(entry)
-  }
-  rootIds.forEach(visit)
-  return out
-}
-
-function productUpdateArtifact(entry, compatibility = '') {
-  const usable = canonicalArtifactRecords(entry.artifacts)
-    .map((artifact) => {
-      if (!artifact.url || !artifact.sha256) return null
-      return {
-        artifact,
-        releaseAsset: {
-          name: artifact.name,
-          url: artifact.url,
-          size: artifact.size,
-          sha256: artifact.sha256,
-        },
-      }
-    })
-    .filter(Boolean)
-  if (!usable.length) return null
-  const normalizedCompatibility = String(compatibility ?? '').trim().toLowerCase()
-  if (normalizedCompatibility) {
-    const tokens = normalizedCompatibility.split(/[^a-z0-9]+/u).filter(Boolean)
-    const compatible = usable.find(({ artifact }) => {
-      const haystack = `${artifact.role} ${artifact.name}`.toLowerCase()
-      return tokens.every((token) => haystack.includes(token))
-        || (normalizedCompatibility === 'windows-x64' && /(windows|win|setup|installer).*x?64|x?64.*(windows|win|setup|installer)/iu.test(haystack))
-    })
-    if (compatible) return compatible.releaseAsset
-  }
-  return usable[0].releaseAsset
-}
-
-function canonicalReleaseEntryFromModpack(entry, fetchedAt) {
-  if (entry.validation !== 'approved' || entry.kind !== 'modpack') return null
-  const artifacts = canonicalArtifactRecords(entry.artifacts)
-  const manifest = artifacts.find((artifact) => artifact.role === 'manifest' || /\.pack\.json$/i.test(artifact.name))
-  if (!manifest?.url || !manifest.sha256) return null
-  const pack = artifacts.find((artifact) => artifact.role === 'pack' || /\.zip$/i.test(artifact.name))
-  const sourceRepo = String(entry.sourceRepo)
-  const releasePageUrl = `https://github.com/${sourceRepo}/releases/tag/${encodeURIComponent(entry.releaseTag)}`
-  return {
-    id: `release-index:${entry.id}:${entry.version}`,
-    pack: normalizeOfficialPackId(entry.id) ?? entry.id,
-    version: entry.version,
-    channel: entry.channel,
-    tagName: entry.releaseTag,
-    name: `${entry.id} ${entry.version}`,
-    draft: false,
-    prerelease: entry.channel !== 'stable',
-    publishedAt: entry.publishedAt ?? fetchedAt ?? isoNow(),
-    releasePageUrl,
-    releaseNotes: [`Resolved through ECHO Release Index entry ${entry.id}.`],
-    manifestAssetName: manifest.name,
-    manifestUrl: manifest.url,
-    manifestSha256: manifest.sha256,
-    metadataUrl: undefined,
-    trust: 'verified-metadata',
-    assets: artifacts.map((artifact) => ({
-      name: artifact.name,
-      url: artifact.url,
-      browser_download_url: artifact.url,
-      size: artifact.size,
-      sha256: artifact.sha256,
-      releaseTag: entry.releaseTag,
-      releasePageUrl,
-    })),
-  }
-}
 
 async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
   if (!settings.releaseIndex?.enabled) return index
   try {
     const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
     const canonicalEntries = catalog.entries
-      .map((entry) => canonicalReleaseEntryFromModpack(entry, catalog.fetchedAt))
+      .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
       .filter(Boolean)
     const byKey = new Map()
     for (const entry of [...canonicalEntries, ...index.releases]) {
@@ -2662,7 +2501,7 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
 async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWarnings = []) {
   const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
   const releases = catalog.entries
-    .map((entry) => canonicalReleaseEntryFromModpack(entry, catalog.fetchedAt))
+    .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
     .filter(Boolean)
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
   return {
@@ -2682,33 +2521,6 @@ async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWa
     latestPlayableRelease: releases[0] ?? null,
     warnings: [...extraWarnings, ...catalog.warnings],
   }
-}
-
-function parseEchoProtocolUrl(rawUrl) {
-  let parsed
-  try {
-    parsed = new URL(String(rawUrl))
-  } catch {
-    return null
-  }
-  if (parsed.protocol !== 'echo:') return null
-  const parts = [parsed.hostname, ...parsed.pathname.split('/').filter(Boolean)].filter(Boolean)
-  if (parts[0] === 'install' && parts[1] === 'addon' && parts[2]) {
-    return {
-      rawUrl: String(rawUrl),
-      action: 'install-addon',
-      id: decodeURIComponent(parts[2]).toLowerCase(),
-      pack: normalizeOfficialPackId(parsed.searchParams.get('pack')),
-    }
-  }
-  if (parts[0] === 'update' && parts[1] === 'pack' && parts[2]) {
-    return {
-      rawUrl: String(rawUrl),
-      action: 'update-pack',
-      id: normalizeOfficialPackId(decodeURIComponent(parts[2])) ?? decodeURIComponent(parts[2]).toLowerCase(),
-    }
-  }
-  return null
 }
 
 async function resolveEchoProtocolUrl(rawUrl) {
@@ -2863,14 +2675,6 @@ async function backupFileIfExists(sourcePath, backupRoot, relativePath) {
   return backupPath
 }
 
-function requireReleaseConfig(settings) {
-  const config = settings.releaseFeed
-  if (!config.owner || !config.repo) {
-    throw new Error('GitHub release feed is not configured. Add an official pack owner and repository in Settings.')
-  }
-  return config
-}
-
 function officialPackZipAsset(assets, pack = CANONICAL_PROFILE_ID) {
   const escapedPack = String(pack).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return assets.find((asset) => new RegExp(`^${escapedPack}[-_].+\\.zip$`, 'i').test(asset.name)) ?? assets.find((asset) => /\.zip$/i.test(asset.name))
@@ -2933,7 +2737,7 @@ async function fetchModuleReleaseAssets(payload = {}) {
   moduleReleaseAssetsInFlight = (async () => {
     const apiUrl = `https://api.github.com/repos/${encodeURIComponent(MODULE_RELEASE_OWNER)}/${encodeURIComponent(MODULE_RELEASE_REPO)}/releases`
     const releases = await fetchJson(apiUrl)
-    if (!Array.isArray(releases)) throw new Error('ECHO-Modules release feed did not return a release list.')
+    if (!Array.isArray(releases)) throw new Error('ECHO Modules release source did not return a release list.')
     const assets = []
     const sorted = releases
       .filter((release) => !release.draft)
@@ -2985,6 +2789,13 @@ function blankReleaseIndex(config, warnings = [], diagnostics = [], rejectedRele
     diagnostics,
     latestPlayableRelease: null,
     warnings,
+  }
+}
+
+function catalogReleaseSource(settings) {
+  return {
+    provider: 'release-index',
+    channelUrl: String(settings?.releaseIndex?.channelUrl ?? '').trim() || CANONICAL_RELEASE_INDEX_CHANNEL_URL,
   }
 }
 
@@ -3175,7 +2986,7 @@ async function readCachedReleaseIndex(config, cachePath) {
 }
 
 async function readCachedReleaseIndexForSettings(settings) {
-  const config = requireReleaseConfig(settings)
+  const config = catalogReleaseSource(settings)
   const paths = getPaths()
   return readCachedReleaseIndex(config, path.join(paths.releaseCache, 'release-index.json'))
 }
@@ -3186,9 +2997,9 @@ async function fetchFreshReleaseIndex(config, cachePath) {
   try {
     releases = await fetchJson(apiUrl)
   } catch (error) {
-    throw new Error(`GitHub release feed unavailable for ${config.owner}/${config.repo}. The repository may be private, unreachable, or the network request failed: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`Legacy repository metadata unavailable for ${config.owner}/${config.repo}. The repository may be private, unreachable, or the network request failed: ${error instanceof Error ? error.message : String(error)}`)
   }
-  if (!Array.isArray(releases)) throw new Error('GitHub release feed did not return a release list.')
+  if (!Array.isArray(releases)) throw new Error('Legacy repository metadata did not return a release list.')
 
   const entries = []
   const diagnostics = []
@@ -3220,7 +3031,7 @@ async function fetchFreshReleaseIndex(config, cachePath) {
       continue
     }
     if (release.prerelease && !config.includePrereleases) {
-      const reason = 'Prerelease is hidden by the release feed setting.'
+      const reason = 'Prerelease is hidden by legacy metadata settings.'
       diagnostics.push(releaseDiagnostic(release, 'warning', reason, assets))
       rejectedReleases.push(rejectedRelease(release, [reason], assets))
       continue
@@ -3288,36 +3099,15 @@ async function fetchFreshReleaseIndex(config, cachePath) {
 
 async function releaseList(payload = {}) {
   const settings = await readSettings()
-  const config = requireReleaseConfig(settings)
-  const paths = getPaths()
-  const cachePath = path.join(paths.releaseCache, 'release-index.json')
-
-  if (!payload.refresh) {
-    const cached = await readCachedReleaseIndex(config, cachePath)
-    if (cached) return mergeCanonicalReleaseEntries(cached, settings, payload)
-  }
+  const source = catalogReleaseSource(settings)
   if (releaseRefreshInFlight) {
-    try {
-      return mergeCanonicalReleaseEntries(await releaseRefreshInFlight, settings, payload)
-    } catch (error) {
-      if (settings.releaseIndex?.enabled) {
-        return canonicalOnlyReleaseIndex(config, settings, payload, [`Advanced GitHub release feed unavailable: ${error instanceof Error ? error.message : String(error)}`])
-      }
-      throw error
-    }
+    return releaseRefreshInFlight
   }
-  const request = fetchFreshReleaseIndex(config, cachePath)
+  const request = canonicalOnlyReleaseIndex(source, settings, payload)
   releaseRefreshInFlight = request.finally(() => {
     releaseRefreshInFlight = null
   })
-  try {
-    return mergeCanonicalReleaseEntries(await releaseRefreshInFlight, settings, payload)
-  } catch (error) {
-    if (settings.releaseIndex?.enabled) {
-      return canonicalOnlyReleaseIndex(config, settings, payload, [`Advanced GitHub release feed unavailable: ${error instanceof Error ? error.message : String(error)}`])
-    }
-    throw error
-  }
+  return releaseRefreshInFlight
 }
 
 function selectReleaseEntry(index, channel, version, pack) {
@@ -3373,7 +3163,7 @@ async function resolveReleaseEntry(payload, profile) {
   const pack = normalizeOfficialPackId(payload.pack) ?? normalizeOfficialPackId(profile?.id) ?? CANONICAL_PROFILE_ID
   const index = await releaseList({ refresh: payload.refresh })
   const entry = selectReleaseEntry(index, channel, payload.version, pack)
-  if (!entry) throw new Error(`No verified ${pack ?? 'official pack'} ${channel} release was found in the configured GitHub feed.`)
+  if (!entry) throw new Error(`No approved ${pack ?? 'official pack'} ${channel} release was found in the ECHO Catalog.`)
   return entry
 }
 
@@ -3799,321 +3589,6 @@ async function packExportLibrary() {
   return import(pathToFileURL(scriptPath).href)
 }
 
-async function publisherGetSettings() {
-  const settings = await readSettings()
-  return settings.publisher
-}
-
-async function publisherSaveSettings(payload = {}) {
-  const current = await readSettings()
-  const nextPublisher = {
-    owner: String(payload.owner ?? current.publisher.owner ?? current.releaseFeed.owner).trim(),
-    repo: String(payload.repo ?? current.publisher.repo ?? current.releaseFeed.repo).trim(),
-    hasToken: current.publisher.hasToken,
-  }
-  if (payload.clearToken) {
-    await deletePublisherToken()
-    nextPublisher.hasToken = false
-  } else if (typeof payload.token === 'string' && payload.token.trim()) {
-    await writePublisherToken(payload.token)
-    nextPublisher.hasToken = true
-  }
-  const saved = await writeSettings({
-    publisher: nextPublisher,
-    releaseFeed: {
-      ...current.releaseFeed,
-      owner: nextPublisher.owner,
-      repo: nextPublisher.repo,
-    },
-  })
-  return saved.publisher
-}
-
-function publisherArtifactName(channel, version) {
-  return `${CANONICAL_PROFILE_ID}-${channel}-${version}-pack.zip`
-}
-
-function publisherManifestName(channel, version) {
-  return `${CANONICAL_PROFILE_ID}-${channel}-${version}.pack.json`
-}
-
-function publisherTargetVersion(payload = {}) {
-  const version = String(payload.version ?? '').trim()
-  if (!version) {
-    throw new Error('Publisher actions require an explicit Ashfall release version. The launcher no longer provides a bundled default modpack version.')
-  }
-  return version
-}
-
-function publisherFileFromManifest(file) {
-  return {
-    path: file.path,
-    assetName: file.assetName,
-    sha256: file.sha256,
-    size: file.size,
-    required: file.required !== false,
-    moduleId: file.moduleId,
-    side: file.side,
-  }
-}
-
-function comparePublisherFiles(files, baselineManifest) {
-  const baselineByPath = new Map((baselineManifest?.files ?? []).map((file) => [file.path, file]))
-  const nextByPath = new Map(files.map((file) => [file.path, file]))
-  const added = []
-  const changed = []
-  const unchanged = []
-  const upload = []
-
-  for (const file of files) {
-    const previous = baselineByPath.get(file.path)
-    if (!previous) {
-      added.push(file)
-      upload.push(file)
-      continue
-    }
-    if (String(previous.sha256).toLowerCase() !== String(file.sha256).toLowerCase()) {
-      changed.push(file)
-      upload.push(file)
-      continue
-    }
-    unchanged.push(file)
-    upload.push(file)
-  }
-
-  const removed = []
-  for (const previous of baselineManifest?.files ?? []) {
-    if (!nextByPath.has(previous.path)) {
-      removed.push(publisherFileFromManifest(previous))
-    }
-  }
-
-  return { added, changed, unchanged, removed, upload }
-}
-
-function isPublisherModJar(file) {
-  return /^mods\/[^/]+\.jar$/iu.test(file.path ?? file.packPath ?? '')
-}
-
-function publisherNeededJarOutputName(file, usedNames) {
-  const baseName = path.basename(file.path ?? file.packPath)
-  const normalized = baseName.toLowerCase()
-  if (!usedNames.has(normalized)) {
-    usedNames.add(normalized)
-    return baseName
-  }
-  const fallback = file.assetName || safeFileName(file.path ?? file.packPath)
-  usedNames.add(fallback.toLowerCase())
-  return fallback
-}
-
-async function copyPublisherNeededJars(files, sourceByPath, outputDir) {
-  const neededJarsPath = path.join(outputDir, 'needed-jars')
-  await fs.rm(neededJarsPath, { recursive: true, force: true })
-  await ensureDir(neededJarsPath)
-  const usedNames = new Set()
-  let neededJarsCount = 0
-  for (const file of files.filter(isPublisherModJar)) {
-    const source = sourceByPath.get(file.path)
-    if (!source) continue
-    const destination = path.join(neededJarsPath, publisherNeededJarOutputName(file, usedNames))
-    await fs.copyFile(source, destination)
-    neededJarsCount += 1
-  }
-  return { neededJarsPath, neededJarsCount }
-}
-
-async function publisherScan(payload = {}) {
-  const packLib = await packExportLibrary()
-  const sourcePath = normalizePath(payload.sourcePath ?? packLib.DEFAULT_ASHFALL_SOURCE)
-  const channel = payload.channel ?? CANONICAL_CHANNEL
-  const version = publisherTargetVersion(payload)
-  if (!(await exists(sourcePath))) {
-    throw new Error(`Ashfall source instance was not found: ${sourcePath}`)
-  }
-  const instance = await packLib.readCurseForgeInstance(sourcePath)
-  const discovered = await packLib.discoverPackFiles(sourcePath)
-  const files = packLib.validateDiscoveredPackFiles(discovered, sourcePath)
-  const manifest = packLib.buildPackManifest({
-    channel,
-    version,
-    artifactName: publisherArtifactName(channel, version),
-    artifactSha256: '',
-    artifactSize: 0,
-    files,
-    instance,
-  })
-  return {
-    ok: true,
-    generatedAt: isoNow(),
-    sourcePath,
-    version,
-    channel,
-    minecraftVersion: instance.minecraftVersion,
-    neoforgeVersion: instance.loaderVersion,
-    ramMb: instance.allocatedMemoryMb,
-    counts: {
-      totalFiles: files.length,
-      modJars: files.filter((file) => file.relativePath.startsWith('mods/')).length,
-      configFiles: files.filter((file) => file.relativePath.startsWith('config/')).length,
-    },
-    modules: manifest.modules,
-    files: manifest.files.map(publisherFileFromManifest),
-    warnings: [],
-  }
-}
-
-async function publisherBaselineManifest(payload = {}) {
-  try {
-    const fetched = await releaseFetchManifest({
-      channel: payload.channel ?? CANONICAL_CHANNEL,
-      version: payload.baselineVersion,
-      refresh: payload.refresh,
-    })
-    return { manifest: fetched.manifest, version: fetched.manifest.version, warning: null }
-  } catch (error) {
-    return {
-      manifest: null,
-      version: undefined,
-      warning: `No baseline release manifest was available: ${error instanceof Error ? error.message : String(error)}`,
-    }
-  }
-}
-
-async function publisherDiff(payload = {}) {
-  const scan = await publisherScan(payload)
-  const baseline = await publisherBaselineManifest(payload)
-  const compared = comparePublisherFiles(scan.files, baseline.manifest)
-  return {
-    ok: true,
-    generatedAt: isoNow(),
-    baselineVersion: baseline.version,
-    targetVersion: scan.version,
-    ...compared,
-    scan,
-    warnings: baseline.warning ? [baseline.warning] : [],
-  }
-}
-
-async function buildPublisherReleaseFiles(payload, baselineManifest) {
-  const packLib = await packExportLibrary()
-  const paths = getPaths()
-  const sourcePath = normalizePath(payload.sourcePath ?? packLib.DEFAULT_ASHFALL_SOURCE)
-  const channel = payload.channel ?? CANONICAL_CHANNEL
-  const version = publisherTargetVersion(payload)
-  const baseName = `${CANONICAL_PROFILE_ID}-${channel}-${version}`
-  const outputDir = path.join(paths.exports, 'publisher', baseName)
-  const zipName = publisherArtifactName(channel, version)
-  const manifestName = publisherManifestName(channel, version)
-  const zipPath = path.join(outputDir, zipName)
-  const manifestPath = path.join(outputDir, manifestName)
-  const releaseMetadataPath = path.join(outputDir, RELEASE_METADATA_ASSET)
-
-  await ensureDir(outputDir)
-  const instance = await packLib.readCurseForgeInstance(sourcePath)
-  const discovered = packLib.validateDiscoveredPackFiles(await packLib.discoverPackFiles(sourcePath), sourcePath)
-  const zip = new AdmZip()
-  for (const file of discovered) {
-    zip.addLocalFile(file.absolutePath, path.posix.dirname(file.relativePath), path.posix.basename(file.relativePath))
-  }
-  zip.writeZip(zipPath)
-
-  const artifactSha256 = await sha256File(zipPath)
-  const artifactStats = await fs.stat(zipPath)
-  const manifest = packLib.buildPackManifest({
-    channel,
-    version,
-    artifactName: zipName,
-    artifactSha256,
-    artifactSize: artifactStats.size,
-    files: discovered,
-    instance,
-  })
-  manifest.changelog = Array.isArray(payload.changelog) && payload.changelog.length ? payload.changelog : manifest.changelog
-
-  packLib.validateZipMatchesManifest(zipPath, manifest)
-  await writeJson(manifestPath, manifest)
-  const manifestSha256 = await sha256File(manifestPath)
-  const manifestStats = await fs.stat(manifestPath)
-  const compared = comparePublisherFiles(manifest.files.map(publisherFileFromManifest), baselineManifest)
-  const sourceByPath = new Map(discovered.map((file) => [file.relativePath, file.absolutePath]))
-  const fileUploads = manifest.files
-    .map((file) => ({
-      name: file.assetName,
-      role: 'pack-file',
-      packPath: file.path,
-      path: sourceByPath.get(file.path),
-      size: file.size,
-      sha256: file.sha256,
-    }))
-  const neededJars = await copyPublisherNeededJars(manifest.files, sourceByPath, outputDir)
-
-  const releaseMetadata = {
-    formatVersion: 2,
-    pack: CANONICAL_PROFILE_ID,
-    name: CANONICAL_PROFILE_NAME,
-    version,
-    channel,
-    releasedAt: isoNow(),
-    manifestAsset: manifestName,
-    manifestSha256,
-    artifactMode: 'zip',
-    artifactAsset: zipName,
-    artifactSha256,
-    artifactSize: artifactStats.size,
-    packs: [
-      {
-        pack: CANONICAL_PROFILE_ID,
-        name: CANONICAL_PROFILE_NAME,
-        version,
-        channel,
-        manifestAsset: manifestName,
-        manifestSha256,
-        artifactMode: 'zip',
-        artifactAsset: zipName,
-        artifactSha256,
-        artifactSize: artifactStats.size,
-      },
-    ],
-    minecraftVersion: instance.minecraftVersion,
-    loader: {
-      type: 'neoforge',
-      version: instance.loaderVersion,
-      minecraftLauncherVersionId: instance.minecraftLauncherVersionId,
-    },
-    assets: [
-      { name: manifestName, role: 'pack-manifest', sha256: manifestSha256, size: manifestStats.size },
-      { name: zipName, role: 'pack-artifact', sha256: artifactSha256, size: artifactStats.size },
-      ...fileUploads.map((file) => ({
-        name: file.name,
-        role: 'pack-file',
-        path: file.packPath,
-        sha256: file.sha256,
-        size: file.size,
-      })),
-    ],
-    notes: manifest.changelog,
-  }
-  await writeJson(releaseMetadataPath, releaseMetadata)
-
-  return {
-    outputDir,
-    version,
-    channel,
-    manifest,
-    manifestPath,
-    manifestName,
-    releaseMetadataPath,
-    zipPath,
-    zipName,
-    artifactSize: artifactStats.size,
-    neededJarsPath: neededJars.neededJarsPath,
-    neededJarsCount: neededJars.neededJarsCount,
-    fileUploads,
-    compared,
-  }
-}
-
 async function ensureGitHubRelease(owner, repo, token, version, changelog = [], prerelease = true) {
   const tagName = `v${version}`
   const existing = await githubJsonRequest(githubApiUrl(owner, repo, `/releases/tags/${encodeURIComponent(tagName)}`), {
@@ -4138,56 +3613,6 @@ async function deleteReleaseAssetsByName(owner, repo, token, release, names) {
   for (const asset of release.assets ?? []) {
     if (!wanted.has(asset.name)) continue
     await githubJsonRequest(githubApiUrl(owner, repo, `/releases/assets/${asset.id}`), { method: 'DELETE', token })
-  }
-}
-
-async function publisherPublish(payload = {}) {
-  if (!payload.version) throw new Error('A target version is required before publishing.')
-  if (payload.saveToken && payload.token) {
-    await publisherSaveSettings({ owner: payload.owner, repo: payload.repo, token: payload.token })
-  } else if (payload.owner || payload.repo) {
-    await publisherSaveSettings({ owner: payload.owner, repo: payload.repo })
-  }
-  const settings = await readSettings()
-  const owner = String(payload.owner ?? settings.publisher.owner ?? settings.releaseFeed.owner).trim()
-  const repo = String(payload.repo ?? settings.publisher.repo ?? settings.releaseFeed.repo).trim()
-  const token = String(payload.token ?? (await readPublisherToken())).trim()
-  if (!owner || !repo) throw new Error('Publisher owner and repository are required.')
-  if (!token) throw new Error('A GitHub fine-grained personal access token is required to publish.')
-
-  const baseline = await publisherBaselineManifest({ channel: payload.channel ?? CANONICAL_CHANNEL, refresh: true })
-  const built = await buildPublisherReleaseFiles(payload, baseline.manifest)
-  const release = await ensureGitHubRelease(owner, repo, token, built.version, payload.changelog, payload.prerelease ?? true)
-  const uploadItems = [
-    ...built.fileUploads,
-    { name: built.zipName, role: 'pack-artifact', path: built.zipPath, size: built.artifactSize },
-    { name: built.manifestName, role: 'pack-manifest', path: built.manifestPath, size: (await fs.stat(built.manifestPath)).size },
-    { name: RELEASE_METADATA_ASSET, role: 'release-metadata', path: built.releaseMetadataPath, size: (await fs.stat(built.releaseMetadataPath)).size },
-  ]
-  await deleteReleaseAssetsByName(owner, repo, token, release, uploadItems.map((item) => item.name))
-
-  const uploaded = []
-  for (const item of uploadItems) {
-    const contentType = item.name.endsWith('.json') ? 'application/json' : item.name.endsWith('.zip') ? 'application/zip' : 'application/octet-stream'
-    await githubUploadAsset(release.upload_url, item.name, item.path, token, contentType)
-    uploaded.push({ name: item.name, role: item.role, size: item.size })
-  }
-
-  await releaseCacheClear().catch(() => undefined)
-  await appendLauncherLog('INFO', `Published hybrid Ashfall release v${built.version}: uploaded=${uploaded.length}, reused=${built.compared.unchanged.length}, removed=${built.compared.removed.length}.`)
-  return {
-    ok: true,
-    tagName: `v${built.version}`,
-    releaseUrl: release.html_url,
-    manifestPath: built.manifestPath,
-    releaseMetadataPath: built.releaseMetadataPath,
-    artifactPath: built.zipPath,
-    neededJarsPath: built.neededJarsPath,
-    neededJarsCount: built.neededJarsCount,
-    uploaded,
-    reused: built.compared.unchanged,
-    removed: built.compared.removed,
-    warnings: baseline.warning ? [baseline.warning] : [],
   }
 }
 
@@ -4271,7 +3696,7 @@ function manifestFromLegacyZip({ cfManifest, entry, installPath, files }) {
     worldgenWarning: true,
     localInstallRoot: installPath,
     source: {
-      type: 'github-release-zip',
+      type: 'legacy-release-zip',
       release: entry.tagName,
       url: entry.releasePageUrl,
     },
@@ -4286,7 +3711,7 @@ async function installLegacyReleaseZip(payload, profile, entry) {
   }
   const zipSha256 = githubAssetSha256(zipAsset)
   if (!zipSha256) {
-    throw new Error(`${zipAsset.name} is missing a GitHub SHA-256 digest. Add echo-release.json for strict installs or re-upload the asset with a digest.`)
+    throw new Error(`${zipAsset.name} is missing a SHA-256 digest. Add echo-release.json for strict installs or re-upload the asset with a digest.`)
   }
 
   const installPath = normalizePath(payload.installPath ?? profile?.installPath ?? defaultAshfallInstallPath(paths))
@@ -7535,33 +6960,30 @@ async function appReadiness() {
   const installPath = profile?.installPath ? normalizePath(profile.installPath) : undefined
   const installed = Boolean(installPath && (await readInstalledProfileManifest(installPath)))
   const logs = await logsRead({ installPath }).catch(() => ({ files: [], latest: '' }))
-  const releaseConfigured = Boolean(settings.releaseFeed?.owner && settings.releaseFeed?.repo)
-  let releaseFeed = {
-    configured: releaseConfigured,
+  let catalog = {
+    configured: true,
     ok: false,
-    source: releaseConfigured ? `${settings.releaseFeed.owner}/${settings.releaseFeed.repo}` : 'not configured',
+    source: catalogReleaseSource(settings).channelUrl,
     releases: 0,
     latestVersion: undefined,
     fetchedAt: undefined,
-    warnings: releaseConfigured ? [] : ['GitHub release feed is not configured.'],
+    warnings: [],
   }
-  if (releaseConfigured) {
-    try {
-      const index = await releaseList({ refresh: false })
-      releaseFeed = {
-        configured: true,
-        ok: (index.acceptedCount ?? index.releases.length) > 0,
-        source: `${index.source.owner}/${index.source.repo}`,
-        releases: index.acceptedCount ?? index.releases.length,
-        latestVersion: (index.latestPlayableRelease ?? index.releases[0])?.version,
-        fetchedAt: index.fetchedAt,
-        warnings: index.warnings ?? [],
-      }
-    } catch (error) {
-      releaseFeed = {
-        ...releaseFeed,
-        warnings: [error instanceof Error ? error.message : String(error)],
-      }
+  try {
+    const index = await releaseList({ refresh: false })
+    catalog = {
+      configured: true,
+      ok: (index.acceptedCount ?? index.releases.length) > 0,
+      source: index.source.channelUrl,
+      releases: index.acceptedCount ?? index.releases.length,
+      latestVersion: (index.latestPlayableRelease ?? index.releases[0])?.version,
+      fetchedAt: index.fetchedAt,
+      warnings: index.warnings ?? [],
+    }
+  } catch (error) {
+    catalog = {
+      ...catalog,
+      warnings: [error instanceof Error ? error.message : String(error)],
     }
   }
 
@@ -7581,7 +7003,7 @@ async function appReadiness() {
   )
   const warnings = [
     ...(installed ? [] : ['Ashfall is not installed yet.']),
-    ...(releaseFeed.ok ? [] : releaseFeed.warnings),
+    ...(catalog.ok ? [] : catalog.warnings),
     ...(minecraftLauncher.ok ? [] : minecraftLauncher.warnings ?? []),
     ...(packOs.warnings ?? []),
     ...(logs.files.length ? [] : ['No launcher or install logs were found yet.']),
@@ -7598,7 +7020,7 @@ async function appReadiness() {
       manifestPath: profile?.manifestPath,
       version: profile?.version,
     },
-    releaseFeed,
+    catalog,
     minecraftLauncher,
     packOs,
     logs: {
@@ -7629,34 +7051,26 @@ async function appBootstrapState() {
   const settings = await readSettings()
   let releaseIndex = null
   let releaseIndexCatalogState = null
-  if (settings.releaseFeed?.owner && settings.releaseFeed?.repo) {
-    try {
-      releaseIndex = await readCachedReleaseIndexForSettings(settings)
-    } catch (error) {
-      const reason =
-        error instanceof Error
-          ? `Cached GitHub release feed unavailable for ${settings.releaseFeed.owner}/${settings.releaseFeed.repo}: ${error.message}`
-          : `Cached GitHub release feed unavailable for ${settings.releaseFeed.owner}/${settings.releaseFeed.repo}: ${String(error)}`
-      const diagnostic = {
-        tagName: 'release-feed',
-        releaseName: `${settings.releaseFeed.owner}/${settings.releaseFeed.repo}`,
-        severity: 'critical',
-        reason,
-        assets: [],
-      }
-      releaseIndex = blankReleaseIndex(settings.releaseFeed, [reason], [diagnostic], [])
-    }
+  try {
+    releaseIndex = await releaseList({ refresh: false })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    releaseIndex = blankReleaseIndex(catalogReleaseSource(settings), [reason], [{
+      tagName: 'catalog',
+      releaseName: 'ECHO Catalog',
+      severity: 'critical',
+      reason,
+      assets: [],
+    }], [])
   }
-  if (settings.releaseIndex?.enabled) {
-    try {
-      releaseIndexCatalogState = await releaseIndexCatalog({ refresh: false })
-    } catch (error) {
-      releaseIndexCatalogState = {
-        sourceUrl: settings.releaseIndex.channelUrl,
-        fetchedAt: isoNow(),
-        entries: [],
-        warnings: [error instanceof Error ? error.message : String(error)],
-      }
+  try {
+    releaseIndexCatalogState = await releaseIndexCatalog({ refresh: false })
+  } catch (error) {
+    releaseIndexCatalogState = {
+      sourceUrl: settings.releaseIndex.channelUrl,
+      fetchedAt: isoNow(),
+      entries: [],
+      warnings: [error instanceof Error ? error.message : String(error)],
     }
   }
   const [profiles, account, launcherUpdate] = await Promise.all([profileList(), authGetState(), launcherUpdateGetState()])
@@ -8418,11 +7832,6 @@ const handlers = {
   'standalone-runtime:launch': standaloneRuntimeLaunch,
   'release:fetch-manifest': releaseFetchManifest,
   'release:cache-clear': releaseCacheClear,
-  'publisher:get-settings': publisherGetSettings,
-  'publisher:save-settings': publisherSaveSettings,
-  'publisher:scan': publisherScan,
-  'publisher:diff': publisherDiff,
-  'publisher:publish': publisherPublish,
   'neoforge:ensure': neoforgeEnsure,
   'instance:scan-imports': instanceScanImports,
   'instance:import': instanceImport,

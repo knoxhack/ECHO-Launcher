@@ -91,7 +91,7 @@ export function EcosystemHealthPage() {
 
       <div className="grid gap-4 xl:grid-cols-4">
         <HealthCard detail={scan ? `${scan.verification.valid.length} manifest files verified.` : 'No scan has completed yet.'} icon={FileCheck2} status={scan ? statusFromProblems(scan.verification.missing.length + scan.verification.corrupt.length) : 'warning'} title="File Integrity" />
-        <HealthCard detail={scan?.latestVersion ? `Installed ${scan.currentVersion}, latest ${scan.latestVersion}.` : 'Latest release metadata not available.'} icon={RadioTower} status={scan?.latestVersion && scan.latestVersion !== scan.currentVersion ? 'update_available' : 'healthy'} title="Release Feed" />
+        <HealthCard detail={scan?.latestVersion ? `Installed ${scan.currentVersion}, latest ${scan.latestVersion}.` : 'Latest Catalog metadata not available.'} icon={RadioTower} status={scan?.latestVersion && scan.latestVersion !== scan.currentVersion ? 'update_available' : 'healthy'} title="Catalog" />
         <HealthCard detail={scan ? `${scan.assetReports.flatMap((report) => report.missing).length} expected asset entries missing.` : 'Asset validation runs with the scan.'} icon={Volume2} status={scan ? statusFromProblems(scan.assetReports.flatMap((report) => report.missing).length) : 'warning'} title="Asset Validation" />
         <HealthCard detail={scan ? `${scan.modules.length} module groups derived from installed manifest metadata.` : 'Module rows are built from the installed manifest.'} icon={Cpu} status={scan?.ok ? 'healthy' : 'warning'} title="Manifest Modules" />
       </div>

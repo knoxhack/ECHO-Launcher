@@ -43,10 +43,6 @@ import type {
   RuntimeVerificationResult,
   WorldCompatibilityReport,
   DefaultPackExportReport,
-  PublisherDiffResult,
-  PublisherPublishResult,
-  PublisherScanResult,
-  PublisherSettingsState,
 } from '../types/native'
 import type { OfficialPackId, PackManifest } from '../types/manifests'
 import type { CanonicalProductUpdate, CanonicalReleaseIndexCatalog, ReleaseFetchResult, ReleaseIndex } from '../types/releases'
@@ -90,33 +86,6 @@ type NativeCommandMap = {
     result: ReleaseFetchResult & { manifest: PackManifest }
   }
   'release:cache-clear': { payload: undefined; result: { ok: boolean } }
-  'publisher:get-settings': { payload: undefined; result: PublisherSettingsState }
-  'publisher:save-settings': {
-    payload: { owner?: string; repo?: string; token?: string; clearToken?: boolean }
-    result: PublisherSettingsState
-  }
-  'publisher:scan': {
-    payload: { sourcePath?: string; version?: string; channel?: Channel } | undefined
-    result: PublisherScanResult
-  }
-  'publisher:diff': {
-    payload: { sourcePath?: string; version?: string; channel?: Channel; baselineVersion?: string; refresh?: boolean } | undefined
-    result: PublisherDiffResult
-  }
-  'publisher:publish': {
-    payload: {
-      sourcePath?: string
-      version: string
-      channel?: Channel
-      changelog?: string[]
-      owner?: string
-      repo?: string
-      token?: string
-      saveToken?: boolean
-      prerelease?: boolean
-    }
-    result: PublisherPublishResult
-  }
   'neoforge:ensure': {
     payload: { manifest?: PackManifest; installPath?: string; profileId?: string; channel?: Channel }
     result: NativeNeoForgeResult

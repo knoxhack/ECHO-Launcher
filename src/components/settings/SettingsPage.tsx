@@ -72,10 +72,6 @@ export function SettingsPage() {
   const setOfficialServerSettings = useSettingsStore((state) => state.setOfficialServerSettings)
   const refreshOfficialStatus = useServerStatusStore((state) => state.refreshStatus)
   const clearOfficialStatus = useServerStatusStore((state) => state.clearStatus)
-  const [releaseOwner, setReleaseOwner] = useState(settings.releaseFeed.owner)
-  const [releaseRepo, setReleaseRepo] = useState(settings.releaseFeed.repo)
-  const [includePrereleases, setIncludePrereleases] = useState(settings.releaseFeed.includePrereleases)
-  const [releaseIndexEnabled, setReleaseIndexEnabled] = useState(settings.releaseIndex.enabled)
   const [releaseIndexChannelUrl, setReleaseIndexChannelUrl] = useState(settings.releaseIndex.channelUrl)
   const [supportGuideUrl, setSupportGuideUrl] = useState(settings.supportGuideUrl)
   const [advancedMode, setAdvancedMode] = useState(settings.advancedMode)
@@ -111,10 +107,6 @@ export function SettingsPage() {
         setReadiness(readinessState)
         setMobileBridge(mobileBridgeState)
         setDesktopSettings(desktopSettings)
-        setReleaseOwner(desktopSettings.releaseFeed.owner)
-        setReleaseRepo(desktopSettings.releaseFeed.repo)
-        setIncludePrereleases(desktopSettings.releaseFeed.includePrereleases)
-        setReleaseIndexEnabled(desktopSettings.releaseIndex.enabled)
         setReleaseIndexChannelUrl(desktopSettings.releaseIndex.channelUrl)
         setSupportGuideUrl(desktopSettings.supportGuideUrl)
         setAdvancedMode(desktopSettings.advancedMode)
@@ -186,14 +178,8 @@ export function SettingsPage() {
   const saveReleaseSettings = async () => {
     try {
       const saved = await releaseService.saveSettings({
-        releaseFeed: {
-          provider: 'github',
-          owner: releaseOwner,
-          repo: releaseRepo,
-          includePrereleases,
-        },
         releaseIndex: {
-          enabled: releaseIndexEnabled,
+          enabled: true,
           channelUrl: releaseIndexChannelUrl,
         },
         supportGuideUrl,
@@ -202,19 +188,9 @@ export function SettingsPage() {
         creatorMode,
       })
       setDesktopSettings(saved)
-      addToast('Desktop settings saved', saved.releaseIndex.enabled ? saved.releaseIndex.channelUrl : `${saved.releaseFeed.owner}/${saved.releaseFeed.repo}`, 'success')
+      addToast('Desktop settings saved', saved.releaseIndex.channelUrl, 'success')
     } catch (error) {
       addToast('Release settings failed', error instanceof Error ? error.message : 'Unable to save release settings.', 'danger')
-    }
-  }
-
-  const testReleaseFeed = async () => {
-    try {
-      await saveReleaseSettings()
-      const index = await releaseService.listReleases(true)
-      addToast('Release feed connected', `${index.releases.length} Ashfall release entries found.`, 'success')
-    } catch (error) {
-      addToast('Release feed unavailable', error instanceof Error ? error.message : 'Unable to list GitHub releases.', 'danger')
     }
   }
 
@@ -222,7 +198,7 @@ export function SettingsPage() {
     try {
       await saveReleaseSettings()
       const catalog = await releaseService.getCanonicalCatalog(true)
-      addToast('Release Index connected', `${catalog.entries.length} approved/catalog entries loaded from ${catalog.channel ?? 'channel metadata'}.`, catalog.warnings.length ? 'warning' : 'success')
+      addToast('Catalog connected', `${catalog.entries.length} approved releases loaded from ${catalog.channel ?? 'channel metadata'}.`, catalog.warnings.length ? 'warning' : 'success')
     } catch (error) {
       addToast('Release Index unavailable', error instanceof Error ? error.message : 'Unable to load canonical Release Index.', 'danger')
     }
@@ -944,7 +920,7 @@ export function SettingsPage() {
                       />
                       <ToggleRow
                         checked={creatorMode}
-                        description="Shows publisher/release tooling after settings are saved."
+                        description="Shows advanced release tooling after settings are saved."
                         label="Creator Mode"
                         onCheckedChange={(value) => {
                           setCreatorMode(value)
@@ -1087,55 +1063,19 @@ export function SettingsPage() {
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-white">Canonical Release Index</p>
-                        <p className="mt-1 text-xs text-slate-400">Default resolver for pack, module, addon, launcher, runtime, and studio updates.</p>
-                      </div>
-                      <RadioTower className="h-5 w-5 text-cyan-soft" />
-                    </div>
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Channel URL
-                      <input
-                        className="h-11 w-full rounded-lg border border-cyan-soft/20 bg-slate-950 px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-cyan-echo"
-                        onChange={(event) => setReleaseIndexChannelUrl(event.target.value)}
-                        placeholder="https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json"
-                        type="url"
-                        value={releaseIndexChannelUrl}
-                      />
-                    </label>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <ToggleRow checked={releaseIndexEnabled} label="Use canonical Release Index" onCheckedChange={setReleaseIndexEnabled} />
-                      <CyberButton icon={Save} onClick={() => void saveReleaseSettings()} size="sm" variant="primary">
-                        Save Index
-                      </CyberButton>
-                      <CyberButton icon={Link} onClick={() => void testReleaseIndex()} size="sm" variant="secondary">
-                        Test Index
-                      </CyberButton>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4 xl:col-span-2">
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-white">Advanced GitHub Release Feed</p>
-                        <p className="mt-1 text-xs text-slate-400">Manual fallback for legacy release testing when the canonical index is disabled.</p>
+                        <p className="mt-1 text-xs text-slate-400">Default resolver for packs, addons, launcher updates, runtime packages, and approved tools.</p>
                       </div>
                       <RadioTower className="h-5 w-5 text-cyan-soft" />
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
-                      <label className="space-y-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Owner
+                      <label className="space-y-2 text-xs font-semibold uppercase tracking-wide text-slate-500 md:col-span-2">
+                        Channel URL
                         <input
                           className="h-11 w-full rounded-lg border border-cyan-soft/20 bg-slate-950 px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-cyan-echo"
-                          onChange={(event) => setReleaseOwner(event.target.value)}
-                          placeholder="GitHub organization"
-                          value={releaseOwner}
-                        />
-                      </label>
-                      <label className="space-y-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Repository
-                        <input
-                          className="h-11 w-full rounded-lg border border-cyan-soft/20 bg-slate-950 px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-cyan-echo"
-                          onChange={(event) => setReleaseRepo(event.target.value)}
-                          placeholder="Ashfall release repository"
-                          value={releaseRepo}
+                          onChange={(event) => setReleaseIndexChannelUrl(event.target.value)}
+                          placeholder="https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json"
+                          type="url"
+                          value={releaseIndexChannelUrl}
                         />
                       </label>
                       <label className="space-y-2 text-xs font-semibold uppercase tracking-wide text-slate-500 md:col-span-2">
@@ -1149,12 +1089,11 @@ export function SettingsPage() {
                       </label>
                     </div>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <ToggleRow checked={includePrereleases} label="Include prerelease GitHub releases" onCheckedChange={setIncludePrereleases} />
                       <CyberButton icon={Save} onClick={() => void saveReleaseSettings()} size="sm" variant="primary">
-                        Save Settings
+                        Save Catalog
                       </CyberButton>
-                      <CyberButton icon={Link} onClick={() => void testReleaseFeed()} size="sm" variant="secondary">
-                        Test Feed
+                      <CyberButton icon={Link} onClick={() => void testReleaseIndex()} size="sm" variant="secondary">
+                        Test Index
                       </CyberButton>
                     </div>
                   </div>

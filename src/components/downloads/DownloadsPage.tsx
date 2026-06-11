@@ -10,7 +10,7 @@ import { useReleaseStore } from '../../stores/releaseStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { NativeInstallResult } from '../../types/native'
 import type { ReleaseEntry } from '../../types/releases'
-import { isPlayablePackRelease, latestPlayableReleaseForPack, releaseAcceptedCount, releaseFeedConfigured, releaseRejectedCount } from '../../utils/releaseValidation'
+import { isPlayablePackRelease, latestPlayableReleaseForPack, releaseAcceptedCount, releaseRejectedCount } from '../../utils/releaseValidation'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
 import { MetricCard } from '../cyber/MetricCard'
@@ -23,7 +23,6 @@ export function DownloadsPage() {
   const selectedProfileId = useLauncherStore((state) => state.selectedProfileId)
   const profiles = useProfileStore((state) => state.profiles)
   const setProfiles = useProfileStore((state) => state.setProfiles)
-  const releaseFeed = useSettingsStore((state) => state.releaseFeed)
   const advancedMode = useSettingsStore((state) => state.advancedMode)
   const creatorMode = useSettingsStore((state) => state.creatorMode)
   const releaseIndex = useReleaseStore((state) => state.releaseIndex)
@@ -54,7 +53,7 @@ export function DownloadsPage() {
     [releaseIndex?.diagnostics],
   )
   const canInstallSelectedRelease = Boolean(manifestPath || isPlayablePackRelease(selectedRelease, selectedProfile.id))
-  const strictReleaseMissing = releaseFeedConfigured(releaseFeed) && acceptedCount === 0 && !manifestPath
+  const strictReleaseMissing = acceptedCount === 0 && !manifestPath
 
   const totals = useMemo(() => {
     if (!installReport) return { total: 0, completed: 0, blocked: 0 }
@@ -78,21 +77,19 @@ export function DownloadsPage() {
       if (announce) {
         const accepted = releaseAcceptedCount(index)
         const rejected = releaseRejectedCount(index)
-        addToast('Release feed loaded', `${accepted} accepted and ${rejected} rejected from ${index.source.owner}/${index.source.repo}.`, accepted ? 'success' : 'warning')
+        addToast('Catalog loaded', `${accepted} approved release${accepted === 1 ? '' : 's'} loaded; ${rejected} catalog diagnostic${rejected === 1 ? '' : 's'} tracked.`, accepted ? 'success' : 'warning')
       }
     } catch (error) {
       if (announce) {
-        addToast('Release feed unavailable', error instanceof Error ? error.message : 'Configure the GitHub release feed in Settings.', 'warning')
+        addToast('Catalog unavailable', error instanceof Error ? error.message : 'Check the Release Index channel in Settings.', 'warning')
       }
     }
   }, [addToast, loadReleases, selectedProfile.id])
 
   useEffect(() => {
-    if (releaseFeedConfigured(releaseFeed)) {
-      const timer = window.setTimeout(() => void refreshReleases(false, false), 0)
-      return () => window.clearTimeout(timer)
-    }
-  }, [refreshReleases, releaseFeed])
+    const timer = window.setTimeout(() => void refreshReleases(false, false), 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshReleases])
 
   const importManifest = async () => {
     if (!isNativeAvailable()) {
@@ -226,7 +223,7 @@ export function DownloadsPage() {
             <p className="text-xs font-semibold uppercase text-cyan-soft">Downloads</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">Install & Update Pipeline</h2>
             <p className="mt-2 text-sm leading-6 text-slate-300">
-              Installs Ashfall from strict GitHub release metadata, verifies SHA-256 hashes, and writes a local install report for Minecraft Launcher handoff.
+              Installs Ashfall from approved Catalog install packages, verifies SHA-256 hashes, and writes a local install report for Minecraft Launcher handoff.
             </p>
           </div>
           <div className="grid grid-cols-4 gap-3">
@@ -244,12 +241,12 @@ export function DownloadsPage() {
           <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
             <div className="flex items-center gap-2 text-cyan-soft">
               <RadioTower className="h-4 w-4" />
-              <p className="text-xs font-semibold uppercase">Release Feed</p>
+              <p className="text-xs font-semibold uppercase">Catalog</p>
             </div>
             <p className="mt-2 text-sm font-semibold text-white">
-              {releaseFeedConfigured(releaseFeed) ? `${releaseFeed.owner}/${releaseFeed.repo}` : 'Not configured'}
+              {'ECHO Catalog'}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Accepted {acceptedCount} / rejected {rejectedCount}</p>
+            <p className="mt-1 text-xs text-slate-500">Approved {acceptedCount} / diagnostics {rejectedCount}</p>
           </div>
           <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
             <p className="text-xs font-semibold uppercase text-slate-500">Selected Release</p>
@@ -259,7 +256,7 @@ export function DownloadsPage() {
             <p className="text-xs font-semibold uppercase text-slate-500">Manifest Trust</p>
             <p className="mt-2 text-sm font-semibold text-white">
               {isPlayablePackRelease(selectedRelease, selectedProfile.id)
-                ? 'SHA-256 verified metadata'
+                ? 'Verified checksum metadata'
                 : 'Blocked until echo-release.json and manifest hash exist'}
             </p>
           </div>
@@ -287,7 +284,7 @@ export function DownloadsPage() {
               <div>
                 <p className="text-sm font-semibold text-amber-100">Strict Ashfall release assets are missing</p>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                  Tester installs stay locked until the GitHub release includes trusted metadata, the hashed pack manifest, and the matching compressed pack archive.
+                  Tester installs stay locked until the Catalog entry includes trusted metadata, the hashed pack manifest, and the matching compressed pack archive.
                 </p>
               </div>
               <StatusChip label="Non-playable" status="warning" />
@@ -310,11 +307,11 @@ export function DownloadsPage() {
             <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
               <p className="text-sm font-semibold text-white">{selectedProfile.name}</p>
               <p className="mt-1 text-xs text-slate-400">
-                Installed {selectedProfile.version} / Latest GitHub {latestRelease?.version ?? 'not loaded'} / Minecraft {selectedProfile.minecraft} / NeoForge {selectedProfile.neoforge}
+                Installed {selectedProfile.version} / Catalog latest {latestRelease?.version ?? 'not loaded'} / Minecraft {selectedProfile.minecraft} / NeoForge {selectedProfile.neoforge}
               </p>
             </div>
             <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
-              <p className="text-xs text-slate-500">Official Release</p>
+              <p className="text-xs text-slate-500">Approved Release</p>
               {channelReleases.length > 0 ? (
                 <select
                   className="mt-2 h-10 w-full rounded-lg border border-cyan-soft/20 bg-slate-950 px-3 text-sm text-white"
@@ -328,12 +325,12 @@ export function DownloadsPage() {
                   ))}
                 </select>
               ) : (
-                <p className="mt-1 text-xs text-slate-300">Configure the GitHub release feed in Settings, then refresh releases.</p>
+                <p className="mt-1 text-xs text-slate-300">Catalog releases are still loading, or this pack is not installed yet.</p>
               )}
             </div>
             <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Manual Manifest Override</p>
-              <p className="mt-1 break-all font-mono text-xs text-slate-200">{manifestPath ?? 'Using official release feed'}</p>
+              <p className="mt-1 break-all font-mono text-xs text-slate-200">{manifestPath ?? 'Using ECHO Catalog manifest'}</p>
             </div>
             <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Install Folder</p>
@@ -387,7 +384,7 @@ export function DownloadsPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-                Select a trusted GitHub release or import a strict local manifest, then install. Ashfall installs require echo-release.json plus the hashed pack manifest and the metadata-named compressed pack archive.
+                Select an approved Catalog release or import a strict local manifest, then install. Ashfall installs require echo-release.json plus the hashed pack manifest and the metadata-named compressed pack archive.
               </div>
             )}
           </GlassCard>

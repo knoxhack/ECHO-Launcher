@@ -191,7 +191,7 @@ export interface AppReadinessState {
     manifestPath?: string
     version?: string
   }
-  releaseFeed: {
+  catalog: {
     configured: boolean
     ok: boolean
     source: string
@@ -455,70 +455,6 @@ export interface NativeInstallResult {
   before: NativeVerifyResult
   after: NativeVerifyResult
   reportPath: string
-}
-
-export interface PublisherSettingsState {
-  owner: string
-  repo: string
-  hasToken: boolean
-}
-
-export interface PublisherFile {
-  path: string
-  assetName: string
-  sha256: string
-  size: number
-  required: boolean
-  moduleId: string
-  side: 'client' | 'server' | 'both'
-}
-
-export interface PublisherScanResult {
-  ok: boolean
-  generatedAt: string
-  sourcePath: string
-  version: string
-  channel: string
-  minecraftVersion: string
-  neoforgeVersion: string
-  ramMb: number
-  counts: {
-    totalFiles: number
-    modJars: number
-    configFiles: number
-  }
-  modules: string[]
-  files: PublisherFile[]
-  warnings: string[]
-}
-
-export interface PublisherDiffResult {
-  ok: boolean
-  generatedAt: string
-  baselineVersion?: string
-  targetVersion: string
-  added: PublisherFile[]
-  changed: PublisherFile[]
-  unchanged: PublisherFile[]
-  removed: PublisherFile[]
-  upload: PublisherFile[]
-  scan: PublisherScanResult
-  warnings: string[]
-}
-
-export interface PublisherPublishResult {
-  ok: boolean
-  tagName: string
-  releaseUrl: string
-  manifestPath: string
-  releaseMetadataPath: string
-  artifactPath: string
-  neededJarsPath?: string
-  neededJarsCount?: number
-  uploaded: Array<{ name: string; role: string; size: number }>
-  reused: PublisherFile[]
-  removed: PublisherFile[]
-  warnings: string[]
 }
 
 export interface NativeHandoffPreparationPhase {

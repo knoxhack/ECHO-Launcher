@@ -11,7 +11,7 @@ import type {
 export const bundledPackManifest: PackManifest = {
   pack: 'ashfall-native-edition',
   name: 'Ashfall Native Edition',
-  version: 'GitHub latest',
+  version: 'Catalog latest',
   channel: 'alpha',
   minecraft: '26.1.2',
   minecraftVersion: '26.1.2',
@@ -36,7 +36,7 @@ export const bundledPackManifest: PackManifest = {
   modules: [],
   files: [],
   changelog: [
-    'Ashfall Native Edition installs only from strict public alpha release metadata.',
+    'Ashfall Native Edition installs only from approved Catalog metadata.',
     'NeoForge packs are intentionally excluded from the public launcher alpha.',
   ],
   worldgenWarning: true,
@@ -46,7 +46,7 @@ export const bundledPackManifest: PackManifest = {
 export const bundledAddonManifest: AddonManifest = {
   id: 'ashfall-addons',
   name: 'Ashfall Addons',
-  version: 'GitHub latest',
+  version: 'Catalog latest',
   category: 'pack',
   required: true,
   dependencies: [],
@@ -84,7 +84,7 @@ export const bundledServerManifest: ServerManifest = {
 }
 
 export const bundledReleaseManifest: ReleaseManifest = {
-  version: 'GitHub latest',
+  version: 'Catalog latest',
   channel: 'alpha',
   releasedAt: '',
   manifestUrl: '',

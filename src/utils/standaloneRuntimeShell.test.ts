@@ -49,6 +49,18 @@ describe('standalone runtime shell', () => {
     expect(state.label).toBe('Play Ashfall')
   })
 
+  it('allows NeoForge handoff without Native Loader metadata', () => {
+    const state = buildRuntimeLaunchButtonState({
+      mode: 'neoforge-minecraft',
+      state: null,
+      nativeAvailable: true,
+      nativeLoaderReady: false,
+    })
+
+    expect(state.disabled).toBe(false)
+    expect(state.label).toBe('Play with NeoForge')
+  })
+
   it('blocks native runtime launch when verification is missing', () => {
     const state = buildRuntimeLaunchButtonState({
       mode: 'native-runtime',

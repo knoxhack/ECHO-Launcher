@@ -1,13 +1,15 @@
 import type { AddonModule, BuildPreset, DependencyWarning } from '../types/addons'
 import type { EcosystemModuleRow } from '../types/launcher'
 
-export const bundledAddons: AddonModule[] = [
+const catalogPendingVersion = 'Catalog pending'
+
+const bundledAddonDefinitions: AddonModule[] = [
   {
     id: 'echocore',
     name: 'ECHO Core',
     category: 'Foundation',
-    version: '1.4.0',
-    latestVersion: '1.4.0',
+    version: catalogPendingVersion,
+    latestVersion: catalogPendingVersion,
     requirement: 'required',
     status: 'healthy',
     defaultEnabled: true,
@@ -62,8 +64,8 @@ export const bundledAddons: AddonModule[] = [
     id: 'echoworldcore',
     name: 'WorldCore',
     category: 'Foundation',
-    version: '1.4.0',
-    latestVersion: '1.4.0',
+    version: catalogPendingVersion,
+    latestVersion: catalogPendingVersion,
     requirement: 'required',
     status: 'warning',
     defaultEnabled: true,
@@ -90,8 +92,8 @@ export const bundledAddons: AddonModule[] = [
     id: 'echoterminal',
     name: 'ECHO Terminal',
     category: 'Player Interface',
-    version: '1.4.0',
-    latestVersion: '1.4.0',
+    version: catalogPendingVersion,
+    latestVersion: catalogPendingVersion,
     requirement: 'recommended',
     status: 'healthy',
     defaultEnabled: true,
@@ -160,8 +162,8 @@ export const bundledAddons: AddonModule[] = [
     id: 'echotutorialcore',
     name: 'TutorialCore',
     category: 'Player Interface',
-    version: '1.4.0',
-    latestVersion: '1.4.0',
+    version: catalogPendingVersion,
+    latestVersion: catalogPendingVersion,
     requirement: 'recommended',
     status: 'healthy',
     defaultEnabled: true,
@@ -174,8 +176,8 @@ export const bundledAddons: AddonModule[] = [
     id: 'ashfallprotocol',
     name: 'Ashfall Protocol',
     category: 'Gameplay',
-    version: '1.4.0',
-    latestVersion: '1.4.0',
+    version: catalogPendingVersion,
+    latestVersion: catalogPendingVersion,
     requirement: 'required',
     status: 'healthy',
     defaultEnabled: true,
@@ -368,6 +370,12 @@ export const bundledAddons: AddonModule[] = [
   },
 ]
 
+export const bundledAddons: AddonModule[] = bundledAddonDefinitions.map((addon) => ({
+  ...addon,
+  version: catalogPendingVersion,
+  latestVersion: catalogPendingVersion,
+}))
+
 export const buildPresets: BuildPreset[] = [
   {
     id: 'ashfall',
@@ -394,12 +402,12 @@ export const staticDependencyWarnings: DependencyWarning[] = [
   },
 ]
 
-export const bundledEcosystemModules: EcosystemModuleRow[] = [
+const bundledEcosystemModuleDefinitions: EcosystemModuleRow[] = [
   {
     id: 'echocore',
     name: 'ECHO Core',
-    installedVersion: '1.4.0',
-    latestVersion: '1.4.0',
+    installedVersion: 'Not installed',
+    latestVersion: catalogPendingVersion,
     status: 'healthy',
     requiredDependencies: [],
     optionalIntegrations: ['Terminal', 'MissionCore', 'RuntimeGuard'],
@@ -408,8 +416,8 @@ export const bundledEcosystemModules: EcosystemModuleRow[] = [
   {
     id: 'terminal',
     name: 'Terminal',
-    installedVersion: '1.4.0',
-    latestVersion: '1.4.0',
+    installedVersion: 'Not installed',
+    latestVersion: catalogPendingVersion,
     status: 'healthy',
     requiredDependencies: ['ECHO Core'],
     optionalIntegrations: ['TutorialCore', 'SignalOS'],
@@ -428,8 +436,8 @@ export const bundledEcosystemModules: EcosystemModuleRow[] = [
   {
     id: 'worldcore',
     name: 'WorldCore',
-    installedVersion: '1.4.0',
-    latestVersion: '1.4.0',
+    installedVersion: 'Not installed',
+    latestVersion: catalogPendingVersion,
     status: 'warning',
     requiredDependencies: ['ECHO Core', 'DataCore'],
     optionalIntegrations: ['WeatherCore', 'Agriculture Reclamation'],
@@ -468,12 +476,12 @@ export const bundledEcosystemModules: EcosystemModuleRow[] = [
   {
     id: 'tutorialcore',
     name: 'TutorialCore',
-    installedVersion: '1.4.0',
-    latestVersion: '1.4.0',
+    installedVersion: 'Not installed',
+    latestVersion: catalogPendingVersion,
     status: 'healthy',
     requiredDependencies: ['ECHO Core', 'Terminal'],
     optionalIntegrations: ['WeatherCore', 'RelicTech'],
-    notes: 'Guide content current for Ashfall 1.4.0.',
+    notes: 'Guide content appears after Catalog metadata loads.',
   },
   {
     id: 'relictech',
@@ -576,3 +584,11 @@ export const bundledEcosystemModules: EcosystemModuleRow[] = [
     notes: 'Optional chapter not installed for this profile.',
   },
 ]
+
+export const bundledEcosystemModules: EcosystemModuleRow[] = bundledEcosystemModuleDefinitions.map((module) => ({
+  ...module,
+  installedVersion: 'Not installed',
+  latestVersion: catalogPendingVersion,
+  status: 'missing',
+  notes: 'Catalog metadata has not been loaded for this module yet.',
+}))

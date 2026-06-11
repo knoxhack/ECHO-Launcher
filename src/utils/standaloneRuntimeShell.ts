@@ -44,41 +44,48 @@ export function runtimeSummaryStatus(state: StandaloneRuntimeState | null): Heal
   return 'operational'
 }
 
+function buildRuntimeModeCard(
+  id: LauncherRuntimeModeId,
+  state: StandaloneRuntimeState | null,
+  options: RuntimeModeCardOptions = {},
+): StandaloneRuntimeModeCard {
+  const standaloneStatus = runtimeSummaryStatus(state)
+  const minecraftReady = options.minecraftReady ?? true
+  const nativeLoaderReady = options.nativeLoaderReady ?? false
+
+  if (id === 'native-runtime') {
+    return {
+      id,
+      ...modeCopy[id],
+      status: standaloneStatus,
+      disabledReason: state?.ok ? undefined : 'Standalone runtime verification must pass before launch.',
+    }
+  }
+  if (id === 'neoforge-minecraft') {
+    return {
+      id,
+      ...modeCopy[id],
+      status: minecraftReady ? 'operational' : 'warning',
+      disabledReason: minecraftReady ? undefined : 'Minecraft Launcher readiness is degraded.',
+    }
+  }
+  return {
+    id,
+    ...modeCopy[id],
+    status: nativeLoaderReady && minecraftReady ? 'operational' : 'warning',
+    disabledReason: nativeLoaderReady
+      ? minecraftReady
+        ? undefined
+        : 'Minecraft Launcher readiness is degraded.'
+      : options.nativeLoaderDisabledReason ?? 'Native Loader release metadata is required before launch.',
+  }
+}
+
 export function buildRuntimeModeCards(
   state: StandaloneRuntimeState | null,
   options: RuntimeModeCardOptions = {},
 ): StandaloneRuntimeModeCard[] {
-  const standaloneStatus = runtimeSummaryStatus(state)
-  const minecraftReady = options.minecraftReady ?? true
-  const nativeLoaderReady = options.nativeLoaderReady ?? false
-  return modeOrder.map((id) => {
-    if (id === 'native-runtime') {
-      return {
-        id,
-        ...modeCopy[id],
-        status: standaloneStatus,
-        disabledReason: state?.ok ? undefined : 'Standalone runtime verification must pass before launch.',
-      }
-    }
-    if (id === 'neoforge-minecraft') {
-      return {
-        id,
-        ...modeCopy[id],
-        status: minecraftReady ? 'operational' : 'warning',
-        disabledReason: minecraftReady ? undefined : 'Minecraft Launcher readiness is degraded.',
-      }
-    }
-    return {
-      id,
-      ...modeCopy[id],
-      status: nativeLoaderReady && minecraftReady ? 'operational' : 'warning',
-      disabledReason: nativeLoaderReady
-        ? minecraftReady
-          ? undefined
-          : 'Minecraft Launcher readiness is degraded.'
-        : options.nativeLoaderDisabledReason ?? 'Native Loader release metadata is required before launch.',
-    }
-  })
+  return modeOrder.map((id) => buildRuntimeModeCard(id, state, options))
 }
 
 export function buildRuntimeLaunchButtonState(input: {
@@ -90,12 +97,11 @@ export function buildRuntimeLaunchButtonState(input: {
   nativeLoaderDisabledReason?: string
   launching?: boolean
 }): StandaloneRuntimeLaunchButtonState {
-  const cards = buildRuntimeModeCards(input.state, {
+  const card = buildRuntimeModeCard(input.mode, input.state, {
     minecraftReady: input.minecraftReady ?? true,
     nativeLoaderReady: input.nativeLoaderReady,
     nativeLoaderDisabledReason: input.nativeLoaderDisabledReason,
   })
-  const card = cards.find((item) => item.id === input.mode) ?? cards[0]
   if (!input.nativeAvailable) {
     return {
       disabled: true,

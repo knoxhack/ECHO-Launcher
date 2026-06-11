@@ -3,112 +3,28 @@ import type { DownloadItem, NewsItem } from '../types/launcher'
 
 export const bundledNews: NewsItem[] = [
   {
-    title: 'Ashfall 1.4.0 - Horizon',
-    channel: 'Stable',
-    summary: 'Worldgen updates, storm resource pass, and launcher repair metadata.',
-    date: 'May 10, 2026',
+    title: 'Catalog Loading',
+    channel: 'Catalog',
+    summary: 'Approved releases appear after the ECHO Catalog loads from the Release Index channel.',
+    date: 'Pending',
   },
   {
-    title: 'RelicTech v1.0.6 Released',
-    channel: 'Module',
-    summary: 'Dependency validation and safer relic progression initialization.',
-    date: 'May 8, 2026',
+    title: 'No Install Yet',
+    channel: 'Library',
+    summary: 'Installed loadout details appear after Ashfall is installed or verified.',
+    date: 'Pending',
   },
   {
-    title: 'ECHO Core Patch Notes',
-    channel: 'Core',
-    summary: 'Manifest compare fixes and improved server compatibility records.',
-    date: 'May 6, 2026',
+    title: 'Verified Checksums Required',
+    channel: 'Install',
+    summary: 'Install packages remain blocked until metadata includes SHA-256 URL records.',
+    date: 'Pending',
   },
 ]
 
-export const bundledDownloads: DownloadItem[] = [
-  {
-    id: 'download-echocore',
-    fileName: 'echocore-1.4.0.jar',
-    module: 'ECHO Core',
-    version: '1.4.0',
-    size: 3_612_480,
-    progress: 100,
-    status: 'completed',
-    hashStatus: 'verified',
-  },
-  {
-    id: 'download-weathercore',
-    fileName: 'echoweathercore-1.3.2.jar',
-    module: 'WeatherCore',
-    version: '1.3.2',
-    size: 8_912_640,
-    progress: 63,
-    status: 'downloading',
-    hashStatus: 'pending',
-  },
-  {
-    id: 'download-sound-assets',
-    fileName: 'echosoundcore-assets.zip',
-    module: 'SoundCore',
-    version: '1.3.0',
-    size: 210_763_776,
-    progress: 18,
-    status: 'queued',
-    hashStatus: 'pending',
-  },
-  {
-    id: 'download-configs',
-    fileName: 'ashfall-configs.zip',
-    module: 'Ashfall',
-    version: '1.4.0',
-    size: 2_892_800,
-    progress: 100,
-    status: 'failed',
-    hashStatus: 'failed',
-  },
-]
+export const bundledDownloads: DownloadItem[] = []
 
-export const bundledLogEntries: LogEntry[] = [
-  {
-    id: 'log-1',
-    level: 'ERROR',
-    source: 'RuntimeGuard',
-    message: 'Missing dependency: echopowergrid required by echorelictech.',
-    timestamp: '21:14:06',
-  },
-  {
-    id: 'log-2',
-    level: 'WARN',
-    source: 'ManifestService',
-    message: 'Version mismatch WeatherCore: installed 1.3.2, expected 1.3.4.',
-    timestamp: '21:14:03',
-  },
-  {
-    id: 'log-3',
-    level: 'INFO',
-    source: 'JavaRuntimeService',
-    message: 'Java Runtime OK: Eclipse Temurin 25.0.1 detected.',
-    timestamp: '21:13:58',
-  },
-  {
-    id: 'log-4',
-    level: 'ERROR',
-    source: 'NeoForge',
-    message: 'Game initialization aborted after dependency graph validation.',
-    timestamp: '21:13:52',
-  },
-  {
-    id: 'log-5',
-    level: 'WARN',
-    source: 'WorldCore',
-    message: 'Worldgen data changed since profile Ashfall was created.',
-    timestamp: '21:13:41',
-  },
-  {
-    id: 'log-6',
-    level: 'INFO',
-    source: 'AssetValidator',
-    message: 'SoundCore scan complete: 17 expected tracks found, 3 optional tracks missing.',
-    timestamp: '21:13:19',
-  },
-]
+export const bundledLogEntries: LogEntry[] = []
 
 export const diagnosticCounters: DiagnosticCounters = {
   healthy: 7,

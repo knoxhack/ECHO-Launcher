@@ -2,19 +2,24 @@ import type { LucideIcon } from 'lucide-react'
 
 export type PageId =
   | 'home'
+  | 'library'
+  | 'community'
+  | 'tools'
+  | 'settings'
+
+export type LegacyPageId =
+  | PageId
   | 'runtime'
   | 'modpacks'
   | 'profiles'
   | 'servers'
   | 'chat'
   | 'ecosystem'
-  | 'publisher'
-  | 'tools'
-  | 'settings'
   | 'downloads'
   | 'logs'
+  | 'publisher'
 
-export type ToolsTabId = 'repair' | 'export' | 'diagnostics' | 'crash'
+export type ToolsTabId = 'repair' | 'export' | 'diagnostics' | 'crash' | 'logs' | 'ecosystem'
 
 export type Channel = 'stable' | 'beta' | 'alpha' | 'nightly' | 'dev-local' | 'experimental' | 'dev'
 

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Channel, PageId, ToastMessage, ToastTone, ToolsTabId } from '../types/launcher'
 import type { PackOsVariant } from '../types/packos'
+import { normalizePageId } from '../components/shell/navigation'
 
 interface LauncherStore {
   activePage: PageId
@@ -68,9 +69,11 @@ export const useLauncherStore = create<LauncherStore>()(
     {
       name: 'echo-launcher-store',
       partialize: (state) => ({
+        activePage: state.activePage,
         selectedProfileId: state.selectedProfileId,
         selectedChannel: state.selectedChannel,
         selectedVariant: state.selectedVariant,
+        activeToolsTab: state.activeToolsTab,
       }),
       merge: (persisted, current) => ({
         ...current,
@@ -78,8 +81,8 @@ export const useLauncherStore = create<LauncherStore>()(
         selectedProfileId: normalizeSelectedProfileId((persisted as Partial<LauncherStore>)?.selectedProfileId),
         selectedChannel: 'alpha',
         selectedVariant: (persisted as Partial<LauncherStore>)?.selectedVariant ?? 'standard',
-        activeToolsTab: current.activeToolsTab,
-        activePage: 'home',
+        activeToolsTab: (persisted as Partial<LauncherStore>)?.activeToolsTab ?? current.activeToolsTab,
+        activePage: normalizePageId((persisted as Partial<LauncherStore>)?.activePage),
         toasts: [],
       }),
     },

@@ -8,14 +8,14 @@ describe('official modpack catalog', () => {
       'ashfall-neoforge-edition',
       'ashfall-standalone-edition',
     ])
-    expect(officialModpacks.map((pack) => pack.repo)).toEqual([
-      'knoxhack/ECHO-Ashfall-Native-Edition',
-      'knoxhack/ECHO-Ashfall-NeoForge-Edition',
-      'knoxhack/ECHO-Ashfall-Standalone-Edition',
+    expect(officialModpacks.map((pack) => pack.catalogId)).toEqual([
+      'ashfall-native-edition',
+      'ashfall-neoforge-edition',
+      'ashfall-standalone-edition',
     ])
     expect(officialModpacks.map((pack) => pack.runtimeMode)).toEqual([
       'native-loader-minecraft',
-      'native-loader-minecraft',
+      'neoforge-minecraft',
       'native-runtime',
     ])
     expect(JSON.stringify(officialModpacks)).toMatch(/neoforge/i)

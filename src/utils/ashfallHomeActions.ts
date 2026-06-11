@@ -1,16 +1,55 @@
 import type { LauncherProfile } from '../types/profiles'
 import type { ReleaseEntry } from '../types/releases'
+import type { LauncherRuntimeModeId } from '../types/standaloneRuntime'
 
-type HomeActionProfile = Pick<LauncherProfile, 'installPath' | 'status' | 'version'>
+type HomeActionProfile = Pick<LauncherProfile, 'installPath' | 'name' | 'runtimeMode' | 'status' | 'version'>
 type HomeActionRelease = Pick<ReleaseEntry, 'version'> | null | undefined
+export type AshfallHomeActionKind = 'install' | 'update' | 'play' | 'launch-standalone'
 
 export interface AshfallHomeActions {
   needsInstall: boolean
   needsUpdate: boolean
+  primaryActionKind: AshfallHomeActionKind
   primaryActionLabel: string
   primaryBusyLabel: string
   primaryUsesInstallFlow: boolean
   updateActionLabel: string | null
+}
+
+export interface AshfallHomeRoute {
+  mode: LauncherRuntimeModeId
+  label: string
+  shortLabel: string
+  detail: string
+  steps: string[]
+}
+
+const homeRoutes: Record<LauncherRuntimeModeId, AshfallHomeRoute> = {
+  'neoforge-minecraft': {
+    mode: 'neoforge-minecraft',
+    label: 'Minecraft + NeoForge',
+    shortLabel: 'NeoForge',
+    detail: 'Uses the official Minecraft Launcher with the selected Ashfall NeoForge profile.',
+    steps: ['Approved install package', 'NeoForge profile', 'Minecraft Launcher'],
+  },
+  'native-loader-minecraft': {
+    mode: 'native-loader-minecraft',
+    label: 'Minecraft + Native Loader',
+    shortLabel: 'Native Loader',
+    detail: 'Uses the official Minecraft Launcher with ECHO Native Loader metadata for the selected pack.',
+    steps: ['Approved install package', 'Native Loader metadata', 'Minecraft Launcher'],
+  },
+  'native-runtime': {
+    mode: 'native-runtime',
+    label: 'ECHO Standalone Engine',
+    shortLabel: 'Standalone',
+    detail: 'Runs the ECHO standalone engine for packs that do not use Minecraft, NeoForge, or Native Loader.',
+    steps: ['Runtime package', 'Standalone checks', 'ECHO engine'],
+  },
+}
+
+export function getAshfallHomeRoute(profile: Pick<LauncherProfile, 'runtimeMode'>): AshfallHomeRoute {
+  return homeRoutes[profile.runtimeMode ?? 'neoforge-minecraft']
 }
 
 function versionParts(version: string) {
@@ -41,17 +80,33 @@ function isNewerVersion(candidate: string, current: string) {
 export function getAshfallHomeActions(profile: HomeActionProfile, latestRelease: HomeActionRelease): AshfallHomeActions {
   const needsInstall = profile.status !== 'healthy' || !profile.installPath
   const needsUpdate = !needsInstall && Boolean(latestRelease?.version && isNewerVersion(latestRelease.version, profile.version))
+  const route = getAshfallHomeRoute(profile)
+  const primaryActionKind: AshfallHomeActionKind = needsInstall
+    ? 'install'
+    : needsUpdate
+      ? 'update'
+      : route.mode === 'native-runtime'
+        ? 'launch-standalone'
+        : 'play'
 
   return {
     needsInstall,
     needsUpdate,
-    primaryActionLabel: needsInstall
-      ? latestRelease?.version
-        ? `Install Ashfall ${latestRelease.version}`
-        : 'Install Ashfall'
-      : 'Play Ashfall',
-    primaryBusyLabel: needsInstall ? 'Installing...' : 'Launching...',
-    primaryUsesInstallFlow: needsInstall,
-    updateActionLabel: needsUpdate && latestRelease?.version ? `Update Ashfall ${latestRelease.version}` : null,
+    primaryActionKind,
+    primaryActionLabel:
+      primaryActionKind === 'install'
+        ? latestRelease?.version
+          ? `Install Ashfall ${latestRelease.version}`
+          : 'Install Ashfall'
+        : primaryActionKind === 'update'
+          ? latestRelease?.version
+            ? `Update Ashfall ${latestRelease.version}`
+            : 'Update Ashfall'
+          : primaryActionKind === 'launch-standalone'
+            ? 'Launch Standalone'
+            : 'Play Ashfall',
+    primaryBusyLabel: primaryActionKind === 'install' ? 'Installing...' : primaryActionKind === 'update' ? 'Updating...' : 'Launching...',
+    primaryUsesInstallFlow: primaryActionKind === 'install',
+    updateActionLabel: null,
   }
 }

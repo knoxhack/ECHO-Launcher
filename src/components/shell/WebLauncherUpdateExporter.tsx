@@ -200,7 +200,7 @@ export function WebLauncherUpdateExporter() {
         zip.file(`${versionFolder}/${artifact.name}`, artifact.file)
       }
       zip.file(`${versionFolder}/launcher-update-upload-report.json`, `${JSON.stringify(nextReport, null, 2)}\n`)
-      zip.file(`${versionFolder}/github-release-notes.md`, notes)
+      zip.file(`${versionFolder}/release-notes.md`, notes)
       const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
