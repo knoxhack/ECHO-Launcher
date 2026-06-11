@@ -30,7 +30,7 @@ import type { HealthStatus } from '../../types/launcher'
 import type { LauncherRuntimeModeId, MinecraftRuntimeModeId } from '../../types/standaloneRuntime'
 import type { NativeHandoffPreparationResult, NativeInstallResult } from '../../types/native'
 import { formatOfficialServerUpdatedAt, getOfficialServerRuntimeState } from '../../types/serverStatus'
-import { getAshfallHomeActions, getAshfallHomeRoute } from '../../utils/ashfallHomeActions'
+import { defaultAshfallRuntimeMode, getAshfallHomeActions, getAshfallHomeRoute } from '../../utils/ashfallHomeActions'
 import { OFFICIAL_ASHFALL_CHAT_CHANNEL_ID } from '../../utils/communityChat'
 import { officialServerSettingsDefaults } from '../../utils/officialServerSettings'
 import {
@@ -117,7 +117,8 @@ export function HomePage() {
   const profileRefreshInFlight = useRef(false)
   const lastProfileRefreshAt = useRef(0)
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
-  const selectedRuntimeMode = selectedProfile?.runtimeMode ?? 'neoforge-minecraft'
+  const selectedRuntimeMode = defaultAshfallRuntimeMode(selectedProfile ?? {})
+  const selectedMinecraftRuntimeMode: MinecraftRuntimeModeId = selectedRuntimeMode === 'neoforge-minecraft' ? 'neoforge-minecraft' : 'native-loader-minecraft'
   const profileForRuntimeMode = useMemo(
     () => Object.fromEntries(profiles.filter((profile) => profile.runtimeMode).map((profile) => [profile.runtimeMode, profile])),
     [profiles],
@@ -274,7 +275,7 @@ export function HomePage() {
     }
   }, [officialServerStatusUrl, officialStatusFallback, officialStatusPollSeconds, refreshOfficialStatus])
 
-  const prepareAndOpenMinecraftLauncher = async (runtimeMode: MinecraftRuntimeModeId = 'neoforge-minecraft') => {
+  const prepareAndOpenMinecraftLauncher = async (runtimeMode: MinecraftRuntimeModeId = selectedMinecraftRuntimeMode) => {
     const runtimeLabel = runtimeMode === 'native-loader-minecraft' ? 'Native Loader + Minecraft' : 'NeoForge + Minecraft'
     if (packOsBlocked) {
       setHandoffProgress(96)

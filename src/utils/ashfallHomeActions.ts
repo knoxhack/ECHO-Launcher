@@ -2,7 +2,7 @@ import type { LauncherProfile } from '../types/profiles'
 import type { ReleaseEntry } from '../types/releases'
 import type { LauncherRuntimeModeId } from '../types/standaloneRuntime'
 
-type HomeActionProfile = Pick<LauncherProfile, 'installPath' | 'name' | 'runtimeMode' | 'status' | 'version'>
+type HomeActionProfile = Pick<LauncherProfile, 'installPath' | 'name' | 'runtimeMode' | 'status' | 'version'> & Partial<Pick<LauncherProfile, 'id'>>
 type HomeActionRelease = Pick<ReleaseEntry, 'version'> | null | undefined
 export type AshfallHomeActionKind = 'install' | 'update' | 'play' | 'launch-standalone'
 
@@ -48,8 +48,15 @@ const homeRoutes: Record<LauncherRuntimeModeId, AshfallHomeRoute> = {
   },
 }
 
-export function getAshfallHomeRoute(profile: Pick<LauncherProfile, 'runtimeMode'>): AshfallHomeRoute {
-  return homeRoutes[profile.runtimeMode ?? 'neoforge-minecraft']
+export function defaultAshfallRuntimeMode(profile: Partial<Pick<LauncherProfile, 'id' | 'runtimeMode'>>): LauncherRuntimeModeId {
+  if (profile.runtimeMode) return profile.runtimeMode
+  if (profile.id === 'ashfall-native-edition' || profile.id === 'ashfall-native-loader' || profile.id === 'ashfall') return 'native-loader-minecraft'
+  if (profile.id === 'ashfall-standalone-edition') return 'native-runtime'
+  return 'neoforge-minecraft'
+}
+
+export function getAshfallHomeRoute(profile: Partial<Pick<LauncherProfile, 'id' | 'runtimeMode'>>): AshfallHomeRoute {
+  return homeRoutes[defaultAshfallRuntimeMode(profile)]
 }
 
 function versionParts(version: string) {

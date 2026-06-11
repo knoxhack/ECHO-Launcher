@@ -78,13 +78,13 @@ export class LaunchService {
     refreshRelease = true,
     operationId?: string,
     updatePolicy: HandoffUpdatePolicy = 'allow',
-    runtimeMode: MinecraftRuntimeModeId = 'neoforge-minecraft',
+    runtimeMode?: MinecraftRuntimeModeId,
   ): Promise<NativeHandoffPreparationResult> {
     requireNative()
     return invokeNative('launch:prepare-handoff', { profileId, installPath, ramGb, refreshRelease, operationId, updatePolicy, runtimeMode })
   }
 
-  async handoffToMinecraftLauncher(profileId: string, installPath?: string, ramGb?: number, runtimeMode: MinecraftRuntimeModeId = 'neoforge-minecraft'): Promise<MinecraftLauncherHandoffResult> {
+  async handoffToMinecraftLauncher(profileId: string, installPath?: string, ramGb?: number, runtimeMode?: MinecraftRuntimeModeId): Promise<MinecraftLauncherHandoffResult> {
     requireNative()
     return invokeNative('minecraft-launcher:handoff', { profileId, installPath, ramGb, runtimeMode })
   }

@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Official desktop launcher for ECHO modpacks and Ashfall public beta builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",

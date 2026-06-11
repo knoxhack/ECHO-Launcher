@@ -159,7 +159,7 @@ const DEFAULT_DESKTOP_SETTINGS = {
     activePairing: null,
   },
 }
-const MINECRAFT_RUNTIME_MODES = new Set(['native-loader-minecraft'])
+const MINECRAFT_RUNTIME_MODES = new Set(['neoforge-minecraft', 'native-loader-minecraft'])
 const DEFAULT_ECHO_NATIVE_LAUNCHER_ROOT = 'C:\\Experimental\\Codex\\ECHONATIVEPLATFORM\\ECHO-Native'
 let activeLaunch = null
 const operationStatuses = new Map()
@@ -4035,8 +4035,18 @@ async function resolveProfileAndManifest(payload = {}) {
   return { profile, manifest, installPath }
 }
 
-function normalizeMinecraftRuntimeMode(runtimeMode) {
-  return MINECRAFT_RUNTIME_MODES.has(runtimeMode) ? runtimeMode : 'neoforge-minecraft'
+function defaultMinecraftRuntimeMode(profileOrId = CANONICAL_PROFILE_ID) {
+  if (profileOrId && typeof profileOrId === 'object' && MINECRAFT_RUNTIME_MODES.has(profileOrId.runtimeMode)) {
+    return profileOrId.runtimeMode
+  }
+  const profileId = typeof profileOrId === 'string' ? profileOrId : profileOrId?.id
+  const packId = normalizeOfficialPackId(profileId)
+  if (packId === 'ashfall-native-edition') return 'native-loader-minecraft'
+  return 'neoforge-minecraft'
+}
+
+function normalizeMinecraftRuntimeMode(runtimeMode, profileOrId = CANONICAL_PROFILE_ID) {
+  return MINECRAFT_RUNTIME_MODES.has(runtimeMode) ? runtimeMode : defaultMinecraftRuntimeMode(profileOrId)
 }
 
 function minecraftRuntimeLabel(runtimeMode) {
@@ -4049,15 +4059,15 @@ function minecraftRuntimeLoaderKey(runtimeMode) {
   return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' ? 'native-loader' : 'neoforge'
 }
 
-function minecraftLauncherProfileId(profileId, runtimeMode = 'neoforge-minecraft') {
+function minecraftLauncherProfileId(profileId, runtimeMode) {
   const safeId = safeFileName(profileId).toLowerCase().replace(/-+/g, '-').replace(/^-|-$/g, '')
   const baseId = `echo-${safeId || 'profile'}`
-  return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' && !baseId.endsWith('-native-loader') ? `${baseId}-native-loader` : baseId
+  return normalizeMinecraftRuntimeMode(runtimeMode, profileId) === 'native-loader-minecraft' && !baseId.endsWith('-native-loader') ? `${baseId}-native-loader` : baseId
 }
 
-function minecraftLauncherProfileName(profile, runtimeMode = 'neoforge-minecraft') {
+function minecraftLauncherProfileName(profile, runtimeMode) {
   const baseName = profile.name?.startsWith('ECHO ') ? profile.name : profile.name ?? 'ECHO Pack'
-  return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' && !/native loader/i.test(baseName) ? `${baseName} - Native Loader` : baseName
+  return normalizeMinecraftRuntimeMode(runtimeMode, profile) === 'native-loader-minecraft' && !/native loader/i.test(baseName) ? `${baseName} - Native Loader` : baseName
 }
 
 function nativeLoaderMinecraftVersionId(manifest) {
@@ -4065,8 +4075,8 @@ function nativeLoaderMinecraftVersionId(manifest) {
   return String(manifest.nativeLoader?.minecraftLauncherVersionId ?? '').trim() || (version ? `echo-native-loader-${version}` : '')
 }
 
-function minecraftLauncherVersionId(manifest, runtimeMode = 'neoforge-minecraft') {
-  if (normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft') return nativeLoaderMinecraftVersionId(manifest)
+function minecraftLauncherVersionId(manifest, runtimeMode) {
+  if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') return nativeLoaderMinecraftVersionId(manifest)
   return manifest.loader?.minecraftLauncherVersionId ?? `neoforge-${manifest.loader?.version ?? 'unknown'}`
 }
 
@@ -4144,38 +4154,44 @@ function cleanupConflictingMinecraftLauncherProfiles(document, profileId, versio
   return { removedProfiles, warnings }
 }
 
-function manifestModJarPaths(manifest) {
+function manifestMinecraftRuntimeFilePaths(manifest, runtimeMode) {
+  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
+  const pattern = normalizedMode === 'native-loader-minecraft' ? /^addons\/.+\.echo-addon$/iu : /^mods\/.+\.jar$/iu
   return (manifest.files ?? [])
     .filter((file) => file.required !== false)
     .map((file) => String(file.path ?? '').replace(/\\/g, '/'))
-    .filter((filePath) => /^mods\/.+\.jar$/iu.test(filePath))
+    .filter((filePath) => pattern.test(filePath))
 }
 
-async function validateAshfallInstanceMods(installPath, manifest) {
-  const expectedMods = manifestModJarPaths(manifest)
-  const missingMods = []
-  for (const relativePath of expectedMods) {
-    if (!(await exists(safeJoin(installPath, relativePath)))) missingMods.push(relativePath)
+async function validateAshfallInstanceMods(installPath, manifest, runtimeMode) {
+  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
+  const expectedFiles = manifestMinecraftRuntimeFilePaths(manifest, normalizedMode)
+  const missingFiles = []
+  for (const relativePath of expectedFiles) {
+    if (!(await exists(safeJoin(installPath, relativePath)))) missingFiles.push(relativePath)
   }
-  const validatedModsCount = expectedMods.length - missingMods.length
-  if (expectedMods.length === 0) {
+  const validatedModsCount = expectedFiles.length - missingFiles.length
+  const native = normalizedMode === 'native-loader-minecraft'
+  const itemLabel = native ? 'Native addon file' : 'mod jar'
+  const folderName = native ? 'addons' : 'mods'
+  if (expectedFiles.length === 0) {
     return {
       ok: false,
       validatedModsCount,
-      warnings: ['Ashfall release manifest does not list any mod jars, so ECHO cannot prepare a safe Minecraft Launcher handoff.'],
+      warnings: [`Ashfall release manifest does not list any ${native ? 'Native addon files' : 'mod jars'}, so ECHO cannot prepare a safe Minecraft Launcher handoff.`],
     }
   }
-  if (missingMods.length > 0) {
-    const preview = missingMods.slice(0, 5).join(', ')
+  if (missingFiles.length > 0) {
+    const preview = missingFiles.slice(0, 5).join(', ')
     return {
       ok: false,
       validatedModsCount,
       warnings: [
-        `${missingMods.length} Ashfall mod jar${missingMods.length === 1 ? '' : 's'} missing from ${path.join(installPath, 'mods')}. First missing: ${preview}.`,
+        `${missingFiles.length} Ashfall ${itemLabel}${missingFiles.length === 1 ? '' : 's'} missing from ${path.join(installPath, folderName)}. First missing: ${preview}.`,
       ],
     }
   }
-  return { ok: true, validatedModsCount, warnings: [] }
+  return { ok: true, validatedModsCount, validatedFileLabel: itemLabel, warnings: [] }
 }
 
 function validateMinecraftLauncherProfileReady(document, profileId, versionId, installPath) {
@@ -4197,8 +4213,8 @@ function validateMinecraftLauncherProfileReady(document, profileId, versionId, i
   }
 }
 
-function launcherRuntimeManifestDefinition(manifest, runtimeMode = 'neoforge-minecraft') {
-  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode)
+function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
+  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
   if (normalizedMode === 'native-loader-minecraft') {
     return {
       runtimeMode: normalizedMode,
@@ -4223,7 +4239,7 @@ function launcherRuntimeManifestDefinition(manifest, runtimeMode = 'neoforge-min
   }
 }
 
-function launcherVersionManifestRequirement(manifest, versionId, runtimeMode = 'neoforge-minecraft') {
+function launcherVersionManifestRequirement(manifest, versionId, runtimeMode) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const versionJson = runtime.versionJson
   const expectedInheritsFrom = versionJson?.inheritsFrom ?? minecraftVersionFromManifest(manifest)
@@ -4234,7 +4250,7 @@ function launcherVersionManifestRequirement(manifest, versionId, runtimeMode = '
   }
 }
 
-function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode = 'neoforge-minecraft') {
+function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const versionJson = runtime.versionJson
   const requirement = launcherVersionManifestRequirement(manifest, versionId, runtimeMode)
@@ -4283,7 +4299,7 @@ function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode
   return { ok: true, versionJson, requirement }
 }
 
-function validateMinecraftLauncherVersionDocument(document, manifest, versionId, runtimeMode = 'neoforge-minecraft') {
+function validateMinecraftLauncherVersionDocument(document, manifest, versionId, runtimeMode) {
   const manifestValidation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode)
   if (!manifestValidation.ok) {
     return { valid: false, source: 'invalid', reason: manifestValidation.reason }
@@ -4387,7 +4403,7 @@ async function missingNeoForgeClientArtifacts(minecraftRoot, manifest) {
   return missing
 }
 
-function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode = 'neoforge-minecraft') {
+function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode)
   if (!validation.ok) {
@@ -4489,7 +4505,7 @@ async function detectMinecraftRoot(options = {}) {
   return null
 }
 
-async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode = 'neoforge-minecraft') {
+async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode) {
   const expected = minecraftLauncherVersionId(manifest, runtimeMode)
   const manifestValidation = validateReleaseLauncherVersionManifest(manifest, expected, runtimeMode)
   if (!manifestValidation.ok) {
@@ -4510,8 +4526,8 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
   return { versionId: expected, ready: false, source: 'missing', metadataPath: expectedJson }
 }
 
-async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode = 'neoforge-minecraft') {
-  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode)
+async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode) {
+  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, profile)
   const baseVersion = await ensureMinecraftLauncherBaseVersionMetadata(minecraftRoot, manifest)
   const runtimeArtifacts = normalizedMode === 'neoforge-minecraft'
     ? await ensureNeoForgeClientArtifacts(minecraftRoot, manifest, profile, operationId)
@@ -4900,7 +4916,7 @@ async function minecraftLauncherOpen(payload = {}) {
 
 async function minecraftLauncherProfileStatus(payload = {}) {
   const { profile, manifest, installPath } = await resolveProfileAndManifest(payload)
-  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
   const runtimeLabel = minecraftRuntimeLabel(runtimeMode)
   const minecraftRoot = await detectMinecraftRoot({ createIfMissing: payload.createMinecraftRoot === true })
   const profileId = minecraftLauncherProfileId(profile.id, runtimeMode)
@@ -5013,9 +5029,9 @@ async function openOfficialMinecraftLauncher() {
 }
 
 async function minecraftLauncherHandoff(payload = {}) {
-  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode)
-  const runtimeLabel = minecraftRuntimeLabel(runtimeMode)
   const status = await minecraftLauncherProfileStatus({ ...payload, createMinecraftRoot: true })
+  const runtimeMode = status.runtimeMode
+  const runtimeLabel = status.runtimeLabel
   if (!status.ok) {
     return {
       ...status,
@@ -5117,7 +5133,7 @@ async function minecraftLauncherHandoff(payload = {}) {
     statusWithVersion.versionId,
     installPath,
   )
-  const modsValidation = await validateAshfallInstanceMods(installPath, manifest)
+  const modsValidation = await validateAshfallInstanceMods(installPath, manifest, runtimeMode)
   const launcherProfileWarnings = [...profileCleanup.warnings, ...profileValidation.warnings, ...modsValidation.warnings]
   if (!profileValidation.ok || !modsValidation.ok) {
     const message = launcherProfileWarnings.join(' ')
@@ -5166,7 +5182,7 @@ async function minecraftLauncherHandoff(payload = {}) {
     : ''
   await appendLauncherLog(
     'INFO',
-    `Minecraft Launcher ${runtimeLabel} handoff profile ${statusWithVersion.profileId} updated for ${profile.name}; ${modsValidation.validatedModsCount} Ashfall mod jars validated in ${installPath}.${removedProfileMessage}`,
+    `Minecraft Launcher ${runtimeLabel} handoff profile ${statusWithVersion.profileId} updated for ${profile.name}; ${modsValidation.validatedModsCount} Ashfall ${modsValidation.validatedFileLabel ?? 'runtime file'}${modsValidation.validatedModsCount === 1 ? '' : 's'} validated in ${installPath}.${removedProfileMessage}`,
   )
 
   return {
@@ -5265,7 +5281,7 @@ async function createVerifiedInstallReport(profile, manifest, installPath, verif
   return writeInstallLikeReport('install', installId, report)
 }
 
-function packOsLaunchBlockResult(packOs, operationId, phases, runtimeMode = 'neoforge-minecraft', profileId = CANONICAL_PROFILE_ID) {
+function packOsLaunchBlockResult(packOs, operationId, phases, runtimeMode, profileId = CANONICAL_PROFILE_ID) {
   const selectedPack = packOs?.packs?.find((pack) => pack.packId === profileId) ?? packOs?.selectedPack
   if (!selectedPack || selectedPack.launchAllowed !== false || !BLOCKING_UI_STATES.has(selectedPack.uiState)) return null
   const reason = [
@@ -5285,8 +5301,8 @@ function packOsLaunchBlockResult(packOs, operationId, phases, runtimeMode = 'neo
   return {
     ok: false,
     profileId: selectedPack.packId ?? profileId,
-    runtimeMode: normalizeMinecraftRuntimeMode(runtimeMode),
-    runtimeLabel: minecraftRuntimeLabel(runtimeMode),
+    runtimeMode: normalizeMinecraftRuntimeMode(runtimeMode, profileId),
+    runtimeLabel: minecraftRuntimeLabel(normalizeMinecraftRuntimeMode(runtimeMode, profileId)),
     operationId,
     phases,
     release: null,
@@ -5302,7 +5318,7 @@ function packOsLaunchBlockResult(packOs, operationId, phases, runtimeMode = 'neo
 async function launchPrepareHandoff(payload = {}) {
   const operationId = payload.operationId ?? createOperationId('handoff')
   const updatePolicy = payload.updatePolicy === 'skip' ? 'skip' : 'allow'
-  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, payload.profileId ?? CANONICAL_PROFILE_ID)
   const runtimeLabel = minecraftRuntimeLabel(runtimeMode)
   updateOperationStatus(operationId, {
     kind: 'handoff',
