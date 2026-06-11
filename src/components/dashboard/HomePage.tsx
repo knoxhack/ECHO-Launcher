@@ -162,7 +162,7 @@ export function HomePage() {
         const localNativeStatus = await launchService.nativeLoaderStatus().catch(() => null)
         const manifest = nativeLoaderRelease?.version
           ? (await invokeNative('release:fetch-manifest', {
-              channel: 'stable',
+              channel: nativeLoaderProfile?.channel ?? 'alpha',
               version: nativeLoaderRelease.version,
               pack: 'ashfall-native-edition',
               refresh: false,

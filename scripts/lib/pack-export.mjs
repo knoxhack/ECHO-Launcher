@@ -439,7 +439,7 @@ export function buildPackManifest({
   const modules = [...new Set(manifestFiles.map((file) => file.moduleId))].sort()
 
   const normalizedPack = normalizePackId(pack)
-  return {
+  const baseManifest = {
     pack: normalizedPack,
     name,
     version,
@@ -477,6 +477,33 @@ export function buildPackManifest({
     ]),
     worldgenWarning: true,
     ramMb: instance.allocatedMemoryMb,
+  }
+  if (normalizedPack === 'ashfall-native-edition') {
+    baseManifest.nativeLoader = nativeLoaderManifestFromInstance(instance)
+  }
+  return baseManifest
+}
+
+function nativeLoaderManifestFromInstance(instance) {
+  const version = String(process.env.ECHO_NATIVE_LOADER_VERSION || '1.0.0').trim()
+  const versionId = String(process.env.ECHO_NATIVE_LOADER_VERSION_ID || `echo-native-loader-${version}`).trim()
+  return {
+    version,
+    minecraftLauncherVersionId: versionId,
+    versionJson: {
+      id: versionId,
+      inheritsFrom: instance.minecraftVersion,
+      mainClass: process.env.ECHO_NATIVE_LOADER_MAIN_CLASS || 'com.echo.NativeLoaderClient',
+      arguments: {
+        game: [],
+        jvm: [],
+      },
+      libraries: [
+        {
+          name: process.env.ECHO_NATIVE_LOADER_LIBRARY || `com.echo:native-loader:${version}`,
+        },
+      ],
+    },
   }
 }
 

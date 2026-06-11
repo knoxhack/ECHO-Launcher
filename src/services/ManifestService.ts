@@ -11,7 +11,7 @@ export interface ManifestComparison {
 }
 
 export class ManifestService {
-  async loadManifest(channel: Channel = 'stable'): Promise<PackManifest> {
+  async loadManifest(channel: Channel = 'alpha'): Promise<PackManifest> {
     requireNative()
     const manifest = await invokeNative('manifest:load')
     return { ...manifest, channel }
@@ -33,7 +33,7 @@ export class ManifestService {
   }
 
   getAvailableChannels(): Channel[] {
-    return ['stable']
+    return ['alpha', 'experimental']
   }
 }
 

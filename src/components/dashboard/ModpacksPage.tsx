@@ -309,7 +309,7 @@ function OfficialPackCard({
         <div>
           <p className="text-sm leading-6 text-slate-300">
             {isPlayable
-              ? playableRelease?.releaseNotes[0] ?? `Upload echo-release.json, ${pack.id}-stable-version.pack.json, and the matching pack archive to enable tester installs.`
+              ? playableRelease?.releaseNotes[0] ?? `Upload echo-release.json, ${pack.id}-${pack.channel}-version.pack.json, and the matching pack archive to enable tester installs.`
               : pack.detail}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">

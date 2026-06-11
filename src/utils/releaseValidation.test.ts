@@ -108,6 +108,24 @@ const canonicalNativePack: CanonicalReleaseIndexEntry = {
   compatibility: ['ashfall-native-edition'],
 }
 
+const canonicalStandalonePack: CanonicalReleaseIndexEntry = {
+  ...canonicalPack,
+  id: 'ashfall-standalone-edition',
+  channel: 'experimental',
+  sourceRepo: 'knoxhack/ECHO-Ashfall-Standalone-Edition',
+  artifacts: {
+    pack: { file: 'ashfall-standalone-edition-0.1.0.zip', sha256: '7'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Ashfall-Standalone-Edition/releases/download/v0.1.0/ashfall-standalone-edition-0.1.0.zip', size: 100 },
+    manifest: {
+      file: 'ashfall-standalone-edition-experimental-0.1.0.pack.json',
+      sha256: '8'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Ashfall-Standalone-Edition/releases/download/v0.1.0/ashfall-standalone-edition-experimental-0.1.0.pack.json',
+      size: 10,
+    },
+  },
+  dependencies: [],
+  compatibility: ['ashfall-standalone-edition'],
+}
+
 const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
   id: 'echo-launcher',
   kind: 'product',
@@ -237,6 +255,7 @@ describe('releaseValidation', () => {
 
   it('maps approved Release Index modpacks into strict release entries', () => {
     const entry = releaseEntryFromCanonicalModpack(canonicalPack, '2026-06-09T00:00:00Z')
+    const standaloneEntry = releaseEntryFromCanonicalModpack(canonicalStandalonePack, '2026-06-09T00:00:00Z')
 
     expect(entry).toMatchObject({
       pack: 'ashfall-neoforge-edition',
@@ -246,6 +265,13 @@ describe('releaseValidation', () => {
       trust: 'verified-metadata',
     })
     expect(entry?.assets.map((asset) => asset.name)).toContain('ashfall-neoforge-edition-0.1.0.zip')
+    expect(standaloneEntry).toMatchObject({
+      pack: 'ashfall-standalone-edition',
+      channel: 'experimental',
+      version: '0.1.0',
+      manifestAssetName: 'ashfall-standalone-edition-experimental-0.1.0.pack.json',
+      trust: 'verified-metadata',
+    })
   })
 
   it('parses and resolves echo protocol links only through approved index entries', () => {

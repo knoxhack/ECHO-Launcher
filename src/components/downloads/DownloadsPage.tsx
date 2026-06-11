@@ -127,7 +127,7 @@ export function DownloadsPage() {
 
   const fetchSelectedManifest = async () => {
     try {
-      const result = await releaseService.fetchManifest('stable', selectedRelease?.version, true, selectedProfile.id)
+      const result = await releaseService.fetchManifest(selectedProfile.channel, selectedRelease?.version, true, selectedProfile.id)
       setManifestPath(undefined)
       addToast(
         result.cached ? 'Manifest cache verified' : 'Release manifest fetched',
@@ -290,7 +290,7 @@ export function DownloadsPage() {
               <StatusChip label="Non-playable" status="warning" />
             </div>
             <div className="mt-4 grid gap-2 md:grid-cols-3">
-              {['echo-release.json', `${selectedProfile.id}-stable-<version>.pack.json`, 'metadata-named .echo-pack.zip or pack.zip'].map((asset) => (
+              {['echo-release.json', `${selectedProfile.id}-${selectedProfile.channel}-<version>.pack.json`, 'metadata-named .echo-pack.zip or pack.zip'].map((asset) => (
                 <div className="rounded-lg border border-amber-echo/30 bg-black/25 px-3 py-2 font-mono text-xs text-amber-100" key={asset}>
                   {asset}
                 </div>

@@ -128,6 +128,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
 ]
 const KNOWN_ASHFALL_INSTANCE_PATHS = process.platform === 'win32' ? ['C:\\CurseForge\\Instances\\Ashfall Protocol'] : []
 const CHANNELS = new Set([CANONICAL_CHANNEL, 'experimental'])
+const PACK_CHANNELS = [CANONICAL_CHANNEL, 'experimental']
 const OFFICIAL_SERVER_STALE_MS = 120_000
 const OFFICIAL_SERVER_STATUS_URL = process.env.ECHO_OFFICIAL_SERVER_STATUS_URL || 'https://api.echoplatform.dev/status.json'
 const OFFICIAL_COMMUNITY_API_URL = process.env.ECHO_COMMUNITY_API_URL || 'https://api.echoplatform.dev'
@@ -245,6 +246,11 @@ function safeJoin(root, relativePath) {
 
 function manifestAssetName(channel, version, pack = CANONICAL_PROFILE_ID) {
   return `${pack}-${channel}-${version}.pack.json`
+}
+
+function defaultChannelForPack(pack) {
+  const normalized = normalizeOfficialPackId(pack)
+  return profileDefinition(normalized ?? CANONICAL_PROFILE_ID).channel ?? CANONICAL_CHANNEL
 }
 
 
@@ -2814,15 +2820,15 @@ function parseReleaseMetadataEntry(metadata, release, assets, diagnostics, item 
   const manifestAssetFromMetadata = effectiveMetadata.manifestAsset ?? effectiveMetadata.manifestAssetName ?? effectiveMetadata.manifestName
   const manifestSha256 = effectiveMetadata.manifestSha256 ?? effectiveMetadata.sha256 ?? metadataSha(manifestAssetFromMetadata)
   const manifestAsset = assets.find((asset) => asset.name === manifestAssetFromMetadata)
-  const fallbackManifest = assets.find((asset) => new RegExp(`^${pack}-stable-.+\\.pack\\.json$`, 'i').test(asset.name))
+  const fallbackManifest = assets.find((asset) => PACK_CHANNELS.some((channel) => new RegExp(`^${pack}-${channel}-.+\\.pack\\.json$`, 'i').test(asset.name)))
   const legacyFallbackManifest = pack === CANONICAL_PROFILE_ID
     ? assets.find((asset) => /^ashfall-stable-.+\.pack\.json$/i.test(asset.name))
     : null
   const selectedManifest = manifestAsset ?? fallbackManifest ?? legacyFallbackManifest
-  const parsed = selectedManifest?.name.match(new RegExp(`^${pack}-stable-(.+)\\.pack\\.json$`, 'i'))
+  const parsed = selectedManifest?.name.match(new RegExp(`^${pack}-(${PACK_CHANNELS.join('|')})-(.+)\\.pack\\.json$`, 'i'))
     ?? selectedManifest?.name.match(/^ashfall-stable-(.+)\.pack\.json$/i)
-  const channel = effectiveMetadata.channel ?? CANONICAL_CHANNEL
-  const version = effectiveMetadata.version ?? parsed?.[1] ?? release.tag_name.replace(/^v/i, '')
+  const channel = effectiveMetadata.channel ?? (parsed?.[1] && CHANNELS.has(parsed[1]) ? parsed[1] : defaultChannelForPack(pack))
+  const version = effectiveMetadata.version ?? (parsed?.[2] ?? parsed?.[1]) ?? release.tag_name.replace(/^v/i, '')
   const artifactAssetName = effectiveMetadata.artifactAsset ?? effectiveMetadata.artifactAssetName ?? effectiveMetadata.artifactName
   const artifactAsset = artifactAssetName ? assets.find((asset) => asset.name === artifactAssetName) : null
 
@@ -3159,7 +3165,7 @@ async function resolveInstallableManifest(manifest, entry, payload = {}) {
 }
 
 async function resolveReleaseEntry(payload, profile) {
-  const channel = payload.channel ?? profile?.channel ?? 'stable'
+  const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(payload.pack ?? profile?.id)
   const pack = normalizeOfficialPackId(payload.pack) ?? normalizeOfficialPackId(profile?.id) ?? CANONICAL_PROFILE_ID
   const index = await releaseList({ refresh: payload.refresh })
   const entry = selectReleaseEntry(index, channel, payload.version, pack)
@@ -3168,7 +3174,7 @@ async function resolveReleaseEntry(payload, profile) {
 }
 
 async function releaseFetchManifest(payload = {}) {
-  const channel = payload.channel ?? 'stable'
+  const channel = payload.channel ?? defaultChannelForPack(payload.pack)
   if (!CHANNELS.has(channel)) throw new Error(`Unsupported pack channel: ${channel}`)
 
   const entry = await resolveReleaseEntry(payload, { channel, id: normalizeOfficialPackId(payload.pack) ?? CANONICAL_PROFILE_ID })
@@ -3619,7 +3625,7 @@ async function deleteReleaseAssetsByName(owner, repo, token, release, names) {
 async function resolveInstallManifest(payload, profile) {
   if (payload.manifest) return validatePackManifest(payload.manifest)
   if (payload.manifestPath) return manifestLoad(payload)
-  const channel = payload.channel ?? profile?.channel ?? 'stable'
+  const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(payload.pack ?? profile?.id)
   const fetched = await releaseFetchManifest({ channel, version: payload.version, refresh: payload.refresh ?? true, pack: payload.pack ?? profile?.id })
   return fetched.manifest
 }
@@ -6849,7 +6855,7 @@ async function instanceImport(payload = {}) {
   const profile = {
     id: `imported-${candidate.id}`,
     name: payload.name ?? candidate.name,
-    channel: CHANNELS.has(candidate.channel) ? candidate.channel : 'stable',
+    channel: CHANNELS.has(candidate.channel) ? candidate.channel : CANONICAL_CHANNEL,
     channelLabel: 'Imported Install',
     version: candidate.version ?? 'unknown',
     minecraft: 'unknown',

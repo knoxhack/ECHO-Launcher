@@ -11,7 +11,16 @@ export class ProfileService {
   }
 
   updateChannel(profile: LauncherProfile, channel: Channel): LauncherProfile {
-    return { ...profile, channel: channel === 'stable' ? channel : 'stable', channelLabel: 'Release' }
+    const labels: Partial<Record<Channel, string>> = {
+      alpha: 'Alpha',
+      experimental: 'Experimental',
+      stable: 'Release',
+      beta: 'Beta',
+      nightly: 'Nightly',
+      'dev-local': 'Dev Local',
+      dev: 'Dev',
+    }
+    return { ...profile, channel, channelLabel: labels[channel] ?? profile.channelLabel }
   }
 
   updateEnabledAddons(profile: LauncherProfile, enabledAddons: string[]): LauncherProfile {
