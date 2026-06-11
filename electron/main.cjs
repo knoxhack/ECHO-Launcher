@@ -212,7 +212,8 @@ app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu-compositing')
 app.setName(APP_NAME)
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
-app.setPath('userData', path.join(app.getPath('appData'), 'echo-launcher'))
+const launcherUserDataPath = String(process.env.ECHO_LAUNCHER_USER_DATA_DIR ?? '').trim()
+app.setPath('userData', launcherUserDataPath ? path.resolve(launcherUserDataPath) : path.join(app.getPath('appData'), 'echo-launcher'))
 
 function nowStamp() {
   return new Date().toISOString().replace(/[:.]/g, '-')

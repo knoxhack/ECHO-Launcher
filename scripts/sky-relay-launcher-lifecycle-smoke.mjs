@@ -438,11 +438,12 @@ async function main() {
       launcherRepairCorruptFile: 'passed',
       launcherRollbackSimulatedUpdate: 'passed',
       realVersionToVersionUpdate: 'blocked',
-      electronUiEndToEnd: 'not_started',
+      packagedElectronCardUiSmoke: 'covered_separately',
+      electronInstallUpdateRepairRollbackClickThrough: 'not_started',
     },
     blockers: [
       'Only one Sky Relay pack version exists, so this smoke uses same-version manifest reconciliation plus rollback instead of a real version-to-version update.',
-      'This script uses Launcher-owned resolver and lifecycle contracts from Node; a visible Electron UI pass is still required before public catalog promotion.',
+      'This script uses Launcher-owned resolver and lifecycle contracts from Node; packaged Electron card UI smoke is covered separately, but packaged install/update/repair/rollback click-through is still required before public catalog promotion.',
     ],
   }
   await writeJson(args.out, report)
