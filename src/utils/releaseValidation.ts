@@ -36,8 +36,8 @@ export function packManifestAssetName(channel: Channel, version: string, pack: O
 }
 
 export function moduleArtifactFamilyForPack(pack: OfficialPackId) {
-  if (pack === 'ashfall-neoforge-edition') return 'neoforge'
-  if (pack === 'ashfall-standalone-edition') return 'standalone'
+  if (pack.endsWith('-neoforge-edition')) return 'neoforge'
+  if (pack.endsWith('-standalone-edition')) return 'standalone'
   return 'echo-addon'
 }
 
@@ -210,29 +210,29 @@ export function validatePackManifest(value: unknown): PackManifest {
   if (!channels.includes(manifest.channel)) {
     throw new Error('Manifest channel is invalid.')
   }
-  if (normalizedPack === 'ashfall-standalone-edition') {
+  if (normalizedPack.endsWith('-standalone-edition')) {
     if (!manifest.runtime?.requiredJava) {
-      throw new Error('Ashfall Standalone Edition manifests must include runtime.requiredJava.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include runtime.requiredJava.`)
     }
     if (!manifest.launch?.mainClass) {
-      throw new Error('Ashfall Standalone Edition manifests must include launch metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include launch metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-native-edition') {
+  } else if (normalizedPack.endsWith('-native-edition')) {
     if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
       throw new Error('Manifest Minecraft version is required.')
     }
     if (!manifest.nativeLoader) {
-      throw new Error('Ashfall Native Edition manifests must include Native Loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include Native Loader metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-neoforge-edition') {
+  } else if (normalizedPack.endsWith('-neoforge-edition')) {
     if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
       throw new Error('Manifest Minecraft version is required.')
     }
     if (manifest.loader?.type !== 'neoforge') {
-      throw new Error('Ashfall NeoForge Edition manifests must include NeoForge loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include NeoForge loader metadata.`)
     }
   }
-  if (normalizedPack === 'ashfall-native-edition' || manifest.nativeLoader) {
+  if (normalizedPack.endsWith('-native-edition') || manifest.nativeLoader) {
     const nativeLoaderStatus = nativeLoaderMetadataStatus(manifest)
     if (!nativeLoaderStatus.ok) {
       throw new Error(nativeLoaderStatus.reason)

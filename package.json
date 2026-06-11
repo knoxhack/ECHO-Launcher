@@ -39,6 +39,7 @@
     "audit:placeholders": "node scripts/check-placeholders.mjs",
     "test": "vitest run",
     "test:e2e:release-index": "node scripts/release-index-local-e2e.mjs",
+    "test:e2e:sky-relay-launcher": "node scripts/sky-relay-launcher-lifecycle-smoke.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

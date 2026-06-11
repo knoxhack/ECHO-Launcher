@@ -23,13 +23,23 @@ interface LauncherStore {
 }
 
 const defaultProfileId = 'ashfall-native-edition'
-const selectableProfileIds = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const selectableProfileIds = new Set([
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'sky-relay-native-edition',
+  'sky-relay-neoforge-edition',
+  'sky-relay-standalone-edition',
+])
 
 function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'ashfall' || profileId === 'ashfall-stable') return defaultProfileId
   if (profileId === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
   if (profileId === 'ashfall-native-loader') return defaultProfileId
   if (profileId === 'ashfall-standalone-runtime' || profileId === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
+  if (profileId === 'sky-relay' || profileId === 'sky-relay-native-loader') return 'sky-relay-native-edition'
+  if (profileId === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
+  if (profileId === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
   return profileId && selectableProfileIds.has(profileId) ? profileId : defaultProfileId
 }
 

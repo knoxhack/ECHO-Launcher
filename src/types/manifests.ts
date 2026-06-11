@@ -8,7 +8,11 @@ export type AshfallRuntimePackId =
   | 'ashfall-native-edition'
   | 'ashfall-neoforge-edition'
   | 'ashfall-standalone-edition'
-export type OfficialPackId = AshfallRuntimePackId
+export type SkyRelayRuntimePackId =
+  | 'sky-relay-native-edition'
+  | 'sky-relay-neoforge-edition'
+  | 'sky-relay-standalone-edition'
+export type OfficialPackId = AshfallRuntimePackId | SkyRelayRuntimePackId
 
 export interface LoaderInstaller {
   url?: string

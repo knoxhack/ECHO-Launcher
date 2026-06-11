@@ -36,6 +36,14 @@ const stableAddons = [
   'signalosexample',
 ]
 
+const skyRelayAddons = [
+  'echocore',
+  'echonetcore',
+  'echoadaptercore',
+  'echoruntimeguard',
+  'echoskyrelayprotocol',
+]
+
 export const bundledProfiles: LauncherProfile[] = [
   {
     id: 'ashfall-native-edition',
@@ -84,5 +92,53 @@ export const bundledProfiles: LauncherProfile[] = [
     playtime: '0h 00m',
     status: 'missing',
     enabledAddons: stableAddons,
+  },
+  {
+    id: 'sky-relay-native-edition',
+    name: 'Sky Relay Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Sky Relay Native',
+    version: 'Catalog planned',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+    ramGb: 7,
+    moduleCount: 5,
+    lastPlayed: 'Never',
+    playtime: '0h 00m',
+    status: 'missing',
+    enabledAddons: skyRelayAddons,
+  },
+  {
+    id: 'sky-relay-neoforge-edition',
+    name: 'Sky Relay NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Sky Relay NeoForge',
+    version: 'Catalog planned',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+    ramGb: 7,
+    moduleCount: 5,
+    lastPlayed: 'Never',
+    playtime: '0h 00m',
+    status: 'missing',
+    enabledAddons: skyRelayAddons,
+  },
+  {
+    id: 'sky-relay-standalone-edition',
+    name: 'Sky Relay Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channel: 'alpha',
+    channelLabel: 'Sky Relay Standalone',
+    version: 'Catalog planned',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+    ramGb: 7,
+    moduleCount: 5,
+    lastPlayed: 'Never',
+    playtime: '0h 00m',
+    status: 'missing',
+    enabledAddons: skyRelayAddons,
   },
 ]

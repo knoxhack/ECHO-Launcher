@@ -8,13 +8,19 @@
 // - the Release Index local E2E (scripts/release-index-local-e2e.mjs)
 // Keep it dependency-free and side-effect-free.
 
-export const officialPackIds = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
+const ashfallOfficialPackIds = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
+const skyRelayOfficialPackIds = ['sky-relay-native-edition', 'sky-relay-neoforge-edition', 'sky-relay-standalone-edition']
+
+export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds]
 
 export function normalizeOfficialPackId(pack) {
   if (pack === 'ashfall') return 'ashfall-native-edition'
   if (pack === 'ashfall-native-loader') return 'ashfall-native-edition'
   if (pack === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
   if (pack === 'ashfall-standalone-runtime' || pack === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
+  if (pack === 'sky-relay' || pack === 'sky-relay-native-loader') return 'sky-relay-native-edition'
+  if (pack === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
+  if (pack === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
   return officialPackIds.includes(pack) ? pack : undefined
 }
 
@@ -49,8 +55,8 @@ export function installableArtifactRecords(artifacts) {
 export function artifactForPackTarget(entry, pack) {
   const target = normalizeOfficialPackId(pack)
   const artifacts = installableArtifactRecords(entry.artifacts)
-  if (target === 'ashfall-neoforge-edition') return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
-  if (target === 'ashfall-standalone-edition') return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
+  if (target?.endsWith('-neoforge-edition')) return artifacts.find((artifact) => artifact.role === 'neoforge' || /-neoforge\.jar$/i.test(artifact.name)) ?? null
+  if (target?.endsWith('-standalone-edition')) return artifacts.find((artifact) => artifact.role === 'standalone' || /-standalone\.jar$/i.test(artifact.name)) ?? null
   return artifacts.find((artifact) => artifact.role === 'native' || /\.echo-addon$/i.test(artifact.name)) ?? null
 }
 

@@ -95,7 +95,14 @@ const CANONICAL_PROFILE_ID = 'ashfall-native-edition'
 const CANONICAL_PROFILE_NAME = 'Ashfall Native Edition'
 const CANONICAL_CHANNEL = 'alpha'
 const CANONICAL_VERSION = 'Catalog latest'
-const OFFICIAL_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const OFFICIAL_PACK_IDS = new Set([
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'sky-relay-native-edition',
+  'sky-relay-neoforge-edition',
+  'sky-relay-standalone-edition',
+])
 const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
   {
@@ -122,6 +129,33 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     runtimeMode: 'native-runtime',
     channelLabel: 'Experimental',
     installFolder: 'Ashfall Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'sky-relay-native-edition',
+    name: 'Sky Relay Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay Native Edition',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'sky-relay-neoforge-edition',
+    name: 'Sky Relay NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'sky-relay-standalone-edition',
+    name: 'Sky Relay Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
@@ -1234,7 +1268,7 @@ async function readInstalledProfileManifest(installPath, expectedPackId) {
   const packName = String(manifest.name ?? '').toLowerCase()
   const expected = normalizeOfficialPackId(expectedPackId)
   if (expected && packId && packId !== expected) return null
-  if (!packId && !packName.includes('ashfall')) return null
+  if (!packId && !/(ashfall|sky relay|sky-relay)/i.test(packName)) return null
 
   return {
     installPath: normalizedInstallPath,
@@ -1532,29 +1566,29 @@ function validatePackManifest(manifest, options = {}) {
   if (!CHANNELS.has(manifest.channel)) {
     throw new Error('Pack manifest channel is invalid.')
   }
-  if (normalizedPack === 'ashfall-standalone-edition') {
+  if (normalizedPack.endsWith('-standalone-edition')) {
     if (!manifest.runtime?.requiredJava) {
-      throw new Error('Ashfall Standalone Edition manifests must include runtime.requiredJava.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include runtime.requiredJava.`)
     }
     if (!manifest.launch?.mainClass) {
-      throw new Error('Ashfall Standalone Edition manifests must include launch metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include launch metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-native-edition') {
+  } else if (normalizedPack.endsWith('-native-edition')) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
       throw new Error('Pack manifest requires a Minecraft version.')
     }
     if (!manifest.nativeLoader) {
-      throw new Error('Ashfall Native Edition manifests must include Native Loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include Native Loader metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-neoforge-edition') {
+  } else if (normalizedPack.endsWith('-neoforge-edition')) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
       throw new Error('Pack manifest requires a Minecraft version.')
     }
     if (manifest.loader?.type !== 'neoforge') {
-      throw new Error('Ashfall NeoForge Edition manifests must include NeoForge loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include NeoForge loader metadata.`)
     }
   }
-  if (normalizedPack === 'ashfall-native-edition' || manifest.nativeLoader) {
+  if (normalizedPack.endsWith('-native-edition') || manifest.nativeLoader) {
     const nativeLoaderValidation = validateReleaseLauncherVersionManifest(
       manifest,
       nativeLoaderMinecraftVersionId(manifest),
