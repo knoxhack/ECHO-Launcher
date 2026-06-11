@@ -6,14 +6,20 @@ import { normalizeAshfallProfiles, selectAshfallInstallPath } from './ashfallPro
 const fallback = bundledProfiles[0]
 
 describe('ashfallProfileMigration', () => {
-  it('returns the three Ashfall edition profiles from seed data', () => {
+  it('returns bundled launcher profiles from seed data', () => {
     const normalized = normalizeAshfallProfiles(bundledProfiles, bundledProfiles)
     expect(normalized.map((profile) => profile.id)).toEqual([
       'ashfall-native-edition',
       'ashfall-neoforge-edition',
       'ashfall-standalone-edition',
+      'sky-relay-native-edition',
+      'sky-relay-neoforge-edition',
+      'sky-relay-standalone-edition',
     ])
     expect(normalized.map((profile) => profile.runtimeMode)).toEqual([
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
@@ -43,7 +49,7 @@ describe('ashfallProfileMigration', () => {
     ]
 
     const normalized = normalizeAshfallProfiles(oldProfiles, bundledProfiles)
-    expect(normalized).toHaveLength(3)
+    expect(normalized).toHaveLength(6)
     expect(normalized[0]).toMatchObject({
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
@@ -55,6 +61,11 @@ describe('ashfallProfileMigration', () => {
     })
     expect(normalized[1]).toMatchObject({ id: 'ashfall-neoforge-edition', installPath: undefined })
     expect(normalized[2]).toMatchObject({ id: 'ashfall-standalone-edition', installPath: undefined })
+    expect(normalized.slice(3).map((profile) => profile.id)).toEqual([
+      'sky-relay-native-edition',
+      'sky-relay-neoforge-edition',
+      'sky-relay-standalone-edition',
+    ])
   })
 
   it('uses the visible user folder for fresh Ashfall installs', () => {
