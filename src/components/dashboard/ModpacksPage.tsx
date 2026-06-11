@@ -185,7 +185,7 @@ export function ModpacksPage() {
         ) : null}
       </GlassCard>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid gap-4 lg:grid-cols-2">
           {officialModpacks.map((pack) => (
             <OfficialPackCard
@@ -300,7 +300,7 @@ function OfficialPackCard({
         </div>
         <div className="absolute bottom-5 left-5 right-5">
           <p className="text-xs font-semibold uppercase text-amber-echo">{releaseLine}</p>
-          <h3 className="mt-1 text-4xl font-black text-white">{pack.name}</h3>
+          <h3 className="mt-1 text-3xl font-black leading-tight text-white">{pack.name}</h3>
           <p className="mt-2 max-w-xl text-sm leading-6 text-slate-200">{pack.summary}</p>
         </div>
       </div>
