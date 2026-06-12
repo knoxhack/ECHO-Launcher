@@ -95,13 +95,24 @@ const CANONICAL_PROFILE_ID = 'ashfall-native-edition'
 const CANONICAL_PROFILE_NAME = 'Ashfall Native Edition'
 const CANONICAL_CHANNEL = 'alpha'
 const CANONICAL_VERSION = 'Catalog latest'
-const OFFICIAL_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const OFFICIAL_PACK_IDS = new Set([
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'sky-relay-native-edition',
+  'sky-relay-neoforge-edition',
+  'sky-relay-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
+])
 const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
   {
     id: 'ashfall-native-edition',
     name: 'Ashfall Native Edition',
     runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Ashfall Native Edition',
     minecraft: '26.1.2',
@@ -111,6 +122,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'ashfall-neoforge-edition',
     name: 'Ashfall NeoForge Edition',
     runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Ashfall NeoForge Edition',
     minecraft: '26.1.2',
@@ -120,15 +132,76 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'ashfall-standalone-edition',
     name: 'Ashfall Standalone Edition',
     runtimeMode: 'native-runtime',
+    channel: 'experimental',
     channelLabel: 'Experimental',
     installFolder: 'Ashfall Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
+  {
+    id: 'sky-relay-native-edition',
+    name: 'Sky Relay Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay Native Edition',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'sky-relay-neoforge-edition',
+    name: 'Sky Relay NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'sky-relay-standalone-edition',
+    name: 'Sky Relay Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channel: 'alpha',
+    channelLabel: 'Alpha',
+    installFolder: 'Sky Relay Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'arcana-division-native-edition',
+    name: 'Arcana Division Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division Native Edition',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'arcana-division-neoforge-edition',
+    name: 'Arcana Division NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'arcana-division-standalone-edition',
+    name: 'Arcana Division Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
 ]
 const KNOWN_ASHFALL_INSTANCE_PATHS = process.platform === 'win32' ? ['C:\\CurseForge\\Instances\\Ashfall Protocol'] : []
-const CHANNELS = new Set([CANONICAL_CHANNEL, 'experimental'])
-const PACK_CHANNELS = [CANONICAL_CHANNEL, 'experimental']
+const CHANNELS = new Set([CANONICAL_CHANNEL, 'beta', 'experimental'])
+const PACK_CHANNELS = [CANONICAL_CHANNEL, 'beta', 'experimental']
 const OFFICIAL_SERVER_STALE_MS = 120_000
 const OFFICIAL_SERVER_STATUS_URL = process.env.ECHO_OFFICIAL_SERVER_STATUS_URL || 'https://api.echoplatform.dev/status.json'
 const OFFICIAL_COMMUNITY_API_URL = process.env.ECHO_COMMUNITY_API_URL || 'https://api.echoplatform.dev'
@@ -178,7 +251,8 @@ app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu-compositing')
 app.setName(APP_NAME)
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
-app.setPath('userData', path.join(app.getPath('appData'), 'echo-launcher'))
+const launcherUserDataPath = String(process.env.ECHO_LAUNCHER_USER_DATA_DIR ?? '').trim()
+app.setPath('userData', launcherUserDataPath ? path.resolve(launcherUserDataPath) : path.join(app.getPath('appData'), 'echo-launcher'))
 
 function nowStamp() {
   return new Date().toISOString().replace(/[:.]/g, '-')
@@ -730,7 +804,8 @@ function getPlatformInfo() {
 
 function getPaths() {
   const root = path.join(app.getPath('userData'), 'ECHO')
-  const playerContentRoot = path.join(app.getPath('home') || os.homedir(), 'ECHOLauncher')
+  const launcherPlayerContentPath = String(process.env.ECHO_LAUNCHER_PLAYER_CONTENT_ROOT ?? '').trim()
+  const playerContentRoot = launcherPlayerContentPath ? path.resolve(launcherPlayerContentPath) : path.join(app.getPath('home') || os.homedir(), 'ECHOLauncher')
   return {
     root,
     playerContentRoot,
@@ -1155,7 +1230,7 @@ function isLegacyPrivateInstancePath(paths, candidate) {
 }
 
 function defaultProfiles(paths) {
-  const enabledAddons = [
+  const ashfallEnabledAddons = [
     'arcanaveil',
     'echoagriculturereclamation',
     'echoarmory',
@@ -1190,23 +1265,62 @@ function defaultProfiles(paths) {
     'signalos',
     'signalosexample',
   ]
+  const skyRelayEnabledAddons = [
+    'echocore',
+    'echonetcore',
+    'echoadaptercore',
+    'echoruntimeguard',
+    'echoskyrelayprotocol',
+  ]
+  const arcanaDivisionEnabledAddons = [
+    'echocore',
+    'echoadaptercore',
+    'echonetcore',
+    'echofoundationcore',
+    'echomaterialcore',
+    'echotoolcore',
+    'echostationcore',
+    'echoworldstarter',
+    'echocommonloot',
+    'echocreatureroles',
+    'echoarcanacore',
+    'echoaetherworks',
+    'echocursecore',
+    'echofamiliarcore',
+    'echogrimoire',
+    'echoriftworlds',
+    'echoritualcore',
+    'echospellcore',
+    'echoholomap',
+    'echoindex',
+    'echolens',
+    'echoterminal',
+    'echothemecore',
+    'echomissioncore',
+    'echoarcanadivisionprotocol',
+  ]
+  const enabledAddonsForProfile = (id) => {
+    if (String(id).startsWith('sky-relay-')) return skyRelayEnabledAddons
+    if (String(id).startsWith('arcana-division-')) return arcanaDivisionEnabledAddons
+    return ashfallEnabledAddons
+  }
   return ASHFALL_PROFILE_DEFINITIONS.map((definition) => ({
     id: definition.id,
     name: definition.name,
     runtimeMode: definition.runtimeMode,
-    channel: CANONICAL_CHANNEL,
+    channel: definition.channel ?? CANONICAL_CHANNEL,
     channelLabel: definition.channelLabel,
     version: CANONICAL_VERSION,
     minecraft: definition.minecraft,
     neoforge: definition.neoforge,
     ramGb: 7,
-    moduleCount: 33,
+    moduleCount: enabledAddonsForProfile(definition.id).length,
     lastPlayed: 'Never',
     playtime: '0h 00m',
     status: 'missing',
     installPath: defaultInstallPathForProfile(paths, definition.id),
     manifestPath: undefined,
-    enabledAddons,
+    enabledAddons: enabledAddonsForProfile(definition.id),
   }))
 }
 
@@ -1234,7 +1348,7 @@ async function readInstalledProfileManifest(installPath, expectedPackId) {
   const packName = String(manifest.name ?? '').toLowerCase()
   const expected = normalizeOfficialPackId(expectedPackId)
   if (expected && packId && packId !== expected) return null
-  if (!packId && !packName.includes('ashfall')) return null
+  if (!packId && !/(ashfall|sky relay|sky-relay)/i.test(packName)) return null
 
   return {
     installPath: normalizedInstallPath,
@@ -1532,29 +1646,29 @@ function validatePackManifest(manifest, options = {}) {
   if (!CHANNELS.has(manifest.channel)) {
     throw new Error('Pack manifest channel is invalid.')
   }
-  if (normalizedPack === 'ashfall-standalone-edition') {
+  if (normalizedPack.endsWith('-standalone-edition')) {
     if (!manifest.runtime?.requiredJava) {
-      throw new Error('Ashfall Standalone Edition manifests must include runtime.requiredJava.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include runtime.requiredJava.`)
     }
     if (!manifest.launch?.mainClass) {
-      throw new Error('Ashfall Standalone Edition manifests must include launch metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include launch metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-native-edition') {
+  } else if (normalizedPack.endsWith('-native-edition')) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
       throw new Error('Pack manifest requires a Minecraft version.')
     }
     if (!manifest.nativeLoader) {
-      throw new Error('Ashfall Native Edition manifests must include Native Loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include Native Loader metadata.`)
     }
-  } else if (normalizedPack === 'ashfall-neoforge-edition') {
+  } else if (normalizedPack.endsWith('-neoforge-edition')) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
       throw new Error('Pack manifest requires a Minecraft version.')
     }
     if (manifest.loader?.type !== 'neoforge') {
-      throw new Error('Ashfall NeoForge Edition manifests must include NeoForge loader metadata.')
+      throw new Error(`${manifest.name ?? normalizedPack} manifests must include NeoForge loader metadata.`)
     }
   }
-  if (normalizedPack === 'ashfall-native-edition' || manifest.nativeLoader) {
+  if (normalizedPack.endsWith('-native-edition') || manifest.nativeLoader) {
     const nativeLoaderValidation = validateReleaseLauncherVersionManifest(
       manifest,
       nativeLoaderMinecraftVersionId(manifest),
@@ -2371,11 +2485,15 @@ function normalizeCanonicalIndexEntry(value) {
 function catalogUrlsFromLauncherChannel(channel) {
   const urls = []
   const catalogUrls = channel?.catalogUrls && typeof channel.catalogUrls === 'object' ? channel.catalogUrls : {}
+  const allowLocalUrls = process.env.ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS === '1'
   for (const value of Object.values(catalogUrls)) {
     if (Array.isArray(value)) urls.push(...value)
     else if (typeof value === 'string') urls.push(value)
   }
-  return [...new Set(urls.map((url) => String(url).trim()).filter((url) => /^https:\/\/raw\.githubusercontent\.com\//.test(url)))]
+  return [...new Set(urls.map((url) => String(url).trim()).filter((url) => {
+    if (/^https:\/\/raw\.githubusercontent\.com\//.test(url)) return true
+    return allowLocalUrls && /^http:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url)
+  }))]
 }
 
 async function fetchCanonicalReleaseIndexCatalog(config, cachePath) {
@@ -3157,7 +3275,8 @@ function resolveManifestAssets(manifest, entry) {
 
 async function resolveInstallableManifest(manifest, entry, payload = {}) {
   const requirements = manifest.moduleRequirements ?? manifest.requiredModules
-  if (Array.isArray(requirements) && requirements.length) {
+  const zipManifestHasConcreteFiles = manifest.artifactMode === 'zip' && Array.isArray(manifest.files) && manifest.files.length > 0
+  if (!zipManifestHasConcreteFiles && Array.isArray(requirements) && requirements.length) {
     const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
     return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
   }
@@ -4041,7 +4160,7 @@ function defaultMinecraftRuntimeMode(profileOrId = CANONICAL_PROFILE_ID) {
   }
   const profileId = typeof profileOrId === 'string' ? profileOrId : profileOrId?.id
   const packId = normalizeOfficialPackId(profileId)
-  if (packId === 'ashfall-native-edition') return 'native-loader-minecraft'
+  if (packId?.endsWith('-native-edition')) return 'native-loader-minecraft'
   return 'neoforge-minecraft'
 }
 
@@ -6313,7 +6432,7 @@ async function repairZipPackArtifact(payload, profile, manifest) {
   const skipped = []
   const warnings = []
   const backedUp = []
-  let runtime = null
+  let runtime = { ok: true, warnings: ['Internal Minecraft runtime repair skipped for Minecraft Launcher handoff mode.'] }
 
   await ensureDir(installPath)
   await ensureDir(path.join(installPath, '.echo'))
@@ -6326,10 +6445,13 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     return zipArtifact
   }
 
-  try {
-    runtime = await minecraftRepairRuntime({ manifest })
-  } catch (error) {
-    warnings.push(`Minecraft runtime repair failed: ${error instanceof Error ? error.message : String(error)}`)
+  if (payload.installRuntime === true) {
+    try {
+      runtime = await minecraftRepairRuntime({ manifest })
+    } catch (error) {
+      runtime = { ok: false, warnings: [error instanceof Error ? error.message : String(error)] }
+      warnings.push(`Minecraft runtime repair failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   for (const file of manifest.files ?? []) {

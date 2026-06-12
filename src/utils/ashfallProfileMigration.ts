@@ -81,7 +81,7 @@ export function normalizeAshfallProfiles(profiles: LauncherProfile[], fallbackPr
       id: fallbackProfile.id,
       name: fallbackProfile.name,
       runtimeMode: fallbackProfile.runtimeMode,
-      channel: 'alpha',
+      channel: fallbackProfile.channel,
       channelLabel: fallbackProfile.channelLabel,
     }
   })
