@@ -20,7 +20,7 @@ export {
 } from '../../electron/release-index-resolver.mjs'
 export type { CanonicalArtifactRecord, EchoProtocolRequest, ResolvedEchoProtocolEntry } from '../../electron/release-index-resolver.mjs'
 
-const channels: Channel[] = ['alpha', 'experimental']
+const channels: Channel[] = ['alpha', 'beta', 'experimental']
 const RELEASE_CACHE_VERSION = 4
 export const playableAshfallPackIds: OfficialPackId[] = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
 

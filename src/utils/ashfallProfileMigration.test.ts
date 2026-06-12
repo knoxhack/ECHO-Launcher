@@ -15,8 +15,14 @@ describe('ashfallProfileMigration', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'arcana-division-native-edition',
+      'arcana-division-neoforge-edition',
+      'arcana-division-standalone-edition',
     ])
     expect(normalized.map((profile) => profile.runtimeMode)).toEqual([
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
@@ -49,7 +55,7 @@ describe('ashfallProfileMigration', () => {
     ]
 
     const normalized = normalizeAshfallProfiles(oldProfiles, bundledProfiles)
-    expect(normalized).toHaveLength(6)
+    expect(normalized).toHaveLength(9)
     expect(normalized[0]).toMatchObject({
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
@@ -65,7 +71,11 @@ describe('ashfallProfileMigration', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'arcana-division-native-edition',
+      'arcana-division-neoforge-edition',
+      'arcana-division-standalone-edition',
     ])
+    expect(normalized.slice(6).map((profile) => profile.channel)).toEqual(['beta', 'beta', 'beta'])
   })
 
   it('uses the visible user folder for fresh Ashfall installs', () => {

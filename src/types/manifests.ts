@@ -12,7 +12,11 @@ export type SkyRelayRuntimePackId =
   | 'sky-relay-native-edition'
   | 'sky-relay-neoforge-edition'
   | 'sky-relay-standalone-edition'
-export type OfficialPackId = AshfallRuntimePackId | SkyRelayRuntimePackId
+export type ArcanaDivisionRuntimePackId =
+  | 'arcana-division-native-edition'
+  | 'arcana-division-neoforge-edition'
+  | 'arcana-division-standalone-edition'
+export type OfficialPackId = AshfallRuntimePackId | SkyRelayRuntimePackId | ArcanaDivisionRuntimePackId
 
 export interface LoaderInstaller {
   url?: string

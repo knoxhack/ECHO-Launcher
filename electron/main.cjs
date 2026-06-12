@@ -102,6 +102,9 @@ const OFFICIAL_PACK_IDS = new Set([
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
 ])
 const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
@@ -109,6 +112,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'ashfall-native-edition',
     name: 'Ashfall Native Edition',
     runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Ashfall Native Edition',
     minecraft: '26.1.2',
@@ -118,6 +122,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'ashfall-neoforge-edition',
     name: 'Ashfall NeoForge Edition',
     runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Ashfall NeoForge Edition',
     minecraft: '26.1.2',
@@ -127,6 +132,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'ashfall-standalone-edition',
     name: 'Ashfall Standalone Edition',
     runtimeMode: 'native-runtime',
+    channel: 'experimental',
     channelLabel: 'Experimental',
     installFolder: 'Ashfall Standalone Edition',
     minecraft: 'Standalone',
@@ -136,6 +142,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'sky-relay-native-edition',
     name: 'Sky Relay Native Edition',
     runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Sky Relay Native Edition',
     minecraft: '26.1.2',
@@ -145,6 +152,7 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'sky-relay-neoforge-edition',
     name: 'Sky Relay NeoForge Edition',
     runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Sky Relay NeoForge Edition',
     minecraft: '26.1.2',
@@ -154,15 +162,46 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'sky-relay-standalone-edition',
     name: 'Sky Relay Standalone Edition',
     runtimeMode: 'native-runtime',
+    channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Sky Relay Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
+  {
+    id: 'arcana-division-native-edition',
+    name: 'Arcana Division Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division Native Edition',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'arcana-division-neoforge-edition',
+    name: 'Arcana Division NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'arcana-division-standalone-edition',
+    name: 'Arcana Division Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channel: 'beta',
+    channelLabel: 'Beta',
+    installFolder: 'Arcana Division Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
 ]
 const KNOWN_ASHFALL_INSTANCE_PATHS = process.platform === 'win32' ? ['C:\\CurseForge\\Instances\\Ashfall Protocol'] : []
-const CHANNELS = new Set([CANONICAL_CHANNEL, 'experimental'])
-const PACK_CHANNELS = [CANONICAL_CHANNEL, 'experimental']
+const CHANNELS = new Set([CANONICAL_CHANNEL, 'beta', 'experimental'])
+const PACK_CHANNELS = [CANONICAL_CHANNEL, 'beta', 'experimental']
 const OFFICIAL_SERVER_STALE_MS = 120_000
 const OFFICIAL_SERVER_STATUS_URL = process.env.ECHO_OFFICIAL_SERVER_STATUS_URL || 'https://api.echoplatform.dev/status.json'
 const OFFICIAL_COMMUNITY_API_URL = process.env.ECHO_COMMUNITY_API_URL || 'https://api.echoplatform.dev'
@@ -1191,7 +1230,7 @@ function isLegacyPrivateInstancePath(paths, candidate) {
 }
 
 function defaultProfiles(paths) {
-  const enabledAddons = [
+  const ashfallEnabledAddons = [
     'arcanaveil',
     'echoagriculturereclamation',
     'echoarmory',
@@ -1226,23 +1265,62 @@ function defaultProfiles(paths) {
     'signalos',
     'signalosexample',
   ]
+  const skyRelayEnabledAddons = [
+    'echocore',
+    'echonetcore',
+    'echoadaptercore',
+    'echoruntimeguard',
+    'echoskyrelayprotocol',
+  ]
+  const arcanaDivisionEnabledAddons = [
+    'echocore',
+    'echoadaptercore',
+    'echonetcore',
+    'echofoundationcore',
+    'echomaterialcore',
+    'echotoolcore',
+    'echostationcore',
+    'echoworldstarter',
+    'echocommonloot',
+    'echocreatureroles',
+    'echoarcanacore',
+    'echoaetherworks',
+    'echocursecore',
+    'echofamiliarcore',
+    'echogrimoire',
+    'echoriftworlds',
+    'echoritualcore',
+    'echospellcore',
+    'echoholomap',
+    'echoindex',
+    'echolens',
+    'echoterminal',
+    'echothemecore',
+    'echomissioncore',
+    'echoarcanadivisionprotocol',
+  ]
+  const enabledAddonsForProfile = (id) => {
+    if (String(id).startsWith('sky-relay-')) return skyRelayEnabledAddons
+    if (String(id).startsWith('arcana-division-')) return arcanaDivisionEnabledAddons
+    return ashfallEnabledAddons
+  }
   return ASHFALL_PROFILE_DEFINITIONS.map((definition) => ({
     id: definition.id,
     name: definition.name,
     runtimeMode: definition.runtimeMode,
-    channel: CANONICAL_CHANNEL,
+    channel: definition.channel ?? CANONICAL_CHANNEL,
     channelLabel: definition.channelLabel,
     version: CANONICAL_VERSION,
     minecraft: definition.minecraft,
     neoforge: definition.neoforge,
     ramGb: 7,
-    moduleCount: 33,
+    moduleCount: enabledAddonsForProfile(definition.id).length,
     lastPlayed: 'Never',
     playtime: '0h 00m',
     status: 'missing',
     installPath: defaultInstallPathForProfile(paths, definition.id),
     manifestPath: undefined,
-    enabledAddons,
+    enabledAddons: enabledAddonsForProfile(definition.id),
   }))
 }
 
@@ -4082,7 +4160,7 @@ function defaultMinecraftRuntimeMode(profileOrId = CANONICAL_PROFILE_ID) {
   }
   const profileId = typeof profileOrId === 'string' ? profileOrId : profileOrId?.id
   const packId = normalizeOfficialPackId(profileId)
-  if (packId === 'ashfall-native-edition') return 'native-loader-minecraft'
+  if (packId?.endsWith('-native-edition')) return 'native-loader-minecraft'
   return 'neoforge-minecraft'
 }
 

@@ -10,6 +10,9 @@ describe('official modpack catalog', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'arcana-division-native-edition',
+      'arcana-division-neoforge-edition',
+      'arcana-division-standalone-edition',
     ])
     expect(officialModpacks.map((pack) => pack.catalogId)).toEqual([
       'ashfall-native-edition',
@@ -18,8 +21,14 @@ describe('official modpack catalog', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'arcana-division-native-edition',
+      'arcana-division-neoforge-edition',
+      'arcana-division-standalone-edition',
     ])
     expect(officialModpacks.map((pack) => pack.runtimeMode)).toEqual([
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
@@ -43,6 +52,15 @@ describe('official modpack catalog', () => {
       'Sky Relay NeoForge Edition',
       'Sky Relay Standalone Edition',
     ])
+  })
+
+  it('surfaces Arcana Division as approved beta launcher packs', () => {
+    const arcanaPacks = officialModpacks.filter((pack) => pack.id.startsWith('arcana-division-'))
+
+    expect(arcanaPacks).toHaveLength(3)
+    expect(arcanaPacks.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable'])
+    expect(arcanaPacks.map((pack) => pack.channel)).toEqual(['beta', 'beta', 'beta'])
+    expect(arcanaPacks.map((pack) => pack.moduleCount)).toEqual([25, 25, 25])
   })
 })
 

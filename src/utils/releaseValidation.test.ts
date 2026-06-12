@@ -242,8 +242,26 @@ describe('releaseValidation', () => {
     }), 'ashfall-native-loader')?.version).toBe('0.1.1')
   })
 
+  it('selects approved Arcana Division beta releases by official pack id', () => {
+    const arcanaRelease: ReleaseEntry = {
+      ...baseRelease,
+      id: 'arcana-native',
+      pack: 'arcana-division-native-edition',
+      channel: 'beta',
+      version: '1.0.0',
+      tagName: 'arcana-division-native-1.0.0-beta',
+      publishedAt: '2026-06-12T09:02:29Z',
+    }
+
+    expect(normalizeOfficialPackId('arcana-division')).toBe('arcana-division-native-edition')
+    expect(normalizeOfficialPackId('arcane-division')).toBe('arcana-division-native-edition')
+    expect(isPlayablePackRelease(arcanaRelease, 'arcana-division-native-loader')).toBe(true)
+    expect(latestPlayableReleaseForPack(releaseIndex({ releases: [baseRelease, arcanaRelease] }), 'arcana-division')?.version).toBe('1.0.0')
+  })
+
   it('builds expected pack manifest asset names', () => {
     expect(packManifestAssetName('alpha', '0.1.0', 'ashfall-native-edition')).toBe('ashfall-native-edition-alpha-0.1.0.pack.json')
+    expect(packManifestAssetName('beta', '1.0.0', 'arcana-division-native-edition')).toBe('arcana-division-native-edition-beta-1.0.0.pack.json')
     expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
   })
 
@@ -529,6 +547,77 @@ describe('releaseValidation', () => {
     expect(manifest.pack).toBe('ashfall-neoforge-edition')
     expect(manifest.loader?.type).toBe('neoforge')
     expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
+  })
+
+  it('accepts all three Arcana Division beta pack manifests', () => {
+    const nativeManifest = validatePackManifest({
+      ...baseManifest(),
+      pack: 'arcana-division-native-edition',
+      version: '1.0.0',
+      channel: 'beta',
+      moduleRequirements: Array.from({ length: 24 }, (_, index) => ({
+        id: `echoarcana${index}`,
+        version: '1.0.0',
+      })),
+    })
+    const neoforgeManifest = validatePackManifest({
+      pack: 'arcana-division-neoforge-edition',
+      version: '1.0.0',
+      channel: 'beta',
+      minecraft: '26.1.2',
+      loader: {
+        type: 'neoforge',
+        version: '26.1.2',
+        installer: {
+          assetName: 'neoforge-26.1.2-installer.jar',
+          sha256: 'f'.repeat(64),
+          installMode: 'client',
+        },
+      },
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-neoforge.jar',
+          assetName: 'echocore-1.0.0-neoforge.jar',
+          sha256: 'c'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
+      changelog: ['Arcana beta'],
+      worldgenWarning: true,
+    })
+    const standaloneManifest = validatePackManifest({
+      pack: 'arcana-division-standalone-edition',
+      version: '1.0.0',
+      channel: 'beta',
+      minecraft: 'standalone',
+      runtime: { requiredJava: 'none' },
+      launch: { mainClass: 'com.echo.runtime.ArcanaDivisionStandaloneMain', gameArgs: [], jvmArgs: [] },
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-standalone.jar',
+          assetName: 'echocore-1.0.0-standalone.jar',
+          sha256: 'd'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
+      changelog: ['Arcana beta'],
+      worldgenWarning: true,
+    })
+
+    expect(nativeManifest.pack).toBe('arcana-division-native-edition')
+    expect(nativeManifest.moduleRequirements).toHaveLength(24)
+    expect(neoforgeManifest.pack).toBe('arcana-division-neoforge-edition')
+    expect(standaloneManifest.pack).toBe('arcana-division-standalone-edition')
   })
 
   it('rejects unsafe module requirement paths', () => {

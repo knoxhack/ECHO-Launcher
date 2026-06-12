@@ -10,8 +10,9 @@
 
 const ashfallOfficialPackIds = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
 const skyRelayOfficialPackIds = ['sky-relay-native-edition', 'sky-relay-neoforge-edition', 'sky-relay-standalone-edition']
+const arcanaDivisionOfficialPackIds = ['arcana-division-native-edition', 'arcana-division-neoforge-edition', 'arcana-division-standalone-edition']
 
-export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds]
+export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds, ...arcanaDivisionOfficialPackIds]
 
 export function normalizeOfficialPackId(pack) {
   if (pack === 'ashfall') return 'ashfall-native-edition'
@@ -21,6 +22,10 @@ export function normalizeOfficialPackId(pack) {
   if (pack === 'sky-relay' || pack === 'sky-relay-native-loader') return 'sky-relay-native-edition'
   if (pack === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
   if (pack === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
+  if (pack === 'arcana-division' || pack === 'arcana-division-native-loader') return 'arcana-division-native-edition'
+  if (pack === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
+  if (pack === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'
+  if (pack === 'arcane-division') return 'arcana-division-native-edition'
   return officialPackIds.includes(pack) ? pack : undefined
 }
 

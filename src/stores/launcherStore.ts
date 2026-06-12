@@ -30,6 +30,9 @@ const selectableProfileIds = new Set([
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
 ])
 
 function normalizeSelectedProfileId(profileId?: string) {
@@ -40,6 +43,9 @@ function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'sky-relay' || profileId === 'sky-relay-native-loader') return 'sky-relay-native-edition'
   if (profileId === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
   if (profileId === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
+  if (profileId === 'arcana-division' || profileId === 'arcana-division-native-loader' || profileId === 'arcane-division') return 'arcana-division-native-edition'
+  if (profileId === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
+  if (profileId === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'
   return profileId && selectableProfileIds.has(profileId) ? profileId : defaultProfileId
 }
 
@@ -89,7 +95,7 @@ export const useLauncherStore = create<LauncherStore>()(
         ...current,
         ...(persisted as Partial<LauncherStore>),
         selectedProfileId: normalizeSelectedProfileId((persisted as Partial<LauncherStore>)?.selectedProfileId),
-        selectedChannel: 'alpha',
+        selectedChannel: (persisted as Partial<LauncherStore>)?.selectedChannel ?? 'alpha',
         selectedVariant: (persisted as Partial<LauncherStore>)?.selectedVariant ?? 'standard',
         activeToolsTab: (persisted as Partial<LauncherStore>)?.activeToolsTab ?? current.activeToolsTab,
         activePage: normalizePageId((persisted as Partial<LauncherStore>)?.activePage),

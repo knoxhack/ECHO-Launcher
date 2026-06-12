@@ -23,6 +23,10 @@ import { WarningCard } from '../cyber/WarningCard'
 const packOsIdAliases: Record<string, string> = {
   'echo-prime': 'echo_prime',
   'arcane-division': 'arcana_division',
+  'arcana-division': 'arcana_division',
+  'arcana-division-native-edition': 'arcana_division',
+  'arcana-division-neoforge-edition': 'arcana_division',
+  'arcana-division-standalone-edition': 'arcana_division',
   orbital: 'pack2_draft',
 }
 
