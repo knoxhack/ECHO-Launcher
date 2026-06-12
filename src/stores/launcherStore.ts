@@ -23,13 +23,24 @@ interface LauncherStore {
 }
 
 const defaultProfileId = 'ashfall-native-edition'
-const selectableProfileIds = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const selectableProfileIds = new Set([
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
+])
+const selectableChannels = new Set<Channel>(['alpha', 'beta', 'experimental'])
 
 function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'ashfall' || profileId === 'ashfall-stable') return defaultProfileId
   if (profileId === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
   if (profileId === 'ashfall-native-loader') return defaultProfileId
   if (profileId === 'ashfall-standalone-runtime' || profileId === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
+  if (profileId === 'arcana-division' || profileId === 'arcana-division-native-loader' || profileId === 'arcane-division') return 'arcana-division-native-edition'
+  if (profileId === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
+  if (profileId === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'
   return profileId && selectableProfileIds.has(profileId) ? profileId : defaultProfileId
 }
 
@@ -79,7 +90,9 @@ export const useLauncherStore = create<LauncherStore>()(
         ...current,
         ...(persisted as Partial<LauncherStore>),
         selectedProfileId: normalizeSelectedProfileId((persisted as Partial<LauncherStore>)?.selectedProfileId),
-        selectedChannel: 'alpha',
+        selectedChannel: selectableChannels.has((persisted as Partial<LauncherStore>)?.selectedChannel as Channel)
+          ? ((persisted as Partial<LauncherStore>).selectedChannel as Channel)
+          : current.selectedChannel,
         selectedVariant: (persisted as Partial<LauncherStore>)?.selectedVariant ?? 'standard',
         activeToolsTab: (persisted as Partial<LauncherStore>)?.activeToolsTab ?? current.activeToolsTab,
         activePage: normalizePageId((persisted as Partial<LauncherStore>)?.activePage),

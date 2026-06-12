@@ -103,8 +103,8 @@ function validateZipManifestReleaseAssets(manifest, entryAssets = []) {
 }
 
 function moduleArtifactFamilyForPack(pack) {
-  if (pack === 'ashfall-neoforge-edition') return 'neoforge'
-  if (pack === 'ashfall-standalone-edition') return 'standalone'
+  if (String(pack ?? '').endsWith('-neoforge-edition')) return 'neoforge'
+  if (String(pack ?? '').endsWith('-standalone-edition')) return 'standalone'
   return 'echo-addon'
 }
 

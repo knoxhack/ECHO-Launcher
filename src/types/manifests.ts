@@ -8,7 +8,11 @@ export type AshfallRuntimePackId =
   | 'ashfall-native-edition'
   | 'ashfall-neoforge-edition'
   | 'ashfall-standalone-edition'
-export type OfficialPackId = AshfallRuntimePackId
+export type ArcanaDivisionRuntimePackId =
+  | 'arcana-division-native-edition'
+  | 'arcana-division-neoforge-edition'
+  | 'arcana-division-standalone-edition'
+export type OfficialPackId = AshfallRuntimePackId | ArcanaDivisionRuntimePackId
 
 export interface LoaderInstaller {
   url?: string

@@ -33,7 +33,7 @@ export class ManifestService {
   }
 
   getAvailableChannels(): Channel[] {
-    return ['alpha', 'experimental']
+    return ['alpha', 'beta', 'experimental']
   }
 }
 
