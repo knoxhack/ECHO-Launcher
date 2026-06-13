@@ -163,6 +163,82 @@ describe('release asset resolution', () => {
     ])
   })
 
+  it('adds missing module requirement files without duplicating existing zip files', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'openlands-neoforge-edition',
+        moduleRequirements: [
+          { id: 'echoopenlandsprotocol', version: '0.1.0' },
+          { id: 'echocore', version: '1.0.0' },
+        ],
+        modules: ['echoopenlandsprotocol'],
+        files: [
+          {
+            path: 'mods/echoopenlandsprotocol-0.1.0-neoforge.jar',
+            assetName: 'echoopenlandsprotocol-0.1.0-neoforge.jar',
+            sha256: sha('1'),
+            size: 10,
+            required: true,
+            moduleId: 'echoopenlandsprotocol',
+            side: 'both',
+          },
+        ],
+      },
+      [
+        {
+          name: 'echocore-1.0.0-neoforge.jar',
+          browser_download_url: 'https://example.test/echocore-1.0.0-neoforge.jar',
+          sha256: sha('2'),
+          size: 20,
+        },
+      ],
+    )
+
+    expect(resolved.files).toHaveLength(2)
+    expect(resolved.files[1]).toMatchObject({
+      path: 'mods/echocore-1.0.0-neoforge.jar',
+      assetName: 'echocore-1.0.0-neoforge.jar',
+      url: 'https://example.test/echocore-1.0.0-neoforge.jar',
+      sha256: sha('2'),
+    })
+  })
+
+  it('resolves ranged module requirements to matching published artifacts', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'openlands-native-edition',
+        moduleRequirements: [
+          { id: 'echocore', version: '>=1.0.0' },
+        ],
+        modules: [],
+        files: [],
+      },
+      [
+        {
+          name: 'echocore-1.0.0.echo-addon',
+          browser_download_url: 'https://example.test/echocore-1.0.0.echo-addon',
+          sha256: sha('3'),
+          size: 30,
+        },
+      ],
+    )
+
+    expect(resolved.files[0]).toMatchObject({
+      path: 'addons/echocore-1.0.0.echo-addon',
+      assetName: 'echocore-1.0.0.echo-addon',
+      url: 'https://example.test/echocore-1.0.0.echo-addon',
+      sha256: sha('3'),
+    })
+    expect(resolved.moduleRequirements[0]).toMatchObject({
+      id: 'echocore',
+      version: '>=1.0.0',
+      artifactFamily: 'echo-addon',
+      path: 'addons/echocore-1.0.0.echo-addon',
+      assetName: 'echocore-1.0.0.echo-addon',
+      sha256: sha('3'),
+    })
+  })
+
   it('lets module requirements override asset names and install paths', () => {
     const resolved = resolveModuleRequirements(
       {

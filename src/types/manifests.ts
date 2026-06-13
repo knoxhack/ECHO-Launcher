@@ -110,6 +110,7 @@ export interface PackManifest {
   nativeLoader?: NativeLoaderManifest
   runtime?: RuntimeManifest
   launch?: LaunchManifest
+  moduleArtifactFamily?: ModuleArtifactFamily
   ramMb?: number
   modules: string[]
   moduleRequirements?: ModuleRequirement[]

@@ -158,21 +158,46 @@ function moduleCatalogFromReleaseAssets(releaseAssets = []) {
     if (!asset?.name) continue
     byName.set(asset.name, asset)
   }
-  return { byName }
+  return { byName, assets: releaseAssets.filter((asset) => asset?.name) }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function moduleArtifactPattern(moduleId, family) {
+  const id = escapeRegExp(moduleId)
+  if (family === 'echo-addon') return new RegExp(`^${id}-.+\\.echo-addon$`, 'iu')
+  if (family === 'standalone') return new RegExp(`^${id}-.+-standalone\\.jar$`, 'iu')
+  return new RegExp(`^${id}-.+-neoforge\\.jar$`, 'iu')
+}
+
+function findModuleArtifactForRequirement(requirement, catalog) {
+  const pattern = moduleArtifactPattern(requirement.moduleId, requirement.family)
+  return (catalog.assets ?? []).find((asset) => pattern.test(asset.name)) ?? null
 }
 
 function resolveModuleRequirement(requirement, catalog) {
-  const asset = catalog.byName.get(requirement.assetName)
+  let asset = catalog.byName.get(requirement.assetName)
+  let assetName = requirement.assetName
+  let artifactPath = requirement.path
+  if (!asset) {
+    asset = findModuleArtifactForRequirement(requirement, catalog)
+    if (asset?.name) {
+      assetName = asset.name
+      artifactPath = moduleArtifactPath(assetName, requirement.family)
+    }
+  }
   if (!asset) {
     throw new Error(`Module artifact '${requirement.assetName}' was not found in the ECHO-Modules release feed.`)
   }
   const sha256 = requirement.sha256 ?? releaseAssetSha256(asset)
   if (!sha256) {
-    throw new Error(`Module artifact '${requirement.assetName}' is missing a SHA-256 hash.`)
+    throw new Error(`Module artifact '${assetName}' is missing a SHA-256 hash.`)
   }
   return {
-    path: requirement.path,
-    assetName: requirement.assetName,
+    path: artifactPath,
+    assetName,
     url: releaseAssetUrl(asset),
     sha256,
     size: requirement.size ?? asset.size ?? 0,
@@ -182,23 +207,53 @@ function resolveModuleRequirement(requirement, catalog) {
   }
 }
 
+function moduleRequirementInstallPath(requirement) {
+  return String(requirement.path ?? moduleArtifactPath(requirement.assetName, requirement.family)).replace(/\\/g, '/')
+}
+
+function moduleRequirementMetadata(requirement, resolvedFile) {
+  return {
+    id: requirement.moduleId,
+    version: requirement.version,
+    artifactFamily: requirement.family,
+    assetName: resolvedFile?.assetName ?? requirement.assetName,
+    path: resolvedFile?.path ?? requirement.path,
+    sha256: resolvedFile?.sha256 ?? requirement.sha256,
+    size: resolvedFile?.size ?? requirement.size,
+    required: requirement.required,
+    side: requirement.side,
+  }
+}
+
 function resolveModuleRequirements(manifest = {}, releaseAssets = []) {
   const requirements = normalizeModuleRequirements(manifest)
   if (!requirements.length) return manifest
   const catalog = moduleCatalogFromReleaseAssets(releaseAssets)
-  const existingPaths = new Set((manifest.files ?? []).map((file) => releasePathBasename(file?.path ? String(file.path).replace(/\\/g, '/').toLowerCase() : '')))
+  const existingBasenames = new Set((manifest.files ?? []).map((file) => releasePathBasename(file?.path ? String(file.path).replace(/\\/g, '/').toLowerCase() : '')))
   const existingFullPaths = new Set((manifest.files ?? []).map((file) => String(file?.path ?? '').replace(/\\/g, '/').toLowerCase()))
   const moduleFiles = []
+  const resolvedRequirements = []
   for (const requirement of requirements) {
+    const expectedPath = moduleRequirementInstallPath(requirement).toLowerCase()
+    if (existingFullPaths.has(expectedPath) || existingBasenames.has(releasePathBasename(expectedPath))) {
+      resolvedRequirements.push(moduleRequirementMetadata(requirement))
+      continue
+    }
     const resolved = resolveModuleRequirement(requirement, catalog)
     const normalizedPath = resolved.path.replace(/\\/g, '/').toLowerCase()
-    if (existingFullPaths.has(normalizedPath) || existingPaths.has(releasePathBasename(normalizedPath))) continue
+    if (existingFullPaths.has(normalizedPath) || existingBasenames.has(releasePathBasename(normalizedPath))) {
+      resolvedRequirements.push(moduleRequirementMetadata(requirement, resolved))
+      continue
+    }
     existingFullPaths.add(normalizedPath)
+    existingBasenames.add(releasePathBasename(normalizedPath))
     moduleFiles.push(resolved)
+    resolvedRequirements.push(moduleRequirementMetadata(requirement, resolved))
   }
   return {
     ...manifest,
     modules: [...new Set([...(manifest.modules ?? []), ...requirements.map((item) => item.moduleId)])],
+    moduleRequirements: resolvedRequirements,
     files: [...(manifest.files ?? []), ...moduleFiles],
   }
 }

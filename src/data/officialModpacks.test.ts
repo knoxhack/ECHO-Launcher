@@ -44,6 +44,24 @@ function releaseIndexFixture(): ReleaseIndex {
         trust: 'verified-metadata',
         assets: [],
       },
+      {
+        id: 'release-index:openlands-native-edition:0.1.0',
+        pack: 'openlands-native-edition',
+        version: '0.1.0',
+        channel: 'alpha',
+        tagName: 'v0.1.0-openlands-native-edition',
+        name: 'Openlands Native Edition 0.1.0',
+        draft: false,
+        prerelease: true,
+        publishedAt: '2026-06-11T14:32:21Z',
+        releasePageUrl: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/tag/v0.1.0-openlands-native-edition',
+        releaseNotes: ['Resolved through the approved Catalog entry openlands-native-edition.'],
+        manifestAssetName: 'openlands-native-edition-alpha-0.1.0.pack.json',
+        manifestUrl: 'https://example.test/openlands-native-edition-alpha-0.1.0.pack.json',
+        manifestSha256: '4'.repeat(64),
+        trust: 'verified-metadata',
+        assets: [],
+      },
     ],
     packs: [
       {
@@ -61,12 +79,12 @@ function releaseIndexFixture(): ReleaseIndex {
         channel: 'alpha',
         loader: 'echo-native-loader',
         moduleArtifactFamily: 'echo-addon',
-        catalogStatus: 'unpublished',
+        catalogStatus: 'approved',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/openlands-native.json',
         repoUrl: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition',
-        diagnostic: 'Openlands Native Edition is official but has no public GitHub release assets yet.',
       },
     ],
-    acceptedCount: 1,
+    acceptedCount: 2,
     rejectedReleases: [],
     diagnostics: [],
     latestPlayableRelease: null,
@@ -171,12 +189,12 @@ describe('official modpack catalog', () => {
     expect(JSON.stringify(officialModpacks)).toMatch(/galactic survey/i)
   })
 
-  it('keeps fallback Ashfall packs view-only while readiness is blocked', () => {
+  it('keeps fallback Ashfall packs installable', () => {
     const ashfall = officialModpacks.filter((pack) => pack.id.startsWith('ashfall-'))
 
-    expect(ashfall.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
-    expect(ashfall.map((pack) => pack.version)).toEqual(['Catalog gated', 'Catalog gated', 'Catalog gated'])
-    expect(ashfall.map((pack) => pack.catalogStatus)).toEqual(['warning', 'warning', 'warning'])
+    expect(ashfall.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable'])
+    expect(ashfall.map((pack) => pack.version)).toEqual(['0.1.0', '0.1.0', '0.1.0'])
+    expect(ashfall.map((pack) => pack.catalogStatus)).toEqual(['approved', 'approved', 'approved'])
   })
 
   it('builds visible cards from Release Index channel pack metadata', () => {
@@ -197,17 +215,16 @@ describe('official modpack catalog', () => {
     })
   })
 
-  it('shows Openlands as official but unpublished until real release assets exist', () => {
+  it('makes approved Openlands releases playable from the Release Index', () => {
     const openlands = officialModpacksFromReleaseIndex(releaseIndexFixture()).find((pack) => pack.id === 'openlands-native-edition')
 
     expect(openlands).toMatchObject({
-      status: 'preview',
-      phase: 'Unpublished',
-      version: 'No release yet',
-      catalogStatus: 'unpublished',
+      status: 'playable',
+      phase: 'Approved Alpha',
+      version: '0.1.0',
+      catalogStatus: 'approved',
       sourceRepo: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition',
     })
-    expect(openlands?.detail).toMatch(/no public GitHub release assets/i)
   })
 
   it('keeps warning-gated Ashfall channel packs locked with diagnostics', () => {
@@ -216,7 +233,7 @@ describe('official modpack catalog', () => {
     expect(cards).toHaveLength(3)
     expect(cards.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
     expect(cards.map((pack) => pack.phase)).toEqual(['Warning Gated', 'Warning Gated', 'Warning Gated'])
-    expect(cards.map((pack) => pack.version)).toEqual(['Catalog gated', 'Catalog gated', 'Catalog gated'])
+    expect(cards.map((pack) => pack.version)).toEqual(['0.1.0', '0.1.0', '0.1.0'])
     expect(cards[0]?.detail).toMatch(/Phase 7-10/)
     expect(cards[1]?.detail).toMatch(/missing moduleRequirements/)
     expect(cards[2]?.detail).toMatch(/missing moduleRequirements/)
@@ -228,7 +245,7 @@ describe('official modpack catalog', () => {
     expect(skyRelay).toMatchObject({
       status: 'preview',
       phase: 'Catalog Mismatch',
-      version: 'Catalog pending',
+      version: '0.1.0',
       catalogStatus: 'catalog-mismatch',
     })
     expect(skyRelay?.detail).toMatch(/approved-looking/)

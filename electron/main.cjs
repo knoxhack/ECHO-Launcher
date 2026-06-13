@@ -1925,6 +1925,7 @@ async function manifestImport(payload = {}) {
 
 function validatePackManifest(manifest, options = {}) {
   const normalizedPack = normalizeOfficialPackId(manifest?.pack)
+  manifest = normalizeLegacyPackManifest(manifest, normalizedPack)
   if (!manifest || !normalizedPack || !manifest.version || !Array.isArray(manifest.files)) {
     throw new Error(`The selected file is not a valid official ECHO pack manifest. Expected one of: ${Array.from(OFFICIAL_PACK_IDS).join(', ')}.`)
   }
@@ -2033,6 +2034,58 @@ function validatePackManifest(manifest, options = {}) {
     }
   }
   return { ...manifest, pack: normalizedPack }
+}
+
+function inferModuleRequirementVersion(file, moduleId) {
+  const baseName = path.basename(String(file?.path ?? file?.assetName ?? ''))
+    .replace(/\.echo-addon$/iu, '')
+    .replace(/\.jar$/iu, '')
+    .replace(/-(?:neoforge|standalone)$/iu, '')
+  const normalizedModuleId = String(moduleId ?? '').trim().toLowerCase()
+  if (normalizedModuleId && baseName.toLowerCase().startsWith(`${normalizedModuleId}-`)) {
+    return baseName.slice(normalizedModuleId.length + 1)
+  }
+  return baseName.match(/-(\d[\w.+-]*)$/u)?.[1] ?? ''
+}
+
+function legacyModuleRequirementsFromFiles(manifest, normalizedPack) {
+  const familyForPack = moduleArtifactFamilyForPack(normalizedPack)
+  const byModule = new Map()
+  for (const file of manifest?.files ?? []) {
+    const filePath = String(file?.path ?? '').replace(/\\/g, '/')
+    if (!/^(addons|mods)\//iu.test(filePath)) continue
+    const moduleId = String(file?.moduleId ?? '').trim().toLowerCase()
+    if (!moduleId || moduleId === 'config' || byModule.has(moduleId)) continue
+    const version = inferModuleRequirementVersion(file, moduleId)
+    if (!version) continue
+    byModule.set(moduleId, {
+      id: moduleId,
+      version,
+      artifactFamily: filePath.toLowerCase().startsWith('addons/') ? 'echo-addon' : familyForPack,
+      assetName: path.basename(filePath),
+      path: filePath,
+      sha256: file.sha256,
+      size: file.size,
+      required: file.required !== false,
+      side: file.side ?? 'both',
+    })
+  }
+  return [...byModule.values()]
+}
+
+function normalizeLegacyPackManifest(manifest, normalizedPack) {
+  if (!manifest || !normalizedPack) return manifest
+  const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
+  const next = { ...manifest }
+  if (!next.moduleArtifactFamily) next.moduleArtifactFamily = moduleArtifactFamilyForPack(normalizedPack)
+  if (!Array.isArray(moduleRequirements)) {
+    const inferred = legacyModuleRequirementsFromFiles(next, normalizedPack)
+    if (inferred.length > 0) {
+      next.moduleRequirements = inferred
+      next.modules = [...new Set([...(Array.isArray(next.modules) ? next.modules : []), ...inferred.map((item) => item.id)])]
+    }
+  }
+  return next
 }
 
 async function sha256File(target) {
@@ -3621,8 +3674,18 @@ function resolveManifestAssets(manifest, entry) {
 
 async function resolveInstallableManifest(manifest, entry, payload = {}) {
   const requirements = manifest.moduleRequirements ?? manifest.requiredModules
-  const zipManifestHasConcreteFiles = manifest.artifactMode === 'zip' && Array.isArray(manifest.files) && manifest.files.length > 0
-  if (!zipManifestHasConcreteFiles && Array.isArray(requirements) && requirements.length) {
+  const existingPaths = new Set((manifest.files ?? []).map((file) => String(file?.path ?? '').replace(/\\/g, '/').toLowerCase()))
+  const existingBasenames = new Set([...existingPaths].map((filePath) => path.basename(filePath)))
+  const hasMissingRequiredModules = Array.isArray(requirements) && requirements.some((requirement) => {
+    const moduleId = String(requirement?.id ?? requirement?.moduleId ?? '').trim()
+    const version = String(requirement?.version ?? '').trim()
+    if (!moduleId || !version) return false
+    const family = String(requirement.artifactFamily ?? requirement.family ?? manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(manifest.pack)).trim().toLowerCase()
+    const assetName = String(requirement.assetName ?? requirement.artifactName ?? moduleArtifactName(moduleId, version, family)).trim()
+    const requirementPath = String(requirement.path ?? (family === 'echo-addon' ? `addons/${assetName}` : `mods/${assetName}`)).replace(/\\/g, '/').toLowerCase()
+    return !existingPaths.has(requirementPath) && !existingBasenames.has(path.basename(requirementPath))
+  })
+  if (hasMissingRequiredModules) {
     const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
     return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
   }

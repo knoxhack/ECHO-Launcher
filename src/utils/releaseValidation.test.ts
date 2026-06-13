@@ -689,7 +689,47 @@ describe('releaseValidation', () => {
     expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
   })
 
-  it('rejects official pack manifests without module requirements', () => {
+  it('derives module requirements from legacy file-backed manifests', () => {
+    const manifest = validatePackManifest({
+      pack: 'ashfall-neoforge-edition',
+      version: '1.0.0',
+      channel: 'alpha',
+      minecraft: '26.1.2',
+      artifactMode: 'zip',
+      artifactName: 'ashfall-neoforge-edition-1.0.0.zip',
+      artifactSha256: 'a'.repeat(64),
+      loader: {
+        type: 'neoforge',
+        version: '26.1.2',
+      },
+      launch: { mainClass: 'net.neoforged.fml.startup.Client', gameArgs: [], jvmArgs: [] },
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0.jar',
+          assetName: 'file-c'.repeat(8),
+          sha256: 'c'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
+      changelog: ['NeoForge release'],
+      worldgenWarning: true,
+    })
+
+    expect(manifest.moduleRequirements).toEqual([
+      expect.objectContaining({
+        id: 'echocore',
+        version: '1.0.0',
+        artifactFamily: 'neoforge',
+        path: 'mods/echocore-1.0.0.jar',
+      }),
+    ])
+  })
+
+  it('still rejects manifests that cannot derive module requirements', () => {
     expect(() =>
       validatePackManifest({
         pack: 'ashfall-neoforge-edition',
@@ -700,18 +740,8 @@ describe('releaseValidation', () => {
           type: 'neoforge',
           version: '26.1.2',
         },
-        modules: ['echocore'],
-        files: [
-          {
-            path: 'mods/echocore-1.0.0-neoforge.jar',
-            assetName: 'echocore-1.0.0-neoforge.jar',
-            sha256: 'c'.repeat(64),
-            size: 100,
-            required: true,
-            moduleId: 'echocore',
-            side: 'both',
-          },
-        ],
+        modules: [],
+        files: [],
         changelog: ['NeoForge release'],
         worldgenWarning: true,
       }),

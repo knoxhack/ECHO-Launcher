@@ -195,16 +195,74 @@ export function isUsableReleaseCache(value: ReleaseIndex | null | undefined) {
   )
 }
 
+function pathBaseName(value: string) {
+  return value.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? ''
+}
+
+function inferModuleRequirementVersion(file: { path?: string; assetName?: string }, moduleId: string) {
+  const baseName = pathBaseName(String(file.path ?? file.assetName ?? ''))
+    .replace(/\.echo-addon$/iu, '')
+    .replace(/\.jar$/iu, '')
+    .replace(/-(?:neoforge|standalone)$/iu, '')
+  const normalizedModuleId = moduleId.trim().toLowerCase()
+  if (normalizedModuleId && baseName.toLowerCase().startsWith(`${normalizedModuleId}-`)) {
+    return baseName.slice(normalizedModuleId.length + 1)
+  }
+  return baseName.match(/-(\d[\w.+-]*)$/u)?.[1] ?? ''
+}
+
+function legacyModuleRequirementsFromFiles(manifest: PackManifest, normalizedPack: OfficialPackId) {
+  const familyForPack = moduleArtifactFamilyForPack(normalizedPack)
+  const byModule = new Map<string, NonNullable<PackManifest['moduleRequirements']>[number]>()
+  for (const file of manifest.files ?? []) {
+    const filePath = String(file.path ?? '').replace(/\\/g, '/')
+    if (!/^(addons|mods)\//iu.test(filePath)) continue
+    const moduleId = String(file.moduleId ?? '').trim().toLowerCase()
+    if (!moduleId || moduleId === 'config' || byModule.has(moduleId)) continue
+    const version = inferModuleRequirementVersion(file, moduleId)
+    if (!version) continue
+    byModule.set(moduleId, {
+      id: moduleId,
+      version,
+      artifactFamily: filePath.toLowerCase().startsWith('addons/') ? 'echo-addon' : familyForPack,
+      assetName: pathBaseName(filePath),
+      path: filePath,
+      sha256: file.sha256,
+      size: file.size,
+      required: file.required !== false,
+      side: file.side,
+    })
+  }
+  return [...byModule.values()]
+}
+
+function normalizeLegacyPackManifest(manifest: PackManifest, normalizedPack: OfficialPackId): PackManifest {
+  const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
+  const next: PackManifest = {
+    ...manifest,
+    moduleArtifactFamily: manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(normalizedPack),
+  }
+  if (!Array.isArray(moduleRequirements)) {
+    const inferred = legacyModuleRequirementsFromFiles(next, normalizedPack)
+    if (inferred.length > 0) {
+      next.moduleRequirements = inferred
+      next.modules = [...new Set([...(Array.isArray(next.modules) ? next.modules : []), ...inferred.map((item) => item.id ?? item.moduleId).filter(Boolean) as string[]])]
+    }
+  }
+  return next
+}
+
 export function validatePackManifest(value: unknown): PackManifest {
   if (!value || typeof value !== 'object') {
     throw new Error('Manifest must be a JSON object.')
   }
 
-  const manifest = value as PackManifest
+  let manifest = value as PackManifest
   const normalizedPack = normalizeOfficialPackId(manifest.pack)
   if (!normalizedPack) {
     throw new Error(`Manifest pack must be one of: ${officialPackIds.join(', ')}.`)
   }
+  manifest = normalizeLegacyPackManifest(manifest, normalizedPack)
   if (!manifest.version || typeof manifest.version !== 'string') {
     throw new Error('Manifest version is required.')
   }

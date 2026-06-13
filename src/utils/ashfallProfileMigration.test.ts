@@ -72,7 +72,7 @@ describe('ashfallProfileMigration', () => {
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
       channel: 'alpha',
-      channelLabel: 'Readiness Blocked',
+      channelLabel: 'Ashfall Native',
       ramGb: 9,
       installPath: 'C:\\Games\\ECHO\\Ashfall Stable',
       enabledAddons: ['echocore'],
