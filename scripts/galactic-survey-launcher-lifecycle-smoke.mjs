@@ -8,7 +8,7 @@ import { resolveEchoProtocolEntry } from '../electron/release-index-resolver.mjs
 
 const MODULE_ID = 'echogalacticsurveyprotocol'
 const MODULE_RELEASE_TAG = 'galactic-survey-0.1.0-alpha'
-const TRUST_LABEL = 'local-galactic-survey-draft-smoke'
+const TRUST_LABEL = 'local-galactic-survey-prerelease-smoke'
 
 const EDITIONS = [
   {
@@ -34,7 +34,7 @@ const EDITIONS = [
 function usage() {
   return `Usage: node scripts/galactic-survey-launcher-lifecycle-smoke.mjs [options]
 
-Runs a Launcher-owned lifecycle smoke against downloaded Galactic Survey draft assets.
+Runs a Launcher-owned lifecycle smoke against downloaded Galactic Survey prerelease assets.
 
 Options:
   --download-root <path>  Root containing downloaded edition assets.
@@ -466,8 +466,8 @@ async function main() {
     },
     blockers: [],
     residualRisks: [
-      'The previous Galactic Survey version is a fixture-local manifest generated from current draft assets plus an older module placeholder; it proves launcher update mechanics without claiming a second public Galactic Survey release exists.',
-      'This script uses Launcher-owned resolver and lifecycle contracts from Node against downloaded GitHub draft assets; packaged Electron install/update/repair click-through is covered by release-readiness/galactic-survey-electron-ui-smoke.json, while rollback has no visible packaged UI command yet.',
+      'The previous Galactic Survey version is a fixture-local manifest generated from current prerelease assets plus an older module placeholder; it proves launcher update mechanics without claiming a second public Galactic Survey release exists.',
+      'This script uses Launcher-owned resolver and lifecycle contracts from Node against downloaded GitHub prerelease assets; packaged Electron install/update/repair click-through is covered by release-readiness/galactic-survey-electron-ui-smoke.json, while rollback has no visible packaged UI command yet.',
       'Real gameplay evidence remains required before public alpha promotion.',
     ],
   }
