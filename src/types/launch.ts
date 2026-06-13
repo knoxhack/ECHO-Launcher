@@ -64,6 +64,8 @@ export interface MinecraftLauncherHandoffResult extends MinecraftLauncherProfile
   backupPath?: string
   openedLauncher: boolean
   openMethod?: string
+  prepareOnly?: boolean
+  openSkipped?: boolean
   preparedVersionMetadata?: boolean
   removedLauncherProfiles?: string[]
   launcherProfileWarnings?: string[]

@@ -75,6 +75,19 @@ describe('platform support helpers', () => {
     })
   })
 
+  it('uses an explicit isolated Minecraft root when provided', () => {
+    expect(
+      minecraftLauncherRootsForPlatform({
+        platform: 'win32',
+        env: {
+          APPDATA: 'C:\\Users\\Player\\AppData\\Roaming',
+          ECHO_LAUNCHER_MINECRAFT_ROOT: 'D:\\Smoke\\isolated-minecraft-root',
+        },
+        home: 'C:\\Users\\Player',
+      }),
+    ).toEqual(['D:\\Smoke\\isolated-minecraft-root'])
+  })
+
   it('builds launcher executable candidates for Windows, Linux, and Wine prefixes', () => {
     expect(minecraftLauncherExecutableCandidatesForPlatform({ platform: 'linux', home: '/home/player' })).toContain('/usr/bin/minecraft-launcher')
     expect(

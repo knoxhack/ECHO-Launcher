@@ -116,7 +116,7 @@ type NativeCommandMap = {
     result: NativeOperationStatus
   }
   'launch:prepare-handoff': {
-    payload: { profileId?: string; installPath?: string; ramGb?: number; version?: string; refreshRelease?: boolean; operationId?: string; updatePolicy?: 'allow' | 'skip'; runtimeMode?: MinecraftRuntimeModeId } | undefined
+    payload: { profileId?: string; installPath?: string; ramGb?: number; version?: string; refreshRelease?: boolean; operationId?: string; updatePolicy?: 'allow' | 'skip'; runtimeMode?: MinecraftRuntimeModeId; prepareOnly?: boolean } | undefined
     result: NativeHandoffPreparationResult
   }
   'launch:preflight': { payload: { profileId: string; installPath?: string; ramGb?: number }; result: LaunchPreflightReport }
@@ -145,7 +145,7 @@ type NativeCommandMap = {
     result: MinecraftLauncherDependencyStatus & { opened: boolean; openedLauncher: boolean; method?: string; warnings?: string[] }
   }
   'minecraft-launcher:handoff': {
-    payload: { profileId: string; installPath?: string; ramGb?: number; runtimeMode?: MinecraftRuntimeModeId }
+    payload: { profileId: string; installPath?: string; ramGb?: number; runtimeMode?: MinecraftRuntimeModeId; prepareOnly?: boolean }
     result: MinecraftLauncherHandoffResult
   }
   'world:scan': { payload: { worldPath: string; profileId?: string }; result: WorldCompatibilityReport }

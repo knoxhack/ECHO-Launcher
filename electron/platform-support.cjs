@@ -51,6 +51,8 @@ function launcherUpdateUnsupportedMessage(info, packaged = false, env = process.
 
 function minecraftLauncherRootsForPlatform({ platform = process.platform, env = process.env, home = '' } = {}) {
   const platformPath = pathForPlatform(platform)
+  const explicitRoot = String(env.ECHO_LAUNCHER_MINECRAFT_ROOT ?? '').trim()
+  if (explicitRoot) return [explicitRoot]
   const roots = []
   if (platform === 'linux') {
     roots.push(platformPath.join(home, '.minecraft'))

@@ -517,6 +517,7 @@ async function run() {
   assert(smokeModule?.sha256, `${SMOKE_MODULE_PATH} is missing from ${catalog.manifestPath}`)
   const userDataDir = path.join(args.workRoot, 'user-data')
   const playerContentRoot = path.join(args.workRoot, 'player-content')
+  const isolatedMinecraftRoot = path.join(args.workRoot, 'isolated-minecraft-root')
   const logsDir = path.join(userDataDir, 'ECHO', 'launcher-logs')
   const settingsPath = path.join(userDataDir, 'ECHO', 'settings.json')
   await fs.mkdir(userDataDir, { recursive: true })
@@ -544,6 +545,7 @@ async function run() {
       ...process.env,
       ECHO_LAUNCHER_USER_DATA_DIR: userDataDir,
       ECHO_LAUNCHER_PLAYER_CONTENT_ROOT: playerContentRoot,
+      ECHO_LAUNCHER_MINECRAFT_ROOT: isolatedMinecraftRoot,
       ECHO_LAUNCHER_SMOKE: 'galactic-survey-electron-ui',
       ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS: '1',
     },
@@ -782,6 +784,43 @@ async function run() {
     assert(launchStart?.status === 'preflight_failed', `Legacy launch start returned unexpected status: ${launchStart?.status}`)
     assert(/Minecraft Launcher Handoff/u.test(launchStart.message ?? ''), `Legacy launch start did not name Minecraft Launcher Handoff: ${launchStart.message}`)
 
+    const handoffPreparation = await evaluate(cdp, `window.echoNative.invoke('launch:prepare-handoff', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)},
+      updatePolicy: 'skip',
+      runtimeMode: 'native-loader-minecraft',
+      prepareOnly: true
+    })`)
+    assert(handoffPreparation?.ok === true, `Prepare-only Minecraft Launcher handoff did not report ok=true: ${handoffPreparation?.message}`)
+    assert(handoffPreparation.profileId === SMOKE_PACK.packId, `Prepare-only handoff profile mismatch: ${handoffPreparation.profileId}`)
+    assert(handoffPreparation.runtimeMode === 'native-loader-minecraft', `Prepare-only handoff runtime mismatch: ${handoffPreparation.runtimeMode}`)
+    assert(handoffPreparation.verification?.missing?.length === 0, 'Prepare-only handoff verification has missing files.')
+    assert(handoffPreparation.verification?.corrupt?.length === 0, 'Prepare-only handoff verification has corrupt files.')
+    assert(handoffPreparation.handoff?.ok === true, `Prepare-only handoff result did not report ok=true: ${handoffPreparation.handoff?.message}`)
+    assert(handoffPreparation.handoff?.profileCurrent === true, 'Prepare-only handoff profile is not current.')
+    assert(handoffPreparation.handoff?.versionReady === true, 'Prepare-only handoff version metadata is not ready.')
+    assert(handoffPreparation.handoff?.openedLauncher === false, 'Prepare-only handoff unexpectedly opened the Minecraft Launcher.')
+    assert(handoffPreparation.handoff?.prepareOnly === true, 'Prepare-only handoff did not preserve prepareOnly=true.')
+    assert(handoffPreparation.handoff?.openSkipped === true, 'Prepare-only handoff did not report openSkipped=true.')
+    assert(handoffPreparation.handoff?.updatedProfile === true, 'Prepare-only handoff did not update the launcher profile.')
+    assert(handoffPreparation.handoff?.validatedGameDir === installPath, `Prepare-only handoff gameDir mismatch: ${handoffPreparation.handoff?.validatedGameDir}`)
+    assert((handoffPreparation.handoff?.validatedModsCount ?? 0) > 0, 'Prepare-only handoff did not validate installed Native addon files.')
+    assert(handoffPreparation.handoff?.minecraftRoot === isolatedMinecraftRoot, `Prepare-only handoff used the wrong Minecraft root: ${handoffPreparation.handoff?.minecraftRoot}`)
+    assert(String(handoffPreparation.handoff?.launcherProfilesPath ?? '').startsWith(isolatedMinecraftRoot), 'Prepare-only launcher_profiles path is not inside the isolated Minecraft root.')
+    assert(String(handoffPreparation.handoff?.versionMetadataPath ?? '').startsWith(isolatedMinecraftRoot), 'Prepare-only version metadata path is not inside the isolated Minecraft root.')
+    assert(await exists(handoffPreparation.handoff.launcherProfilesPath), `Prepare-only launcher profile was not written: ${handoffPreparation.handoff.launcherProfilesPath}`)
+    assert(await exists(handoffPreparation.handoff.versionMetadataPath), `Prepare-only version metadata was not written: ${handoffPreparation.handoff.versionMetadataPath}`)
+    const handoffProfiles = await readJson(handoffPreparation.handoff.launcherProfilesPath)
+    const handoffProfile = handoffProfiles.profiles?.[handoffPreparation.handoff.profileId]
+    assert(handoffProfile?.echoManaged === true, 'Prepared launcher profile is not marked echoManaged.')
+    assert(handoffProfile?.echoLauncher?.profileId === SMOKE_PACK.packId, `Prepared launcher profile echo id mismatch: ${handoffProfile?.echoLauncher?.profileId}`)
+    assert(handoffProfile?.echoLauncher?.runtimeMode === 'native-loader-minecraft', `Prepared launcher profile runtime mismatch: ${handoffProfile?.echoLauncher?.runtimeMode}`)
+    assert(handoffProfile?.gameDir === installPath, `Prepared launcher profile gameDir mismatch: ${handoffProfile?.gameDir}`)
+    assert(handoffProfile?.lastVersionId === handoffPreparation.handoff.versionId, `Prepared launcher profile version mismatch: ${handoffProfile?.lastVersionId}`)
+    const handoffVersionMetadata = await readJson(handoffPreparation.handoff.versionMetadataPath)
+    assert(handoffVersionMetadata?.id === handoffPreparation.handoff.versionId, `Prepared version metadata id mismatch: ${handoffVersionMetadata?.id}`)
+    assert(handoffVersionMetadata?.echoLauncher?.loader === 'native-loader', `Prepared version metadata loader mismatch: ${handoffVersionMetadata?.echoLauncher?.loader}`)
+
     const report = {
       schemaVersion: 'echo.galactic_survey.electron-ui-smoke.v1',
       ok: true,
@@ -791,6 +830,7 @@ async function run() {
       workRoot: args.workRoot,
       userDataDir,
       playerContentRoot,
+      isolatedMinecraftRoot,
       debugPort,
       catalogPort,
       platform: {
@@ -897,6 +937,55 @@ async function run() {
           start: launchStart,
           requiredPath: 'Minecraft Launcher Handoff or a real Native runtime launch command must pass before this can become first-launch proof.',
         },
+        minecraftLauncherHandoff: {
+          state: 'prepared_profile_in_isolated_minecraft_root',
+          ok: handoffPreparation.ok,
+          operationId: handoffPreparation.operationId,
+          runtimeMode: handoffPreparation.runtimeMode,
+          runtimeLabel: handoffPreparation.runtimeLabel,
+          phases: handoffPreparation.phases,
+          verification: {
+            missing: handoffPreparation.verification?.missing?.length ?? null,
+            corrupt: handoffPreparation.verification?.corrupt?.length ?? null,
+            valid: handoffPreparation.verification?.valid?.length ?? null,
+          },
+          handoff: {
+            ok: handoffPreparation.handoff?.ok,
+            profileId: handoffPreparation.handoff?.profileId,
+            profileName: handoffPreparation.handoff?.profileName,
+            profileExists: handoffPreparation.handoff?.profileExists,
+            profileCurrent: handoffPreparation.handoff?.profileCurrent,
+            versionId: handoffPreparation.handoff?.versionId,
+            versionReady: handoffPreparation.handoff?.versionReady,
+            versionSource: handoffPreparation.handoff?.versionSource,
+            minecraftRoot: handoffPreparation.handoff?.minecraftRoot,
+            launcherProfilesPath: handoffPreparation.handoff?.launcherProfilesPath,
+            versionMetadataPath: handoffPreparation.handoff?.versionMetadataPath,
+            gameDir: handoffPreparation.handoff?.gameDir,
+            validatedGameDir: handoffPreparation.handoff?.validatedGameDir,
+            validatedModsCount: handoffPreparation.handoff?.validatedModsCount,
+            preparedVersionMetadata: handoffPreparation.handoff?.preparedVersionMetadata,
+            updatedProfile: handoffPreparation.handoff?.updatedProfile,
+            openedLauncher: handoffPreparation.handoff?.openedLauncher,
+            prepareOnly: handoffPreparation.handoff?.prepareOnly,
+            openSkipped: handoffPreparation.handoff?.openSkipped,
+            warnings: handoffPreparation.handoff?.warnings ?? [],
+            message: handoffPreparation.handoff?.message,
+          },
+          writtenProfile: {
+            echoManaged: handoffProfile?.echoManaged === true,
+            profileId: handoffProfile?.echoLauncher?.profileId,
+            runtimeMode: handoffProfile?.echoLauncher?.runtimeMode,
+            gameDir: handoffProfile?.gameDir,
+            lastVersionId: handoffProfile?.lastVersionId,
+          },
+          writtenVersionMetadata: {
+            id: handoffVersionMetadata?.id,
+            loader: handoffVersionMetadata?.echoLauncher?.loader,
+            inheritsFrom: handoffVersionMetadata?.inheritsFrom,
+          },
+          limitation: 'Prepare-only evidence proves packaged launcher metadata handoff in an isolated Minecraft root. It is not gameplay or official Minecraft Launcher open/play evidence.',
+        },
         rollback: {
           state: 'covered_by_node_lifecycle_smoke_no_visible_packaged_ui_command',
         },
@@ -912,6 +1001,7 @@ async function run() {
         packagedElectronRepairClickThrough: 'passed',
         packagedElectronDiagnosticExport: 'passed',
         packagedElectronLogExport: 'passed',
+        packagedElectronMinecraftLauncherHandoffPreparation: 'passed_isolated_prepare_only',
         packagedElectronFirstLaunch: 'blocked_legacy_native_launch_removed',
         packagedElectronRollbackClickThrough: 'not_available_no_visible_ui_command',
         realVersionToVersionUpdate: 'covered_by_release-readiness/galactic-survey-launcher-lifecycle-smoke.json',

@@ -5773,6 +5773,36 @@ async function minecraftLauncherHandoff(payload = {}) {
     }
   }
 
+  if (payload.prepareOnly === true) {
+    await appendLauncherLog(
+      'INFO',
+      `Minecraft Launcher ${runtimeLabel} handoff profile ${statusWithVersion.profileId} prepared for ${profile.name}; launcher open skipped by prepare-only mode.`,
+    )
+    return {
+      ...statusWithVersion,
+      profileExists: true,
+      profileCurrent: true,
+      warnings,
+      backupPath,
+      openedLauncher: false,
+      openMethod: undefined,
+      launcherDependencySource: statusWithVersion.launcherDependencySource,
+      launcherExecutablePath: statusWithVersion.launcherExecutablePath,
+      launcherInstallPath: statusWithVersion.launcherInstallPath,
+      launcherInstallLogPath: statusWithVersion.launcherInstallLogPath,
+      launcherDependencyWarnings: statusWithVersion.launcherDependencyWarnings ?? [],
+      preparedVersionMetadata: versionPrep.created,
+      removedLauncherProfiles: profileCleanup.removedProfiles,
+      launcherProfileWarnings,
+      validatedGameDir: installPath,
+      validatedModsCount: modsValidation.validatedModsCount,
+      updatedProfile: true,
+      prepareOnly: true,
+      openSkipped: true,
+      message: `${profile.name} ${runtimeLabel} profile is ready in Minecraft Launcher; opening the launcher was skipped by prepare-only mode.`,
+    }
+  }
+
   const dependencyBeforeOpen = await minecraftLauncherDependencyStatus({ writeCache: false }).catch(() => null)
   updateOperationStatus(payload.operationId, {
     kind: 'handoff',
@@ -6084,6 +6114,7 @@ async function launchPrepareHandoff(payload = {}) {
           skipVerification: true,
           operationId,
           runtimeMode,
+          prepareOnly: payload.prepareOnly === true,
         }),
       )
       updateOperationStatus(operationId, {
@@ -6250,6 +6281,7 @@ async function launchPrepareHandoff(payload = {}) {
         skipVerification: true,
         operationId,
         runtimeMode,
+        prepareOnly: payload.prepareOnly === true,
       }),
     )
     updateOperationStatus(operationId, {

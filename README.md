@@ -41,6 +41,10 @@ Launcher installers, AppImages, blockmaps, `latest.yml`, and `latest-linux.yml` 
 
 `npm run test:e2e:release-index` creates local `.echo-addon` module artifacts, locally ingests them into a temporary Release Index catalog, resolves `echo://install/addon/<id>?pack=<pack-id>` and `echo://update/pack/<id>` links, then verifies install, update, repair after corruption, and rollback with SHA-256 checks. Pass `-- --keep-temp` to inspect the generated fixture files.
 
+## Galactic Survey Packaged Smoke
+
+`npm run test:e2e:galactic-survey-electron-ui` launches the packaged Windows directory build, installs Galactic Survey Native Edition from a local approved catalog, verifies update reconciliation and repair, exports diagnostics/log bundles, checks the removed legacy launch path fails closed, and prepares Minecraft Launcher handoff metadata in an isolated `ECHO_LAUNCHER_MINECRAFT_ROOT`. That smoke proves profile/version metadata handoff mechanics without opening the official Minecraft Launcher; real first launch still requires open/play evidence.
+
 ## Docs Index
 
 - [docs/launcher-update-flow.md](docs/launcher-update-flow.md)
