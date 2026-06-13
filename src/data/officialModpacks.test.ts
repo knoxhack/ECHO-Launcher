@@ -9,6 +9,9 @@ const officialPackIds = [
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
+  'galactic-survey-native-edition',
+  'galactic-survey-neoforge-edition',
+  'galactic-survey-standalone-edition',
   'openlands-native-edition',
   'openlands-neoforge-edition',
   'openlands-standalone-edition',
@@ -134,9 +137,13 @@ describe('official modpack catalog', () => {
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
     ])
     expect(JSON.stringify(officialModpacks)).toMatch(/openlands/i)
     expect(JSON.stringify(officialModpacks)).toMatch(/sky relay/i)
+    expect(JSON.stringify(officialModpacks)).toMatch(/galactic survey/i)
   })
 
   it('keeps fallback Ashfall packs view-only while readiness is blocked', () => {

@@ -102,6 +102,9 @@ const officialEchoProfileIds = [
   'arcana-division-native-edition',
   'arcana-division-neoforge-edition',
   'arcana-division-standalone-edition',
+  'galactic-survey-native-edition',
+  'galactic-survey-neoforge-edition',
+  'galactic-survey-standalone-edition',
 ]
 
 const reservedEchoMinecraftProfileKeys = new Set([

@@ -12,8 +12,9 @@ const ashfallOfficialPackIds = ['ashfall-native-edition', 'ashfall-neoforge-edit
 const skyRelayOfficialPackIds = ['sky-relay-native-edition', 'sky-relay-neoforge-edition', 'sky-relay-standalone-edition']
 const openlandsOfficialPackIds = ['openlands-native-edition', 'openlands-neoforge-edition', 'openlands-standalone-edition']
 const arcanaDivisionOfficialPackIds = ['arcana-division-native-edition', 'arcana-division-neoforge-edition', 'arcana-division-standalone-edition']
+const galacticSurveyOfficialPackIds = ['galactic-survey-native-edition', 'galactic-survey-neoforge-edition', 'galactic-survey-standalone-edition']
 
-export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds, ...openlandsOfficialPackIds, ...arcanaDivisionOfficialPackIds]
+export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds, ...openlandsOfficialPackIds, ...arcanaDivisionOfficialPackIds, ...galacticSurveyOfficialPackIds]
 
 export function normalizeOfficialPackId(pack) {
   if (pack === 'ashfall') return 'ashfall-native-edition'
@@ -31,6 +32,9 @@ export function normalizeOfficialPackId(pack) {
   if (pack === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
   if (pack === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'
   if (pack === 'arcane-division') return 'arcana-division-native-edition'
+  if (pack === 'galactic-survey' || pack === 'galactic-survey-native-loader') return 'galactic-survey-native-edition'
+  if (pack === 'galactic-survey-neoforge') return 'galactic-survey-neoforge-edition'
+  if (pack === 'galactic-survey-standalone-runtime') return 'galactic-survey-standalone-edition'
   return officialPackIds.includes(pack) ? pack : undefined
 }
 

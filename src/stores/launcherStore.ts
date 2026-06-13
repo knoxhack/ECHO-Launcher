@@ -36,6 +36,9 @@ const selectableProfileIds = new Set([
   'arcana-division-native-edition',
   'arcana-division-neoforge-edition',
   'arcana-division-standalone-edition',
+  'galactic-survey-native-edition',
+  'galactic-survey-neoforge-edition',
+  'galactic-survey-standalone-edition',
 ])
 
 function normalizeSelectedProfileId(profileId?: string) {
@@ -52,6 +55,9 @@ function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'arcana-division' || profileId === 'arcana-division-native-loader' || profileId === 'arcane-division') return 'arcana-division-native-edition'
   if (profileId === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
   if (profileId === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'
+  if (profileId === 'galactic-survey' || profileId === 'galactic-survey-native-loader') return 'galactic-survey-native-edition'
+  if (profileId === 'galactic-survey-neoforge') return 'galactic-survey-neoforge-edition'
+  if (profileId === 'galactic-survey-standalone-runtime') return 'galactic-survey-standalone-edition'
   return profileId && selectableProfileIds.has(profileId) ? profileId : defaultProfileId
 }
 

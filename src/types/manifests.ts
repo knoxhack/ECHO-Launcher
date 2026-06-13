@@ -20,11 +20,16 @@ export type ArcanaDivisionRuntimePackId =
   | 'arcana-division-native-edition'
   | 'arcana-division-neoforge-edition'
   | 'arcana-division-standalone-edition'
+export type GalacticSurveyRuntimePackId =
+  | 'galactic-survey-native-edition'
+  | 'galactic-survey-neoforge-edition'
+  | 'galactic-survey-standalone-edition'
 export type OfficialPackId =
   | AshfallRuntimePackId
   | SkyRelayRuntimePackId
   | OpenlandsRuntimePackId
   | ArcanaDivisionRuntimePackId
+  | GalacticSurveyRuntimePackId
 
 export interface LoaderInstaller {
   url?: string

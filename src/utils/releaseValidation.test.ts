@@ -300,7 +300,7 @@ describe('releaseValidation', () => {
     expect(latestPlayableReleaseForPack(releaseIndex({ releases: [baseRelease, arcanaRelease] }), 'arcana-division')?.version).toBe('1.0.0')
   })
 
-  it('normalizes Sky Relay and Openlands official pack aliases', () => {
+  it('normalizes Sky Relay, Openlands, and Galactic Survey official pack aliases', () => {
     expect(officialPackIds).toEqual([
       'ashfall-native-edition',
       'ashfall-neoforge-edition',
@@ -314,6 +314,9 @@ describe('releaseValidation', () => {
       'arcana-division-native-edition',
       'arcana-division-neoforge-edition',
       'arcana-division-standalone-edition',
+      'galactic-survey-native-edition',
+      'galactic-survey-neoforge-edition',
+      'galactic-survey-standalone-edition',
     ])
     expect(normalizeOfficialPackId('sky-relay')).toBe('sky-relay-native-edition')
     expect(normalizeOfficialPackId('sky-relay-neoforge')).toBe('sky-relay-neoforge-edition')
@@ -322,6 +325,9 @@ describe('releaseValidation', () => {
     expect(normalizeOfficialPackId('openlans')).toBe('openlands-native-edition')
     expect(normalizeOfficialPackId('openlans-neoforge')).toBe('openlands-neoforge-edition')
     expect(normalizeOfficialPackId('openlands-standalone-runtime')).toBe('openlands-standalone-edition')
+    expect(normalizeOfficialPackId('galactic-survey')).toBe('galactic-survey-native-edition')
+    expect(normalizeOfficialPackId('galactic-survey-neoforge')).toBe('galactic-survey-neoforge-edition')
+    expect(normalizeOfficialPackId('galactic-survey-standalone-runtime')).toBe('galactic-survey-standalone-edition')
     expect(isPlayablePackRelease({ ...baseRelease, pack: 'sky-relay-native-edition' }, 'sky-relay')).toBe(true)
   })
 
