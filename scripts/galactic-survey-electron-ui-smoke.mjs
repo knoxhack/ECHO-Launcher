@@ -466,6 +466,18 @@ async function waitForSmokeModuleHash(installPath, expectedSha256, timeoutMs, de
   })
 }
 
+async function assertZipFile(filePath, description) {
+  assert(await exists(filePath), `${description} was not written: ${filePath}`)
+  const bytes = await fs.readFile(filePath)
+  assert(bytes.length > 4, `${description} is empty: ${filePath}`)
+  assert(bytes[0] === 0x50 && bytes[1] === 0x4b, `${description} is not a zip file: ${filePath}`)
+  return {
+    path: filePath,
+    size: bytes.length,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+  }
+}
+
 async function closeHttpServer(server) {
   if (!server) return
   await new Promise((resolve) => server.close(() => resolve()))
@@ -731,6 +743,44 @@ async function run() {
       report.after?.corrupt?.length === 0,
     args.timeoutMs)
     const verifiedAfterRepair = await waitForSmokeModuleHash(installPath, smokeModule.sha256, args.timeoutMs, 'Galactic Survey module hash after repair')
+    const diagnosticExport = await evaluate(cdp, `window.echoNative.invoke('diagnostic:export', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)}
+    })`)
+    assert(diagnosticExport?.ok === true, 'Diagnostic export did not report ok=true.')
+    assert(diagnosticExport.summary?.missing === 0, `Diagnostic export reported ${diagnosticExport.summary?.missing ?? 'unknown'} missing files.`)
+    assert(diagnosticExport.summary?.corrupt === 0, `Diagnostic export reported ${diagnosticExport.summary?.corrupt ?? 'unknown'} corrupt files.`)
+    assert(await exists(diagnosticExport.reportPath), `Diagnostic report was not written: ${diagnosticExport.reportPath}`)
+    const diagnosticReport = await readJson(diagnosticExport.reportPath)
+    assert(diagnosticReport.profile?.id === SMOKE_PACK.packId, `Diagnostic report profile mismatch: ${diagnosticReport.profile?.id}`)
+    assert(diagnosticReport.manifest?.pack === SMOKE_PACK.packId, `Diagnostic report manifest mismatch: ${diagnosticReport.manifest?.pack}`)
+    assert(diagnosticReport.installPath === installPath, `Diagnostic report installPath mismatch: ${diagnosticReport.installPath}`)
+    assert(diagnosticReport.verification?.missing?.length === 0, 'Diagnostic report verification has missing files.')
+    assert(diagnosticReport.verification?.corrupt?.length === 0, 'Diagnostic report verification has corrupt files.')
+
+    const logExport = await evaluate(cdp, `window.echoNative.invoke('logs:export', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)}
+    })`)
+    assert(logExport?.ok === true, 'Log export did not report ok=true.')
+    assert(Array.isArray(logExport.files) && logExport.files.length > 0, 'Log export did not include any source files.')
+    const logZip = await assertZipFile(logExport.zipPath, 'Log export bundle')
+
+    const launchPreflight = await evaluate(cdp, `window.echoNative.invoke('launch:preflight', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)}
+    })`)
+    assert(launchPreflight?.ok === false, 'Legacy native launch preflight unexpectedly reported ok=true.')
+    assert(launchPreflight.profileId === SMOKE_PACK.packId, `Launch preflight profile mismatch: ${launchPreflight.profileId}`)
+    assert(launchPreflight.verification?.missing?.length === 0, 'Launch preflight verification has missing files.')
+    assert(launchPreflight.verification?.corrupt?.length === 0, 'Launch preflight verification has corrupt files.')
+    assert((launchPreflight.blockers ?? []).some((blocker) => blocker.id === 'minecraft-launcher-handoff'), 'Launch preflight did not expose the Minecraft Launcher handoff blocker.')
+    const launchStart = await evaluate(cdp, `window.echoNative.invoke('launch:start', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)}
+    })`)
+    assert(launchStart?.status === 'preflight_failed', `Legacy launch start returned unexpected status: ${launchStart?.status}`)
+    assert(/Minecraft Launcher Handoff/u.test(launchStart.message ?? ''), `Legacy launch start did not name Minecraft Launcher Handoff: ${launchStart.message}`)
 
     const report = {
       schemaVersion: 'echo.galactic_survey.electron-ui-smoke.v1',
@@ -806,6 +856,47 @@ async function run() {
           corruptSha256,
           verifiedModule: verifiedAfterRepair,
         },
+        diagnostics: {
+          ok: diagnosticExport.ok,
+          reportPath: diagnosticExport.reportPath,
+          summary: diagnosticExport.summary,
+          report: {
+            profileId: diagnosticReport.profile?.id,
+            manifestPack: diagnosticReport.manifest?.pack,
+            installPath: diagnosticReport.installPath,
+            verification: {
+              missing: diagnosticReport.verification?.missing?.length ?? null,
+              corrupt: diagnosticReport.verification?.corrupt?.length ?? null,
+              valid: diagnosticReport.verification?.valid?.length ?? null,
+            },
+            javaRuntimes: diagnosticReport.java?.runtimes?.length ?? null,
+            logFiles: diagnosticReport.logs?.files?.length ?? null,
+          },
+        },
+        logs: {
+          ok: logExport.ok,
+          zipPath: logExport.zipPath,
+          size: logExport.size,
+          generatedAt: logExport.generatedAt,
+          sourceFiles: logExport.files,
+          zip: logZip,
+        },
+        firstLaunch: {
+          state: 'fail_closed_legacy_native_launch_removed',
+          preflight: {
+            ok: launchPreflight.ok,
+            profileId: launchPreflight.profileId,
+            installPath: launchPreflight.installPath,
+            verification: {
+              missing: launchPreflight.verification?.missing?.length ?? null,
+              corrupt: launchPreflight.verification?.corrupt?.length ?? null,
+              valid: launchPreflight.verification?.valid?.length ?? null,
+            },
+            blockers: launchPreflight.blockers ?? [],
+          },
+          start: launchStart,
+          requiredPath: 'Minecraft Launcher Handoff or a real Native runtime launch command must pass before this can become first-launch proof.',
+        },
         rollback: {
           state: 'covered_by_node_lifecycle_smoke_no_visible_packaged_ui_command',
         },
@@ -819,6 +910,9 @@ async function run() {
         packagedElectronInstallClickThrough: 'passed',
         packagedElectronUpdateReconciliationClickThrough: 'passed',
         packagedElectronRepairClickThrough: 'passed',
+        packagedElectronDiagnosticExport: 'passed',
+        packagedElectronLogExport: 'passed',
+        packagedElectronFirstLaunch: 'blocked_legacy_native_launch_removed',
         packagedElectronRollbackClickThrough: 'not_available_no_visible_ui_command',
         realVersionToVersionUpdate: 'covered_by_release-readiness/galactic-survey-launcher-lifecycle-smoke.json',
       },

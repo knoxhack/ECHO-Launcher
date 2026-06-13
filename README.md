@@ -29,6 +29,7 @@ Run commands from the repository root.
 - `npm run lint`
 - `npm run test`
 - `npm run test:e2e:release-index`
+- `npm run test:e2e:galactic-survey-electron-ui`
 - `npm run package:win`
 - `npm run package:linux`
 
