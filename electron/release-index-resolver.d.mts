@@ -13,6 +13,12 @@ export type CanonicalArtifactRecord = {
   size?: number
   sha256?: string
   buildMode?: string
+  artifactRole?: string
+  manualInstall?: boolean
+  developerDirectDownload?: boolean
+  launcherFacing?: boolean
+  moduleArtifact?: boolean
+  packContent?: boolean
 }
 
 export type EchoProtocolRequest =

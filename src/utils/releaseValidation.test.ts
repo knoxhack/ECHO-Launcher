@@ -579,6 +579,67 @@ describe('releaseValidation', () => {
     })
   })
 
+  it('does not select the direct Native Loader jar as the product update artifact', () => {
+    const nativeLoaderLibrary = {
+      file: 'echo-native-loader-1.0.0.jar',
+      artifactRole: 'native-loader-library',
+      manualInstall: true,
+      developerDirectDownload: true,
+      launcherFacing: false,
+      moduleArtifact: false,
+      packContent: false,
+      sha256: '5'.repeat(64),
+      size: 1141527,
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar',
+    }
+    const directInstallDescriptor = {
+      file: 'native-loader-direct-install.json',
+      artifactRole: 'native-loader-direct-install-descriptor',
+      manualInstall: true,
+      developerDirectDownload: true,
+      launcherFacing: false,
+      moduleArtifact: false,
+      packContent: false,
+      sha256: '6'.repeat(64),
+      size: 1279,
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-direct-install.json',
+    }
+    const runtimeProduct = {
+      ...canonicalNativeRuntimeProduct,
+      compatibility: ['ashfall-native-edition'],
+      artifacts: {
+        checksums: {
+          file: 'checksums.txt',
+          sha256: '7'.repeat(64),
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/checksums.txt',
+        },
+        nativeLoaderLibrary,
+        nativeLoaderDirectInstall: directInstallDescriptor,
+        archive: {
+          file: 'echo-native-platform-1.0.0-RC1.zip',
+          sha256: '8'.repeat(64),
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-platform-1.0.0-RC1.zip',
+          size: 1221,
+        },
+      },
+    }
+    const onlyDirectLoader = {
+      ...runtimeProduct,
+      artifacts: {
+        nativeLoaderLibrary,
+        nativeLoaderDirectInstall: directInstallDescriptor,
+        checksums: runtimeProduct.artifacts.checksums,
+      },
+    }
+
+    expect(productUpdateArtifact(runtimeProduct, 'ashfall-native-edition')?.name).toBe('echo-native-platform-1.0.0-RC1.zip')
+    expect(productUpdateArtifact(onlyDirectLoader, 'ashfall-native-edition')).toBeNull()
+    expect(productUpdateSelection([onlyDirectLoader], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
+      entry: null,
+      warnings: ['Release Index product echo-native-platform 1.0.1 has no indexed updater artifact for ashfall-native-edition.'],
+    })
+  })
+
   it('validates trusted pack manifests', () => {
     const manifest = validatePackManifest({
       pack: 'ashfall',

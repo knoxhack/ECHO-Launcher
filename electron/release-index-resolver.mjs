@@ -65,6 +65,12 @@ export function canonicalArtifactRecords(artifacts) {
         size: node.size === undefined ? undefined : Number(node.size),
         sha256: node.sha256 ? String(node.sha256) : undefined,
         buildMode: node.buildMode ? String(node.buildMode) : undefined,
+        artifactRole: node.artifactRole ? String(node.artifactRole) : undefined,
+        manualInstall: node.manualInstall === undefined ? undefined : Boolean(node.manualInstall),
+        developerDirectDownload: node.developerDirectDownload === undefined ? undefined : Boolean(node.developerDirectDownload),
+        launcherFacing: node.launcherFacing === undefined ? undefined : Boolean(node.launcherFacing),
+        moduleArtifact: node.moduleArtifact === undefined ? undefined : Boolean(node.moduleArtifact),
+        packContent: node.packContent === undefined ? undefined : Boolean(node.packContent),
       })
     }
     for (const [key, value] of Object.entries(node)) visit(value, key)
@@ -252,16 +258,28 @@ function isMetadataProductArtifact(artifact) {
   return /(?:latest\.ya?ml|\.blockmap|checksums?\.sha256|checksums?\.txt|license(?:\.|$))/iu.test(artifact.name)
 }
 
+function isDirectNativeLoaderArtifact(artifact) {
+  const haystack = `${artifact.role} ${artifact.name} ${artifact.artifactRole ?? ''}`.toLowerCase()
+  return artifact.artifactRole === 'native-loader-library'
+    || artifact.artifactRole === 'native-loader-direct-install-descriptor'
+    || artifact.role === 'nativeLoaderLibrary'
+    || artifact.role === 'nativeLoaderDirectInstall'
+    || artifact.name === 'echo-native-loader-1.0.0.jar'
+    || artifact.name === 'native-loader-direct-install.json'
+    || /\bnative-loader-library\b/u.test(haystack)
+}
+
 export function productUpdateArtifact(entry, compatibility) {
   const artifacts = installableArtifactRecords(entry.artifacts)
   const usable = artifacts
     .map((artifact) => ({ artifact, releaseAsset: artifactToReleaseAsset(artifact) }))
     .filter((row) => Boolean(row.releaseAsset))
   if (!usable.length) return null
-  const installable = usable.filter(({ artifact }) => !isMetadataProductArtifact(artifact))
+  const updateCandidates = usable.filter(({ artifact }) => !isDirectNativeLoaderArtifact(artifact))
+  const installable = updateCandidates.filter(({ artifact }) => !isMetadataProductArtifact(artifact))
   const normalizedCompatibility = String(compatibility ?? '').trim().toLowerCase()
   if (normalizedCompatibility) {
-    const pools = [installable, usable].filter((pool) => pool.length)
+    const pools = [installable, updateCandidates].filter((pool) => pool.length)
     for (const pool of pools) {
       if (normalizedCompatibility === 'windows-x64') {
         const windowsArtifact = pool.find(({ artifact }) => {
@@ -286,7 +304,7 @@ export function productUpdateArtifact(entry, compatibility) {
     })
     if (compatible) return compatible.releaseAsset
   }
-  return (installable[0] ?? usable[0]).releaseAsset
+  return installable[0]?.releaseAsset ?? null
 }
 
 export function productUpdateEntry(entries, id, compatibility) {
