@@ -237,7 +237,7 @@ describe('release asset resolution', () => {
         artifactUrl: 'https://example.test/old.zip',
         loader: {
           installer: {
-            assetName: 'native-loader-1.0.0.jar',
+            assetName: 'echo-native-loader-1.0.0.jar',
             url: 'https://api.github.com/repos/knoxhack/ECHO-Native-Platform/releases/assets/111',
           },
         },
@@ -258,8 +258,8 @@ describe('release asset resolution', () => {
           size: 10,
         },
         {
-          name: 'native-loader-1.0.0.jar',
-          browser_download_url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar',
+          name: 'echo-native-loader-1.0.0.jar',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar',
           size: 20,
         },
         {
@@ -276,7 +276,7 @@ describe('release asset resolution', () => {
       'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0/openlands-native-edition-0.1.0.zip',
     )
     expect(resolved.loader.installer.url).toBe(
-      'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar',
+      'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar',
     )
     expect(resolved.files[0]).toMatchObject({
       url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',

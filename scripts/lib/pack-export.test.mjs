@@ -387,7 +387,7 @@ describe('default Ashfall pack export', () => {
       downloads: {
         artifact: {
           path: 'com/echo/native-loader/1.0.0/native-loader-1.0.0.jar',
-          url: expect.stringContaining('native-loader-1.0.0.jar'),
+          url: expect.stringContaining('echo-native-loader-1.0.0.jar'),
           sha1: expect.stringMatching(/^[a-f0-9]{40}$/u),
           size: expect.any(Number),
         },
