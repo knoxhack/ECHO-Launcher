@@ -15,6 +15,9 @@ describe('ashfallProfileMigration', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'galactic-survey-native-edition',
+      'galactic-survey-neoforge-edition',
+      'galactic-survey-standalone-edition',
       'openlands-native-edition',
       'openlands-neoforge-edition',
       'openlands-standalone-edition',
@@ -23,6 +26,9 @@ describe('ashfallProfileMigration', () => {
       'arcana-division-standalone-edition',
     ])
     expect(normalized.map((profile) => profile.runtimeMode)).toEqual([
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
@@ -61,7 +67,7 @@ describe('ashfallProfileMigration', () => {
     ]
 
     const normalized = normalizeAshfallProfiles(oldProfiles, bundledProfiles)
-    expect(normalized).toHaveLength(12)
+    expect(normalized).toHaveLength(15)
     expect(normalized[0]).toMatchObject({
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
@@ -77,6 +83,9 @@ describe('ashfallProfileMigration', () => {
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
+      'galactic-survey-native-edition',
+      'galactic-survey-neoforge-edition',
+      'galactic-survey-standalone-edition',
       'openlands-native-edition',
       'openlands-neoforge-edition',
       'openlands-standalone-edition',
@@ -84,8 +93,9 @@ describe('ashfallProfileMigration', () => {
       'arcana-division-neoforge-edition',
       'arcana-division-standalone-edition',
     ])
-    expect(normalized.slice(6, 9).map((profile) => profile.channel)).toEqual(['alpha', 'alpha', 'experimental'])
-    expect(normalized.slice(9).map((profile) => profile.channel)).toEqual(['beta', 'beta', 'beta'])
+    expect(normalized.slice(6, 9).map((profile) => profile.channel)).toEqual(['alpha', 'alpha', 'alpha'])
+    expect(normalized.slice(9, 12).map((profile) => profile.channel)).toEqual(['alpha', 'alpha', 'experimental'])
+    expect(normalized.slice(12).map((profile) => profile.channel)).toEqual(['beta', 'beta', 'beta'])
   })
 
   it('uses the visible user folder for fresh Ashfall installs', () => {
