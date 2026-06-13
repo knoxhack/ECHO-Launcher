@@ -45,6 +45,8 @@ Launcher installers, AppImages, blockmaps, `latest.yml`, and `latest-linux.yml` 
 
 `npm run test:e2e:galactic-survey-electron-ui` launches the packaged Windows directory build, installs Galactic Survey Native Edition from a local approved catalog, verifies update reconciliation, clicks the visible Restore Last Known Good rollback action, re-updates, repairs a corrupted module, exports diagnostics/log bundles, checks the removed legacy launch path fails closed, and prepares Minecraft Launcher handoff metadata in an isolated `ECHO_LAUNCHER_MINECRAFT_ROOT`. That smoke proves packaged install/update/rollback/repair UI and profile/version metadata handoff mechanics without opening the official Minecraft Launcher; real first launch still requires open/play evidence.
 
+`node scripts/galactic-survey-real-minecraft-handoff-smoke.mjs --allow-real-minecraft-root --clean` launches the packaged Windows directory build, installs Galactic Survey Native Edition from the downloaded public prerelease pack bytes, and prepares an ECHO-managed Galactic Survey Native Loader profile in the detected user `.minecraft` folder. Use `--minecraft-root <path>` for isolated verification. The report is written to the Release Index as `release-readiness/galactic-survey-real-minecraft-handoff-smoke.json`; it proves real-root handoff preparation only, not official launcher open/play.
+
 ## Docs Index
 
 - [docs/launcher-update-flow.md](docs/launcher-update-flow.md)
