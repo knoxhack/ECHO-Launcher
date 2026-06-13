@@ -13,9 +13,12 @@ const { pathToFileURL } = require('node:url')
 const zlib = require('node:zlib')
 const AdmZip = require('adm-zip')
 const {
+  ECHO_MODULE_RELEASE_DOWNLOAD_TAGS,
   githubAssetSha256,
   moduleArtifactFamilyForPack,
   moduleArtifactName,
+  moduleReleaseAssetsFromChecksumText,
+  moduleReleaseAssetsFromMetadata,
   releaseAssetUrl,
   resolveManifestReleaseAssets,
   resolveModuleRequirements,
@@ -1002,9 +1005,15 @@ function standaloneRuntimeRootCandidates(payload = {}) {
   const configured = String(payload?.runtimeRoot ?? '').trim()
   const envRoot = String(process.env.ECHO_STANDALONE_RUNTIME_ROOT ?? '').trim()
   const appRoot = app.getAppPath()
+  const resourcesRoot = String(process.resourcesPath ?? '').trim()
   const candidates = [
     configured,
     envRoot,
+    path.resolve(resourcesRoot, 'Echo', 'echo-standalone-runtime'),
+    path.resolve(resourcesRoot, 'ECHO', 'echo-standalone-runtime'),
+    path.resolve(resourcesRoot, 'echo-standalone-runtime'),
+    path.resolve(process.cwd(), '..', 'ECHO-Standalone-Runtime'),
+    path.resolve(appRoot, '..', '..', '..', 'ECHO-Standalone-Runtime'),
     path.resolve(process.cwd(), '..', 'Echo', 'echo-standalone-runtime'),
     path.resolve(process.cwd(), '..', 'ECHO', 'echo-standalone-runtime'),
     path.resolve(appRoot, '..', 'Echo', 'echo-standalone-runtime'),
@@ -1034,6 +1043,14 @@ function standaloneRuntimeExecutablePath(runtimeRoot) {
   const executableName = process.platform === 'win32' ? 'EchoStandaloneRuntime.exe' : 'EchoStandaloneRuntime'
   const buildRoot = path.join(runtimeRoot, 'build')
   const relativeExecutable = path.join('EchoStandaloneRuntime', executableName)
+  const packagedCandidates = [
+    path.join(runtimeRoot, executableName),
+    path.join(runtimeRoot, relativeExecutable),
+    path.join(runtimeRoot, 'jpackage-opengl-client', relativeExecutable),
+  ]
+  for (const candidate of packagedCandidates) {
+    if (fssync.existsSync(candidate)) return candidate
+  }
   const fallback = path.join(buildRoot, 'jpackage', relativeExecutable)
   try {
     const candidates = fssync
@@ -2101,10 +2118,64 @@ function legacyModuleRequirementsFromFiles(manifest, normalizedPack) {
   return [...byModule.values()]
 }
 
+const NEOFORGE_VERSION_BY_MINECRAFT_VERSION = new Map([
+  ['26.1.2', '26.1.2.43-beta'],
+])
+
+function normalizedPackRootModulePath(file, normalizedPack) {
+  const filePath = String(file?.path ?? '').replace(/\\/g, '/')
+  if (!filePath.toLowerCase().startsWith('pack-root/')) return null
+  if (!file?.moduleId) return null
+  const basename = path.basename(filePath)
+  if (!basename) return null
+  if (normalizedPack.endsWith('-native-edition') && /\.echo-addon$/iu.test(basename)) return `addons/${basename}`
+  if ((normalizedPack.endsWith('-neoforge-edition') || normalizedPack.endsWith('-standalone-edition')) && /\.jar$/iu.test(basename)) return `mods/${basename}`
+  return null
+}
+
+function normalizeLegacyPackFiles(manifest, normalizedPack) {
+  return (manifest.files ?? []).map((file) => {
+    const normalizedPath = normalizedPackRootModulePath(file, normalizedPack)
+    if (!normalizedPath) return file
+    return {
+      ...file,
+      archivePath: String(file.path ?? '').replace(/\\/g, '/'),
+      path: normalizedPath,
+    }
+  })
+}
+
+function normalizeLegacyNeoForgeLoader(manifest, normalizedPack) {
+  if (!normalizedPack.endsWith('-neoforge-edition') || manifest.loader?.type !== 'neoforge') return manifest.loader
+  const minecraftVersion = String(manifest.minecraftVersion ?? manifest.minecraft ?? manifest.loader?.versionJson?.inheritsFrom ?? '').trim()
+  const loaderVersion = String(manifest.loader?.version ?? '').trim()
+  const replacement = NEOFORGE_VERSION_BY_MINECRAFT_VERSION.get(loaderVersion) ?? (loaderVersion === minecraftVersion ? NEOFORGE_VERSION_BY_MINECRAFT_VERSION.get(minecraftVersion) : undefined)
+  if (!replacement || replacement === loaderVersion) return manifest.loader
+  const next = {
+    ...manifest.loader,
+    version: replacement,
+    minecraftLauncherVersionId: `neoforge-${replacement}`,
+  }
+  if (next.versionJson && typeof next.versionJson === 'object' && !Array.isArray(next.versionJson)) {
+    next.versionJson = {
+      ...next.versionJson,
+      id: `neoforge-${replacement}`,
+      inheritsFrom: next.versionJson.inheritsFrom ?? minecraftVersion,
+    }
+  }
+  const installerSha = String(next.installer?.sha256 ?? '').toLowerCase()
+  if (installerSha === 'f'.repeat(64) || (next.installer?.assetName && !String(next.installer.assetName).includes(replacement))) {
+    delete next.installer
+  }
+  return next
+}
+
 function normalizeLegacyPackManifest(manifest, normalizedPack) {
   if (!manifest || !normalizedPack) return manifest
   const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
   const next = { ...manifest }
+  if (Array.isArray(next.files)) next.files = normalizeLegacyPackFiles(next, normalizedPack)
+  next.loader = normalizeLegacyNeoForgeLoader(next, normalizedPack)
   if (!next.moduleArtifactFamily) next.moduleArtifactFamily = moduleArtifactFamilyForPack(normalizedPack)
   if (!Array.isArray(moduleRequirements)) {
     const inferred = legacyModuleRequirementsFromFiles(next, normalizedPack)
@@ -3430,20 +3501,99 @@ function metadataShaGetter(metadata) {
 let moduleReleaseAssetsCache = null
 let moduleReleaseAssetsInFlight = null
 
+async function fetchIndexedModuleReleaseAssets(payload = {}) {
+  const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
+  const assets = []
+  for (const entry of catalog.entries ?? []) {
+    if (entry.kind !== 'module' && entry.kind !== 'addon') continue
+    const artifacts = entry.artifacts && typeof entry.artifacts === 'object' ? entry.artifacts : {}
+    for (const [family, artifact] of Object.entries(artifacts)) {
+      if (family === 'sources' || !artifact || typeof artifact !== 'object') continue
+      const name = String(artifact.file ?? artifact.name ?? artifact.assetName ?? '').trim()
+      const url = String(artifact.url ?? artifact.browser_download_url ?? artifact.browserDownloadUrl ?? '').trim()
+      const sha256 = String(artifact.sha256 ?? '').trim()
+      if (!name || !/^https?:\/\//i.test(url) || !/^[a-f0-9]{64}$/i.test(sha256)) continue
+      assets.push({
+        name,
+        url,
+        browser_download_url: url,
+        sha256: sha256.toLowerCase(),
+        size: Number.isFinite(Number(artifact.size)) ? Number(artifact.size) : 0,
+        moduleId: entry.id,
+        family,
+        releaseTag: entry.releaseTag,
+        releasePageUrl: `https://github.com/${entry.sourceRepo}/releases/tag/${entry.releaseTag}`,
+        validation: entry.validation,
+      })
+    }
+  }
+  return assets
+}
+
+async function fetchKnownModuleReleaseAssetsFromPublicMetadata() {
+  const assets = []
+  for (const tag of ECHO_MODULE_RELEASE_DOWNLOAD_TAGS) {
+    const baseUrl = `https://github.com/${MODULE_RELEASE_OWNER}/${MODULE_RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`
+    try {
+      const metadata = await fetchJson(`${baseUrl}/${encodeURIComponent(RELEASE_METADATA_ASSET)}`)
+      assets.push(...moduleReleaseAssetsFromMetadata(metadata, tag))
+      continue
+    } catch {
+      // Older module releases may only carry checksums.txt. That is still enough
+      // to build hash-verified public download URLs for individual module files.
+    }
+    try {
+      const checksumText = (await requestBuffer(`${baseUrl}/checksums.txt`)).toString('utf8')
+      assets.push(...moduleReleaseAssetsFromChecksumText(checksumText, tag))
+    } catch {
+      // Keep trying the remaining known releases.
+    }
+  }
+  return assets
+}
+
+function dedupeModuleReleaseAssets(assets = []) {
+  const byNameAndSha = new Set()
+  const deduped = []
+  for (const asset of assets) {
+    const name = String(asset?.name ?? '').trim()
+    if (!name) continue
+    const sha256 = String(asset?.sha256 ?? '').trim().toLowerCase()
+    const key = `${name}:${sha256 || asset?.url || asset?.browser_download_url || ''}`
+    if (byNameAndSha.has(key)) continue
+    byNameAndSha.add(key)
+    deduped.push(asset)
+  }
+  return deduped
+}
+
 async function fetchModuleReleaseAssets(payload = {}) {
   if (!payload.refresh && moduleReleaseAssetsCache) return moduleReleaseAssetsCache
   if (moduleReleaseAssetsInFlight) return moduleReleaseAssetsInFlight
   moduleReleaseAssetsInFlight = (async () => {
+    const indexedAssets = await fetchIndexedModuleReleaseAssets(payload).catch(() => [])
+    const publicMetadataAssets = await fetchKnownModuleReleaseAssetsFromPublicMetadata().catch(() => [])
     const apiUrl = `https://api.github.com/repos/${encodeURIComponent(MODULE_RELEASE_OWNER)}/${encodeURIComponent(MODULE_RELEASE_REPO)}/releases`
-    const releases = await fetchJson(apiUrl)
+    let releases
+    try {
+      releases = await fetchJson(apiUrl)
+    } catch {
+      moduleReleaseAssetsCache = dedupeModuleReleaseAssets([...indexedAssets, ...publicMetadataAssets])
+      return moduleReleaseAssetsCache
+    }
     if (!Array.isArray(releases)) throw new Error('ECHO Modules release source did not return a release list.')
-    const assets = []
+    const assets = [...indexedAssets, ...publicMetadataAssets]
     const sorted = releases
       .filter((release) => !release.draft)
       .sort((a, b) => Date.parse(b.published_at ?? b.created_at ?? 0) - Date.parse(a.published_at ?? a.created_at ?? 0))
 
     for (const release of sorted) {
-      const releaseAssets = await fetchReleaseAssets(release, Array.isArray(release.assets) ? release.assets : [])
+      let releaseAssets
+      try {
+        releaseAssets = await fetchReleaseAssets(release, Array.isArray(release.assets) ? release.assets : [])
+      } catch {
+        continue
+      }
       const metadataAsset = releaseAssets.find((asset) => asset.name === RELEASE_METADATA_ASSET)
       let metadataSha = () => undefined
       if (metadataAsset?.browser_download_url) {
@@ -3463,8 +3613,8 @@ async function fetchModuleReleaseAssets(payload = {}) {
         })
       }
     }
-    moduleReleaseAssetsCache = assets
-    return assets
+    moduleReleaseAssetsCache = dedupeModuleReleaseAssets(assets)
+    return moduleReleaseAssetsCache
   })().finally(() => {
     moduleReleaseAssetsInFlight = null
   })
@@ -3915,23 +4065,43 @@ function artifactCachePath(file, url) {
   return path.join(paths.downloads, 'artifacts', `${hashPrefix}-${name}`)
 }
 
+function artifactDownloadUrls(file) {
+  return [
+    file?.url,
+    ...(Array.isArray(file?.urls) ? file.urls : []),
+  ]
+    .map((url) => String(url ?? '').trim())
+    .filter((url) => /^https?:\/\//i.test(url))
+    .filter((url, index, urls) => urls.indexOf(url) === index)
+}
+
 async function downloadVerifiedArtifact(file) {
-  if (!file.url) {
+  const urls = artifactDownloadUrls(file)
+  if (!urls.length) {
     throw new Error('No artifact URL is configured in the selected release manifest.')
   }
   if (!file.sha256) {
     throw new Error('Artifact is missing a SHA-256 hash.')
   }
-  const cachePath = artifactCachePath(file, file.url)
-  if (await exists(cachePath)) {
-    const cached = await sha256File(cachePath)
-    if (cached.toLowerCase() === String(file.sha256).toLowerCase()) return cachePath
-    await fs.rm(cachePath, { force: true })
+  const errors = []
+  for (const url of urls) {
+    const cachePath = artifactCachePath(file, url)
+    if (await exists(cachePath)) {
+      const cached = await sha256File(cachePath)
+      if (cached.toLowerCase() === String(file.sha256).toLowerCase()) return cachePath
+      await fs.rm(cachePath, { force: true })
+    }
+    try {
+      const headers = isGitHubReleaseAssetApiUrl(url) ? { Accept: 'application/octet-stream' } : undefined
+      const download = await downloadFile({ url, destination: cachePath, sha256: file.sha256, headers })
+      if (!download.verified) throw new Error(`Artifact verification failed for ${file.path}.`)
+      return cachePath
+    } catch (error) {
+      errors.push(`${url}: ${error instanceof Error ? error.message : String(error)}`)
+      await fs.rm(cachePath, { force: true }).catch(() => undefined)
+    }
   }
-  const headers = isGitHubReleaseAssetApiUrl(file.url) ? { Accept: 'application/octet-stream' } : undefined
-  const download = await downloadFile({ url: file.url, destination: cachePath, sha256: file.sha256, headers })
-  if (!download.verified) throw new Error(`Artifact verification failed for ${file.path}.`)
-  return cachePath
+  throw new Error(`Artifact verification failed for ${file.path}. ${errors.slice(0, 3).join(' | ')}`)
 }
 
 async function downloadSha1Artifact(file) {
@@ -4606,6 +4776,81 @@ async function resolveNeoForgeInstallerMetadata(manifest, reportOperation) {
   }
 }
 
+function readNeoForgeInstallerJson(installerPath, entryName) {
+  const zip = new AdmZip(installerPath)
+  const entry = zip.getEntry(entryName)
+  if (!entry) return null
+  try {
+    return JSON.parse(entry.getData().toString('utf8'))
+  } catch {
+    return null
+  }
+}
+
+function normalizeNeoForgeInstallerVersionJson(versionJson, manifest, versionId = minecraftLauncherVersionId(manifest, 'neoforge-minecraft')) {
+  if (!versionJson || typeof versionJson !== 'object' || Array.isArray(versionJson)) return null
+  return stripNullishLauncherFields({
+    ...versionJson,
+    id: versionId,
+    inheritsFrom: versionJson.inheritsFrom ?? minecraftVersionFromManifest(manifest),
+  })
+}
+
+function minecraftLibraryDownloadArtifacts(minecraftRoot, versionJson, labelPrefix = 'Minecraft Launcher library') {
+  const artifacts = []
+  for (const library of versionJson?.libraries ?? []) {
+    if (!minecraftLibraryAllowed(library)) continue
+    const artifact = library.downloads?.artifact
+    if (!artifact?.path || !artifact?.url) continue
+    artifacts.push({
+      label: `${labelPrefix} ${library.name ?? artifact.path}`,
+      libraryName: library.name,
+      path: path.join(minecraftRoot, 'libraries', String(artifact.path).replace(/\\/g, '/')),
+      relativePath: String(artifact.path).replace(/\\/g, '/'),
+      url: artifact.url,
+      sha1: artifact.sha1,
+      size: artifact.size,
+    })
+  }
+  return artifacts
+}
+
+async function missingMinecraftLibraryArtifacts(minecraftRoot, versionJson, labelPrefix) {
+  const missing = []
+  for (const artifact of minecraftLibraryDownloadArtifacts(minecraftRoot, versionJson, labelPrefix)) {
+    if (!(await exists(artifact.path))) {
+      missing.push({ ...artifact, reason: 'missing' })
+      continue
+    }
+    const stats = await fs.stat(artifact.path)
+    const actualSha1 = artifact.sha1 ? await sha1File(artifact.path) : ''
+    if ((artifact.sha1 && actualSha1.toLowerCase() !== String(artifact.sha1).toLowerCase()) || (artifact.size && stats.size !== artifact.size)) {
+      missing.push({ ...artifact, reason: 'corrupt' })
+    }
+  }
+  return missing
+}
+
+async function ensureMinecraftLibraryArtifacts(minecraftRoot, versionJson, labelPrefix) {
+  const before = await missingMinecraftLibraryArtifacts(minecraftRoot, versionJson, labelPrefix)
+  for (const artifact of before) {
+    await downloadSha1Artifact({
+      kind: 'minecraft-launcher-library',
+      path: artifact.relativePath,
+      absolutePath: artifact.path,
+      url: artifact.url,
+      sha1: artifact.sha1,
+      size: artifact.size,
+      libraryName: artifact.libraryName,
+    })
+  }
+  const after = await missingMinecraftLibraryArtifacts(minecraftRoot, versionJson, labelPrefix)
+  if (after.length > 0) {
+    throw new Error(`${labelPrefix} preparation failed: ${after.map((artifact) => `${artifact.relativePath} (${artifact.reason})`).join(', ')}.`)
+  }
+  return before
+}
+
 async function neoforgeEnsure(payload = {}) {
   const operationId = payload.operationId
   const operationKind = payload.operationKind ?? operationStatuses.get(operationId)?.kind ?? 'operation'
@@ -4664,6 +4909,12 @@ async function neoforgeEnsure(payload = {}) {
     url: installer.url,
     sha256: installer.sha256,
   })
+  const installerVersionJson = normalizeNeoForgeInstallerVersionJson(
+    readNeoForgeInstallerJson(installerPath, 'version.json'),
+    manifest,
+    minecraftLauncherVersionId(manifest, 'neoforge-minecraft'),
+  )
+  const installProfileJson = readNeoForgeInstallerJson(installerPath, 'install_profile.json')
   await ensureDir(installPath)
   const launcherProfilesPath = path.join(installPath, 'launcher_profiles.json')
   if (!(await exists(launcherProfilesPath))) {
@@ -4687,6 +4938,8 @@ async function neoforgeEnsure(payload = {}) {
     installerPath,
     installPath,
     mode,
+    installerVersionId: installerVersionJson?.id,
+    installerVersionLibraries: installerVersionJson?.libraries?.length ?? 0,
     stdout: result.stdout,
     stderr: result.stderr,
     error: result.error,
@@ -4714,6 +4967,8 @@ async function neoforgeEnsure(payload = {}) {
     ok: true,
     version: manifest.loader.version,
     installerPath,
+    versionJson: installerVersionJson,
+    installProfileJson,
     installPath,
     javaPath: java.preferred.path,
     mode,
@@ -4902,6 +5157,7 @@ function manifestMinecraftRuntimeFilePaths(manifest, runtimeMode) {
 async function validateAshfallInstanceMods(installPath, manifest, runtimeMode) {
   const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
   const expectedFiles = manifestMinecraftRuntimeFilePaths(manifest, normalizedMode)
+  const manifestName = manifest?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
   const missingFiles = []
   for (const relativePath of expectedFiles) {
     if (!(await exists(safeJoin(installPath, relativePath)))) missingFiles.push(relativePath)
@@ -4914,7 +5170,7 @@ async function validateAshfallInstanceMods(installPath, manifest, runtimeMode) {
     return {
       ok: false,
       validatedModsCount,
-      warnings: [`Ashfall release manifest does not list any ${native ? 'Native addon files' : 'mod jars'}, so ECHO cannot prepare a safe Minecraft Launcher handoff.`],
+      warnings: [`${manifestName} manifest does not list any ${native ? 'Native addon files' : 'mod jars'}, so ECHO cannot prepare a safe Minecraft Launcher handoff.`],
     }
   }
   if (missingFiles.length > 0) {
@@ -4923,7 +5179,7 @@ async function validateAshfallInstanceMods(installPath, manifest, runtimeMode) {
       ok: false,
       validatedModsCount,
       warnings: [
-        `${missingFiles.length} Ashfall ${itemLabel}${missingFiles.length === 1 ? '' : 's'} missing from ${path.join(installPath, folderName)}. First missing: ${preview}.`,
+        `${missingFiles.length} ${manifestName} ${itemLabel}${missingFiles.length === 1 ? '' : 's'} missing from ${path.join(installPath, folderName)}. First missing: ${preview}.`,
       ],
     }
   }
@@ -4951,6 +5207,7 @@ function validateMinecraftLauncherProfileReady(document, profileId, versionId, i
 
 function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
   const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
+  const manifestName = manifest?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
   if (normalizedMode === 'native-loader-minecraft') {
     return {
       runtimeMode: normalizedMode,
@@ -4960,7 +5217,8 @@ function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
       versionJson: manifest.nativeLoader?.versionJson,
       versionId: minecraftLauncherVersionId(manifest, normalizedMode),
       librariesLabel: 'Native Loader libraries',
-      missingMetadataMessage: 'Ashfall release manifest is missing nativeLoader metadata.',
+      missingMetadataMessage: `${manifestName} manifest is missing nativeLoader metadata.`,
+      manifestName,
     }
   }
   return {
@@ -4971,7 +5229,8 @@ function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
     versionJson: manifest.loader?.versionJson,
     versionId: minecraftLauncherVersionId(manifest, normalizedMode),
     librariesLabel: 'NeoForge libraries',
-    missingMetadataMessage: 'Ashfall release manifest is missing loader metadata.',
+    missingMetadataMessage: `${manifestName} manifest is missing loader metadata.`,
+    manifestName,
   }
 }
 
@@ -5063,52 +5322,85 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
   })
 }
 
-function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode) {
+function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode, runtimeVersionJson = null) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
     ? normalizeEchoNativeLoaderVersionJson(runtime.versionJson, manifest, versionId)
-    : runtime.versionJson
+    : (runtimeVersionJson ?? runtime.versionJson)
   const requirement = launcherVersionManifestRequirement(manifest, versionId, runtimeMode)
   if (runtime.runtimeMode === 'native-loader-minecraft' && !runtime.version) {
     return {
       ok: false,
-      reason: 'Ashfall release manifest nativeLoader metadata must include a version.',
+      reason: `${runtime.manifestName} manifest nativeLoader metadata must include a version.`,
+    }
+  }
+  if (runtime.runtimeMode === 'neoforge-minecraft' && !runtime.version) {
+    return {
+      ok: false,
+      reason: `${runtime.manifestName} manifest NeoForge loader metadata must include a version.`,
+    }
+  }
+  if (runtime.runtimeMode === 'neoforge-minecraft' && (!versionJson || typeof versionJson !== 'object' || Array.isArray(versionJson))) {
+    return {
+      ok: true,
+      versionJson: null,
+      requirement,
+      externalRuntimeMetadataRequired: true,
+    }
+  }
+  if (runtime.runtimeMode === 'neoforge-minecraft') {
+    const hasStrictNeoForgeVersionJson =
+      String(versionJson.id ?? '') === versionId &&
+      String(versionJson.inheritsFrom ?? '') === String(requirement.inheritsFrom ?? '') &&
+      typeof versionJson.mainClass === 'string' &&
+      versionJson.arguments &&
+      typeof versionJson.arguments === 'object' &&
+      !Array.isArray(versionJson.arguments) &&
+      Array.isArray(versionJson.libraries) &&
+      versionJson.libraries.length > 0
+    if (!hasStrictNeoForgeVersionJson) {
+      return {
+        ok: true,
+        versionJson: null,
+        requirement,
+        externalRuntimeMetadataRequired: true,
+      }
     }
   }
   if (!versionJson || typeof versionJson !== 'object' || Array.isArray(versionJson)) {
     return {
       ok: false,
-      reason: `Ashfall release manifest is missing ${runtime.loaderKey === 'native-loader' ? 'nativeLoader.versionJson' : 'loader.versionJson'} for '${versionId}'.`,
+      reason: `${runtime.manifestName} manifest is missing ${runtime.loaderKey === 'native-loader' ? 'nativeLoader.versionJson' : 'loader.versionJson'} for '${versionId}'.`,
     }
   }
   if (String(versionJson.id ?? '') !== versionId) {
     return {
       ok: false,
-      reason: `Ashfall release manifest ${runtime.label} versionJson id is '${versionJson.id ?? 'missing'}', expected '${versionId}'.`,
+      reason: `${runtime.manifestName} manifest ${runtime.label} versionJson id is '${versionJson.id ?? 'missing'}', expected '${versionId}'.`,
     }
   }
   if (String(versionJson.inheritsFrom ?? '') !== String(requirement.inheritsFrom ?? '')) {
     return {
       ok: false,
-      reason: `Ashfall release manifest ${runtime.label} versionJson inheritsFrom is '${versionJson.inheritsFrom ?? 'missing'}', expected '${requirement.inheritsFrom}'.`,
+      reason: `${runtime.manifestName} manifest ${runtime.label} versionJson inheritsFrom is '${versionJson.inheritsFrom ?? 'missing'}', expected '${requirement.inheritsFrom}'.`,
     }
   }
   if (!versionJson.mainClass || typeof versionJson.mainClass !== 'string') {
     return {
       ok: false,
-      reason: `Ashfall release manifest ${runtime.label} versionJson is missing mainClass.`,
+      reason: `${runtime.manifestName} manifest ${runtime.label} versionJson is missing mainClass.`,
     }
   }
   if (!versionJson.arguments || typeof versionJson.arguments !== 'object' || Array.isArray(versionJson.arguments)) {
     return {
       ok: false,
-      reason: `Ashfall release manifest ${runtime.label} versionJson is missing launcher arguments.`,
+      reason: `${runtime.manifestName} manifest ${runtime.label} versionJson is missing launcher arguments.`,
     }
   }
   if (!Array.isArray(versionJson.libraries) || versionJson.libraries.length === 0) {
     return {
       ok: false,
-      reason: `Ashfall release manifest ${runtime.label} versionJson is missing ${runtime.librariesLabel}.`,
+      reason: `${runtime.manifestName} manifest ${runtime.label} versionJson is missing ${runtime.librariesLabel}.`,
     }
   }
   return { ok: true, versionJson, requirement }
@@ -5137,14 +5429,28 @@ function validateMinecraftLauncherVersionDocument(document, manifest, versionId,
   if (String(document.inheritsFrom ?? '') !== String(requirement.inheritsFrom ?? '')) {
     return { valid: false, source: 'invalid', reason: `inheritsFrom is '${document.inheritsFrom ?? 'missing'}', expected '${requirement.inheritsFrom}'` }
   }
-  if (String(document.mainClass ?? '') !== String(requirement.mainClass ?? '')) {
+  const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
+  if (runtime.runtimeMode === 'native-loader-minecraft' && String(document.mainClass ?? '') !== String(requirement.mainClass ?? '')) {
     return { valid: false, source: 'invalid', reason: `mainClass is '${document.mainClass ?? 'missing'}', expected '${requirement.mainClass}'` }
+  }
+  if (!document.mainClass || typeof document.mainClass !== 'string') {
+    return { valid: false, source: 'invalid', reason: 'mainClass is missing' }
   }
   if (!document.arguments || typeof document.arguments !== 'object' || Array.isArray(document.arguments)) {
     return { valid: false, source: 'invalid', reason: 'launcher arguments are missing' }
   }
   if (!Array.isArray(document.libraries) || document.libraries.length === 0) {
-    return { valid: false, source: 'invalid', reason: `${launcherRuntimeManifestDefinition(manifest, runtimeMode).librariesLabel} are missing` }
+    return { valid: false, source: 'invalid', reason: `${runtime.librariesLabel} are missing` }
+  }
+  if (runtime.runtimeMode === 'neoforge-minecraft') {
+    const gameArguments = Array.isArray(document.arguments.game) ? document.arguments.game : []
+    const neoForgeLibraryDownloads = minecraftLibraryDownloadArtifacts('', document, 'NeoForge library')
+    if (!gameArguments.includes('--fml.neoForgeVersion')) {
+      return { valid: false, source: 'invalid', reason: 'NeoForge launcher arguments are missing --fml.neoForgeVersion' }
+    }
+    if (neoForgeLibraryDownloads.length === 0) {
+      return { valid: false, source: 'invalid', reason: 'NeoForge library download metadata is missing' }
+    }
   }
   if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
     if (!document.libraries.some((library) => libraryHasEchoNativeLoaderDownload(library))) {
@@ -5413,31 +5719,34 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
 }
 
 function neoforgeRequiredClientArtifactPaths(minecraftRoot, manifest) {
-  const loaderVersion = manifest.loader?.version
-  if (!loaderVersion) return []
-  const artifacts = []
-  const addLibrary = (label, relativePath) => {
-    if (relativePath) artifacts.push({ label, path: path.join(minecraftRoot, 'libraries', relativePath) })
-  }
-
-  addLibrary('NeoForge patched Minecraft client', artifactPathFromMavenCoordinate(`net.neoforged:minecraft-client-patched:${loaderVersion}`))
-  addLibrary('NeoForge universal jar', artifactPathFromMavenCoordinate(`net.neoforged:neoforge:${loaderVersion}:universal`))
-  return artifacts
+  const versionJson = manifest?.loader?.versionJson ? manifest.loader.versionJson : manifest
+  return minecraftLibraryDownloadArtifacts(minecraftRoot, versionJson, 'NeoForge launcher library')
 }
 
 async function missingNeoForgeClientArtifacts(minecraftRoot, manifest) {
   const missing = []
   for (const artifact of neoforgeRequiredClientArtifactPaths(minecraftRoot, manifest)) {
-    if (!(await exists(artifact.path))) missing.push(artifact)
+    if (!(await exists(artifact.path))) {
+      missing.push({ ...artifact, reason: 'missing' })
+      continue
+    }
+    const stats = await fs.stat(artifact.path)
+    const actualSha1 = artifact.sha1 ? await sha1File(artifact.path) : ''
+    if ((artifact.sha1 && actualSha1.toLowerCase() !== String(artifact.sha1).toLowerCase()) || (artifact.size && stats.size !== artifact.size)) {
+      missing.push({ ...artifact, reason: 'corrupt' })
+    }
   }
   return missing
 }
 
-function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = []) {
+function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = [], runtimeVersionJson = null) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
-  const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode)
+  const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode, runtimeVersionJson)
   if (!validation.ok) {
-    throw new Error(`${validation.reason} Publish a strict Ashfall release with ${runtime.loaderKey === 'native-loader' ? 'nativeLoader.versionJson' : 'loader.versionJson'} including id, inheritsFrom, mainClass, arguments, and libraries.`)
+    throw new Error(`${validation.reason} Publish a strict ${runtime.manifestName} release with ${runtime.loaderKey === 'native-loader' ? 'nativeLoader.versionJson' : 'loader.versionJson'} including id, inheritsFrom, mainClass, arguments, and libraries.`)
+  }
+  if (runtime.runtimeMode === 'neoforge-minecraft' && !validation.versionJson) {
+    throw new Error(`${runtime.manifestName} NeoForge handoff requires official installer metadata for '${runtime.version}'.`)
   }
   const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
     ? normalizeEchoNativeLoaderVersionJson(validation.versionJson, manifest, versionId, packLibraries)
@@ -5456,7 +5765,7 @@ function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packL
       loader: runtime.loaderKey,
       loaderVersion: runtime.version || 'unknown',
       preparedAt: isoNow(),
-      source: 'release-manifest',
+      source: runtimeVersionJson ? 'neoforge-installer' : 'release-manifest',
     },
   }
 }
@@ -5466,31 +5775,65 @@ async function ensureMinecraftLauncherBaseVersionMetadata(minecraftRoot, manifes
   const metadataPath = path.join(minecraftRoot, 'versions', minecraftVersion, `${minecraftVersion}.json`)
   const existing = await readJson(metadataPath, null)
   const existingValidation = validateMinecraftLauncherBaseVersionDocument(existing, minecraftVersion)
+  let metadata = existingValidation.ok ? existing : null
+  let metadataCreated = false
   if (existingValidation.ok) {
-    return { created: false, metadataPath, warnings: [] }
+    metadataCreated = false
+  } else {
+    const resolved = await getMojangVersionMetadata(minecraftVersion)
+    metadata = resolved.metadata
+    const metadataValidation = validateMinecraftLauncherBaseVersionDocument(metadata, minecraftVersion)
+    if (!metadataValidation.ok) {
+      throw new Error(`Minecraft ${minecraftVersion} metadata from Mojang is incomplete: ${metadataValidation.reason}.`)
+    }
+
+    await writeJson(metadataPath, metadata)
+    metadataCreated = true
   }
 
-  const { metadata } = await getMojangVersionMetadata(minecraftVersion)
-  const metadataValidation = validateMinecraftLauncherBaseVersionDocument(metadata, minecraftVersion)
-  if (!metadataValidation.ok) {
-    throw new Error(`Minecraft ${minecraftVersion} metadata from Mojang is incomplete: ${metadataValidation.reason}.`)
-  }
-
-  await writeJson(metadataPath, metadata)
-  return {
-    created: true,
-    metadataPath,
-    warnings: [
+  const warnings = []
+  let clientCreated = false
+  if (metadataCreated) {
+    warnings.push(
       existing
         ? `Minecraft Launcher base version '${minecraftVersion}' metadata was invalid (${existingValidation.reason}). ECHO rewrote it from Mojang metadata so assets can download.`
         : `Minecraft Launcher base version '${minecraftVersion}' metadata was missing. ECHO wrote it from Mojang metadata so assets can download.`,
-    ],
+    )
+  }
+
+  const clientDownload = metadata?.downloads?.client
+  if (clientDownload?.url) {
+    const clientPath = path.join(minecraftRoot, 'versions', minecraftVersion, `${minecraftVersion}.jar`)
+    const result = await downloadSha1Artifact({
+      kind: 'minecraft-client',
+      path: path.join('versions', minecraftVersion, `${minecraftVersion}.jar`).replace(/\\/g, '/'),
+      absolutePath: clientPath,
+      url: clientDownload.url,
+      sha1: clientDownload.sha1,
+      size: clientDownload.size,
+    })
+    if (result.status === 'downloaded') {
+      clientCreated = true
+      warnings.push(`Minecraft ${minecraftVersion} client jar was missing or corrupt. ECHO downloaded it so NeoForge can generate its patched client.`)
+    }
+  }
+
+  return {
+    created: metadataCreated || clientCreated,
+    metadataPath,
+    warnings,
   }
 }
 
 async function ensureNeoForgeClientArtifacts(minecraftRoot, manifest, profile, operationId) {
-  const before = await missingNeoForgeClientArtifacts(minecraftRoot, manifest)
-  if (before.length === 0) return { created: false, warnings: [] }
+  const versionId = minecraftLauncherVersionId(manifest, 'neoforge-minecraft')
+  const metadataPath = path.join(minecraftRoot, 'versions', versionId, `${versionId}.json`)
+  const existing = await readJson(metadataPath, null)
+  const existingValidation = validateMinecraftLauncherVersionDocument(existing, manifest, versionId, 'neoforge-minecraft')
+  const existingMissing = existingValidation.valid ? await missingNeoForgeClientArtifacts(minecraftRoot, existing) : []
+  if (existingValidation.valid && existingMissing.length === 0) {
+    return { created: false, versionJson: existing, warnings: [] }
+  }
 
   const neoforge = await neoforgeEnsure({
     manifest,
@@ -5503,16 +5846,38 @@ async function ensureNeoForgeClientArtifacts(minecraftRoot, manifest, profile, o
     throw new Error(`NeoForge client artifact preparation failed: ${neoforge.message}`)
   }
 
-  const after = await missingNeoForgeClientArtifacts(minecraftRoot, manifest)
+  const versionJson = neoforge.versionJson
+  if (!versionJson) {
+    throw new Error('NeoForge client artifact preparation failed: the official installer did not include version.json metadata.')
+  }
+
+  const launcherLibraries = await ensureMinecraftLibraryArtifacts(minecraftRoot, versionJson, 'NeoForge launcher library')
+  const installerLibraries = neoforge.installProfileJson
+    ? await ensureMinecraftLibraryArtifacts(minecraftRoot, { libraries: neoforge.installProfileJson.libraries ?? [] }, 'NeoForge installer library')
+    : []
+  const after = await missingNeoForgeClientArtifacts(minecraftRoot, versionJson)
   if (after.length > 0) {
-    throw new Error(`NeoForge installer completed, but ${after.length} generated client artifact${after.length === 1 ? '' : 's'} are still missing: ${after.map((artifact) => artifact.label).join(', ')}.`)
+    throw new Error(`NeoForge installer completed, but ${after.length} launcher librar${after.length === 1 ? 'y is' : 'ies are'} still missing: ${after.map((artifact) => artifact.relativePath ?? artifact.label).join(', ')}.`)
+  }
+
+  const warnings = []
+  if (!existingValidation.valid && existing) {
+    warnings.push(`Minecraft Launcher NeoForge version metadata '${versionId}' was invalid (${existingValidation.reason}). ECHO refreshed it from the official NeoForge installer.`)
+  }
+  if (existingMissing.length > 0) {
+    warnings.push(`NeoForge launcher libraries were missing or corrupt (${existingMissing.map((artifact) => artifact.relativePath ?? artifact.label).join(', ')}). ECHO repaired them.`)
+  }
+  if (launcherLibraries.length > 0) {
+    warnings.push(`NeoForge launcher libraries were installed from verified metadata (${launcherLibraries.length} artifact${launcherLibraries.length === 1 ? '' : 's'}).`)
+  }
+  if (installerLibraries.length > 0) {
+    warnings.push(`NeoForge installer support libraries were installed from verified metadata (${installerLibraries.length} artifact${installerLibraries.length === 1 ? '' : 's'}).`)
   }
 
   return {
     created: true,
-    warnings: [
-      `NeoForge generated client artifacts were missing (${before.map((artifact) => artifact.label).join(', ')}). ECHO ran the official NeoForge installer into Minecraft Launcher.`,
-    ],
+    versionJson,
+    warnings,
   }
 }
 
@@ -5547,6 +5912,18 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
   if (await exists(expectedJson)) {
     const document = await readJson(expectedJson, null)
     const validation = validateMinecraftLauncherVersionDocument(document, manifest, expected, runtimeMode)
+    if (validation.valid && normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'neoforge-minecraft') {
+      const missingArtifacts = await missingNeoForgeClientArtifacts(minecraftRoot, document)
+      if (missingArtifacts.length > 0) {
+        return {
+          versionId: expected,
+          ready: false,
+          source: 'missing',
+          metadataPath: expectedJson,
+          reason: `NeoForge launcher library is ${missingArtifacts.map((artifact) => artifact.reason).includes('corrupt') ? 'corrupt' : 'missing'}: ${missingArtifacts.map((artifact) => artifact.relativePath ?? artifact.label).join(', ')}`,
+        }
+      }
+    }
     if (validation.valid && normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
       const missingArtifacts = [
         ...(await missingNativeLoaderClientArtifacts(minecraftRoot, document)),
@@ -5577,7 +5954,7 @@ function repairableEchoManagedRuntimeMetadata(versionId, metadataPath, reason) {
   const id = String(versionId ?? '')
   if (!id.startsWith('echo-')) return false
   if (!metadataPath || path.basename(metadataPath) !== `${id}.json`) return false
-  if (/release manifest/iu.test(String(reason ?? ''))) return false
+  if (/\bmanifest\b/iu.test(String(reason ?? ''))) return false
   return true
 }
 
@@ -5596,15 +5973,22 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
   }
   if (initial.ready) return { ...initial, created: baseVersion.created || runtimeArtifacts.created, warnings }
 
-  const metadata = buildEchoManagedVersionManifest(manifest, initial.versionId, normalizedMode, runtimeArtifacts.packLibraries ?? [])
+  const metadata = buildEchoManagedVersionManifest(
+    manifest,
+    initial.versionId,
+    normalizedMode,
+    runtimeArtifacts.packLibraries ?? [],
+    normalizedMode === 'neoforge-minecraft' ? runtimeArtifacts.versionJson : null,
+  )
   await ensureDir(path.dirname(initial.metadataPath))
   await writeJson(initial.metadataPath, metadata)
 
   const runtimeLabel = minecraftRuntimeLabel(normalizedMode)
+  const manifestName = manifest?.name ?? profile?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
   if (initial.source === 'invalid') {
-    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was invalid (${initial.reason}). ECHO rewrote it from the verified Ashfall release manifest.`)
+    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was invalid (${initial.reason}). ECHO rewrote it from the verified ${manifestName} manifest.`)
   } else {
-    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was missing. ECHO wrote it from the verified Ashfall release manifest.`)
+    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was missing. ECHO wrote it from the verified ${manifestName} manifest.`)
   }
 
   return {
@@ -6391,11 +6775,12 @@ function summarizeInstallProblems(install) {
 
 async function createVerifiedInstallReport(profile, manifest, installPath, verification) {
   const installId = `verify-${nowStamp()}`
+  const packName = profile?.name ?? manifest?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
   const neoforge = {
     ok: true,
     version: manifest.loader?.version ?? 'unknown',
     skipped: true,
-    message: 'Ashfall is already installed; no archive download was needed.',
+    message: `${packName} is already installed; no archive download was needed.`,
   }
   const runtime = {
     ok: true,
@@ -6431,7 +6816,7 @@ async function createVerifiedInstallReport(profile, manifest, installPath, verif
     status: 'healthy',
     manifestPath: path.join(installPath, '.echo', 'installed-manifest.json'),
   })
-  await appendLauncherLog('INFO', `Ashfall install verified without archive download. Verified ${verification.valid.length} files.`)
+  await appendLauncherLog('INFO', `${packName} install verified without archive download. Verified ${verification.valid.length} files.`)
   return writeInstallLikeReport('install', installId, report)
 }
 
@@ -7211,9 +7596,10 @@ async function extractZipEntryToFile(zipPath, entry, destination, options = {}) 
 }
 
 async function extractManifestFileFromZip(zipPath, zip, file, destination, options = {}) {
-  const entry = zip.getEntry(file.path.replace(/\\/g, '/'))
+  const archivePath = String(file.archivePath ?? file.path ?? '').replace(/\\/g, '/')
+  const entry = zip.getEntry(archivePath)
   if (!entry || entry.isDirectory) {
-    throw new Error('File is missing from the verified pack zip.')
+    throw new Error(`File is missing from the verified pack zip: ${archivePath}.`)
   }
   return extractZipEntryToFile(zipPath, entry, destination, {
     expectedSha256: file.sha256,

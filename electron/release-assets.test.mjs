@@ -6,6 +6,8 @@ const {
   buildReleaseAssetLookup,
   findReleaseAssetForManifestFile,
   moduleArtifactName,
+  moduleReleaseAssetsFromChecksumText,
+  moduleReleaseAssetsFromMetadata,
   releaseAssetUrl,
   resolveManifestReleaseAssets,
   resolveModuleRequirements,
@@ -195,6 +197,38 @@ describe('release asset resolution', () => {
     })
   })
 
+  it('builds public fallback URLs for unindexed hash-pinned module artifacts', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'openlands-native-edition',
+        moduleRequirements: [
+          {
+            id: 'echocommonloot',
+            version: '0.1.0',
+            assetName: 'echocommonloot-0.1.0.echo-addon',
+            path: 'addons/echocommonloot-0.1.0.echo-addon',
+            sha256: sha('f'),
+            size: 6350,
+          },
+        ],
+        modules: [],
+        files: [],
+      },
+      [],
+    )
+
+    expect(resolved.files[0]).toMatchObject({
+      path: 'addons/echocommonloot-0.1.0.echo-addon',
+      assetName: 'echocommonloot-0.1.0.echo-addon',
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',
+      sha256: sha('f'),
+      size: 6350,
+    })
+    expect(resolved.files[0].urls).toContain(
+      'https://github.com/knoxhack/ECHO-Modules/releases/download/galactic-survey-0.1.0-alpha/echocommonloot-0.1.0.echo-addon',
+    )
+  })
+
   it('normalizes existing manifest file API URLs to public browser download URLs', () => {
     const resolved = resolveManifestReleaseAssets(
       {
@@ -368,6 +402,55 @@ describe('release asset resolution', () => {
       assetName: 'echocore-1.0.0.echo-addon',
       sha256: sha('3'),
     })
+  })
+
+  it('builds module assets from public module release metadata', () => {
+    const assets = moduleReleaseAssetsFromMetadata(
+      {
+        modules: [
+          {
+            moduleId: 'echoworldcore',
+            artifacts: [
+              {
+                kind: 'neoforge',
+                filename: 'echoworldcore-1.0.0-neoforge.jar',
+                sha256: sha('4'),
+                size: 80031,
+              },
+            ],
+          },
+        ],
+      },
+      'modules-source-packaged-0.1.0',
+    )
+
+    expect(assets[0]).toMatchObject({
+      name: 'echoworldcore-1.0.0-neoforge.jar',
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-source-packaged-0.1.0/echoworldcore-1.0.0-neoforge.jar',
+      sha256: sha('4'),
+      moduleId: 'echoworldcore',
+      family: 'neoforge',
+    })
+  })
+
+  it('builds module assets from public checksums without GitHub API metadata', () => {
+    const assets = moduleReleaseAssetsFromChecksumText(
+      `${sha('5')}  echoworldcore/echoworldcore-1.0.0.echo-addon\n${sha('6')}  notes.txt\n`,
+      'modules-source-packaged-0.1.0',
+    )
+
+    expect(assets).toEqual([
+      {
+        name: 'echoworldcore-1.0.0.echo-addon',
+        url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-source-packaged-0.1.0/echoworldcore-1.0.0.echo-addon',
+        browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-source-packaged-0.1.0/echoworldcore-1.0.0.echo-addon',
+        sha256: sha('5'),
+        size: 0,
+        moduleId: 'echoworldcore',
+        family: 'echo-addon',
+        releaseTag: 'modules-source-packaged-0.1.0',
+      },
+    ])
   })
 
   it('lets module requirements override asset names and install paths', () => {

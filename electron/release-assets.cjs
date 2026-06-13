@@ -12,8 +12,38 @@ function releaseAssetSha256(asset) {
   return normalizeSha256(asset?.sha256) ?? githubAssetSha256(asset)
 }
 
+const ECHO_MODULE_RELEASE_DOWNLOAD_TAGS = [
+  'modules-arcana-division-1.0.0-beta',
+  'sky-relay-0.1.0-alpha',
+  'galactic-survey-0.1.0-alpha',
+  'modules-v0.1.0-alpha',
+  'modules-source-packaged-0.1.0',
+]
+
+function moduleReleaseDownloadUrl(tag, assetName) {
+  return `https://github.com/knoxhack/ECHO-Modules/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`
+}
+
+function releaseAssetUrls(asset) {
+  return [
+    asset?.browser_download_url,
+    asset?.browserDownloadUrl,
+    asset?.url,
+    ...(Array.isArray(asset?.urls) ? asset.urls : []),
+  ]
+    .map((url) => String(url ?? '').trim())
+    .filter((url) => /^https?:\/\//i.test(url))
+    .filter((url, index, urls) => urls.indexOf(url) === index)
+}
+
 function releaseAssetUrl(asset) {
-  return asset?.browser_download_url ?? asset?.url
+  return releaseAssetUrls(asset)[0]
+}
+
+function moduleArtifactFallbackUrls(assetName) {
+  const name = String(assetName ?? '').trim()
+  if (!name || /[<>=]/u.test(name)) return []
+  return ECHO_MODULE_RELEASE_DOWNLOAD_TAGS.map((tag) => moduleReleaseDownloadUrl(tag, name))
 }
 
 function releasePathBasename(value) {
@@ -111,20 +141,24 @@ function resolveManifestReleaseAssets(manifest, entryAssets = []) {
   const files = (manifest?.files ?? []).map((file) => {
     const asset = findReleaseAssetForManifestFile(file, lookup)
     if (!asset) return file
-    const url = releaseAssetUrl(asset)
+    const urls = releaseAssetUrls(asset)
+    const url = urls[0]
     return {
       ...file,
       ...(url ? { url } : {}),
+      ...(urls.length > 1 ? { urls } : {}),
       size: file.size || asset.size,
     }
   })
   const installer = manifest?.loader?.installer
   const installerAsset = installer?.assetName ? lookup.byName.get(installer.assetName) : null
-  const installerUrl = releaseAssetUrl(installerAsset)
+  const installerUrls = releaseAssetUrls(installerAsset)
+  const installerUrl = installerUrls[0]
   const resolvedInstaller = installerAsset
     ? {
         ...installer,
         ...(installerUrl ? { url: installerUrl } : {}),
+        ...(installerUrls.length > 1 ? { urls: installerUrls } : {}),
         size: installer.size || installerAsset.size,
       }
     : installer
@@ -210,6 +244,76 @@ function moduleArtifactPattern(moduleId, family) {
   return new RegExp(`^${id}-.+-neoforge\\.jar$`, 'iu')
 }
 
+function moduleArtifactFamilyFromAssetName(assetName) {
+  const name = String(assetName ?? '').trim().toLowerCase()
+  if (name.endsWith('.echo-addon')) return 'echo-addon'
+  if (name.endsWith('-standalone.jar')) return 'standalone'
+  if (name.endsWith('-neoforge.jar')) return 'neoforge'
+  return undefined
+}
+
+function moduleIdFromArtifactName(assetName, fallback = '') {
+  const name = String(assetName ?? '').trim().toLowerCase()
+  const normalizedFallback = String(fallback ?? '').trim().toLowerCase()
+  if (!name) return normalizedFallback
+  const match = name.match(/^([a-z0-9_.-]+?)-\d/u)
+  return match?.[1] ?? normalizedFallback
+}
+
+function moduleReleaseAssetsFromMetadata(metadata, releaseTag) {
+  const tag = String(releaseTag ?? metadata?.releaseId ?? '').trim()
+  if (!tag || !Array.isArray(metadata?.modules)) return []
+  const assets = []
+  for (const moduleEntry of metadata.modules) {
+    const moduleId = String(moduleEntry?.moduleId ?? moduleEntry?.id ?? '').trim().toLowerCase()
+    for (const artifact of moduleEntry?.artifacts ?? []) {
+      const name = String(artifact?.filename ?? artifact?.file ?? artifact?.name ?? '').trim()
+      const sha256 = normalizeSha256(artifact?.sha256)
+      if (!name || !sha256) continue
+      const url = String(artifact?.downloadUrl ?? artifact?.url ?? '').trim()
+      const publicUrl = /^https?:\/\//i.test(url) ? url : moduleReleaseDownloadUrl(tag, name)
+      const kind = String(artifact?.kind ?? '').trim().toLowerCase()
+      assets.push({
+        name,
+        url: publicUrl,
+        browser_download_url: publicUrl,
+        sha256,
+        size: Number.isFinite(Number(artifact?.size)) ? Number(artifact.size) : 0,
+        moduleId: moduleId || moduleIdFromArtifactName(name),
+        family: kind === 'native' ? 'echo-addon' : (kind || moduleArtifactFamilyFromAssetName(name)),
+        releaseTag: tag,
+      })
+    }
+  }
+  return assets
+}
+
+function moduleReleaseAssetsFromChecksumText(text, releaseTag) {
+  const tag = String(releaseTag ?? '').trim()
+  if (!tag) return []
+  return String(text ?? '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .map((line) => line.match(/^([a-f0-9]{64})\s+\*?(.+)$/iu))
+    .filter(Boolean)
+    .map((match) => {
+      const filePath = String(match[2] ?? '').replace(/\\/g, '/')
+      const name = releasePathBasename(filePath)
+      const moduleId = filePath.includes('/') ? filePath.split('/')[0].toLowerCase() : moduleIdFromArtifactName(name)
+      return {
+        name,
+        url: moduleReleaseDownloadUrl(tag, name),
+        browser_download_url: moduleReleaseDownloadUrl(tag, name),
+        sha256: match[1].toLowerCase(),
+        size: 0,
+        moduleId,
+        family: moduleArtifactFamilyFromAssetName(name),
+        releaseTag: tag,
+      }
+    })
+    .filter((asset) => asset.name && asset.family)
+}
+
 function findModuleArtifactForRequirement(requirement, catalog) {
   const pattern = moduleArtifactPattern(requirement.moduleId, requirement.family)
   return (catalog.assets ?? []).find((asset) => pattern.test(asset.name)) ?? null
@@ -226,19 +330,22 @@ function resolveModuleRequirement(requirement, catalog) {
       artifactPath = moduleArtifactPath(assetName, requirement.family)
     }
   }
-  if (!asset) {
+  const fallbackUrls = asset ? [] : moduleArtifactFallbackUrls(assetName)
+  if (!asset && !fallbackUrls.length) {
     throw new Error(`Module artifact '${requirement.assetName}' was not found in the ECHO-Modules release feed.`)
   }
   const sha256 = requirement.sha256 ?? releaseAssetSha256(asset)
   if (!sha256) {
     throw new Error(`Module artifact '${assetName}' is missing a SHA-256 hash.`)
   }
+  const urls = asset ? releaseAssetUrls(asset) : fallbackUrls
   return {
     path: artifactPath,
     assetName,
-    url: releaseAssetUrl(asset),
+    url: urls[0],
+    ...(urls.length > 1 ? { urls } : {}),
     sha256,
-    size: requirement.size ?? asset.size ?? 0,
+    size: requirement.size ?? asset?.size ?? 0,
     required: requirement.required,
     moduleId: requirement.moduleId,
     side: requirement.side,
@@ -298,13 +405,17 @@ function resolveModuleRequirements(manifest = {}, releaseAssets = []) {
 
 module.exports = {
   buildReleaseAssetLookup,
+  ECHO_MODULE_RELEASE_DOWNLOAD_TAGS,
   findReleaseAssetForManifestFile,
   githubAssetSha256,
   moduleArtifactFamilyForPack,
   moduleArtifactName,
+  moduleReleaseAssetsFromChecksumText,
+  moduleReleaseAssetsFromMetadata,
   normalizeModuleRequirements,
   releaseAssetSha256,
   releaseAssetUrl,
+  releaseAssetUrls,
   resolveManifestReleaseAssets,
   resolveModuleRequirements,
   validateZipManifestReleaseAssets,

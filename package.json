@@ -44,6 +44,7 @@
     "test:e2e:sky-relay-electron-ui": "node scripts/sky-relay-electron-ui-smoke.mjs --clean",
     "test:e2e:galactic-survey-electron-ui": "node scripts/galactic-survey-electron-ui-smoke.mjs --clean",
     "test:e2e:all-modpacks-electron-install": "node scripts/all-modpacks-electron-install-smoke.mjs --clean",
+    "audit:all-modpacks:pipeline": "node scripts/audit-all-modpacks-pipeline.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

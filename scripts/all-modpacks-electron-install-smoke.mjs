@@ -32,7 +32,8 @@ function usage() {
 Launches the packaged Electron app with an isolated user-data/player-content/
 Minecraft root, uses the real public Release Index channel, selects every
 official pack in the Home UI, clicks the visible Install action, waits for a
-successful install report, and hashes every installed manifest file.
+successful install report, hashes every installed manifest file, and verifies
+the selected launch route can be prepared from the installed pack.
 
 Options:
   --exe <path>             Packaged launcher executable.
@@ -242,8 +243,9 @@ async function clickVisibleButton(cdp, text) {
 async function navigateHome(cdp) {
   await waitFor('Home navigation button', 30_000, async () => clickVisibleButton(cdp, 'Home'))
   await waitFor('Home page', 30_000, async () => evaluate(cdp, `(() => {
+    if (document.getElementById('home-pack-select')) return true
     const bodyText = document.body.innerText
-    return /SELECTED\\s+PACK/i.test(bodyText) && /PRIMARY\\s+ACTION/i.test(bodyText)
+    return /SELECTED\\s+PACK/i.test(bodyText) && /Install|Play|Repair|Update|Unavailable/i.test(bodyText)
   })()`))
 }
 
@@ -348,6 +350,80 @@ async function hashInstalledManifest(installPath, selectedPack) {
     manifestVersion: manifest.version,
     fileCount: files.length,
     files,
+  }
+}
+
+function runtimeModeForPack(pack) {
+  if (pack.profileId.endsWith('-standalone-edition')) return 'native-runtime'
+  if (pack.profileId.endsWith('-native-edition')) return 'native-loader-minecraft'
+  return 'neoforge-minecraft'
+}
+
+async function readLauncherProfile(minecraftRoot, profileId) {
+  const launcherProfilesPath = path.join(minecraftRoot, 'launcher_profiles.json')
+  const document = await readJson(launcherProfilesPath)
+  return {
+    launcherProfilesPath,
+    profile: document.profiles?.[profileId] ?? null,
+  }
+}
+
+async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs) {
+  const runtimeMode = runtimeModeForPack(pack)
+  if (runtimeMode === 'native-runtime') {
+    const state = await evaluate(cdp, `window.echoNative.invoke('standalone-runtime:get-state', { profileId: ${JSON.stringify(pack.profileId)} })`, { timeoutMs })
+    assert(state?.ok === true, `${pack.name} standalone runtime is not ready: ${(state?.warnings ?? []).join(' ') || state?.runtimeRoot || 'unknown reason'}`)
+    assert(state?.runtimeRoot, `${pack.name} standalone runtime did not report runtimeRoot.`)
+    assert(state?.executablePath, `${pack.name} standalone runtime did not report executablePath.`)
+    assert(await exists(state.executablePath), `${pack.name} standalone runtime executable is missing: ${state.executablePath}`)
+    return {
+      kind: 'standalone-runtime',
+      ok: true,
+      runtimeRoot: state.runtimeRoot,
+      executablePath: state.executablePath,
+      version: state.version ?? null,
+      warnings: state.warnings ?? [],
+    }
+  }
+
+  const handoff = await evaluate(cdp, `window.echoNative.invoke('launch:prepare-handoff', {
+    profileId: ${JSON.stringify(pack.profileId)},
+    installPath: ${JSON.stringify(installPath)},
+    updatePolicy: 'skip',
+    runtimeMode: ${JSON.stringify(runtimeMode)},
+    prepareOnly: true
+  })`, { timeoutMs })
+  assert(handoff?.ok === true, `${pack.name} Minecraft Launcher handoff failed: ${handoff?.message ?? JSON.stringify(handoff)}`)
+  assert(handoff.profileId === pack.profileId, `${pack.name} handoff profile mismatch: ${handoff.profileId}`)
+  assert(handoff.handoff?.ok === true, `${pack.name} nested handoff failed: ${handoff.handoff?.message ?? JSON.stringify(handoff.handoff)}`)
+  assert(handoff.handoff?.profileCurrent === true, `${pack.name} Minecraft Launcher profile is not current.`)
+  assert(handoff.handoff?.versionReady === true, `${pack.name} Minecraft Launcher version metadata is not ready.`)
+  assert(handoff.handoff?.prepareOnly === true, `${pack.name} handoff did not preserve prepareOnly=true.`)
+  assert(handoff.handoff?.openedLauncher === false, `${pack.name} prepare-only handoff unexpectedly opened Minecraft Launcher.`)
+  assert((handoff.handoff?.validatedModsCount ?? 0) > 0, `${pack.name} handoff did not validate any installed module/addon files.`)
+  assert(await exists(handoff.handoff.launcherProfilesPath), `${pack.name} launcher profile file was not written: ${handoff.handoff.launcherProfilesPath}`)
+  assert(await exists(handoff.handoff.versionMetadataPath), `${pack.name} version metadata was not written: ${handoff.handoff.versionMetadataPath}`)
+
+  const saved = await readLauncherProfile(minecraftRoot, handoff.handoff.profileId)
+  assert(saved.profile?.echoManaged === true, `${pack.name} prepared Minecraft profile is not marked echoManaged.`)
+  assert(saved.profile?.echoLauncher?.profileId === pack.profileId, `${pack.name} prepared Minecraft profile echo id mismatch: ${saved.profile?.echoLauncher?.profileId}`)
+  assert(saved.profile?.echoLauncher?.runtimeMode === runtimeMode, `${pack.name} prepared Minecraft profile runtime mismatch: ${saved.profile?.echoLauncher?.runtimeMode}`)
+  assert(saved.profile?.gameDir === installPath, `${pack.name} prepared Minecraft profile gameDir mismatch: ${saved.profile?.gameDir}`)
+  assert(saved.profile?.lastVersionId === handoff.handoff.versionId, `${pack.name} prepared Minecraft profile version mismatch: ${saved.profile?.lastVersionId}`)
+
+  return {
+    kind: 'minecraft-launcher-handoff',
+    ok: true,
+    runtimeMode,
+    profileId: handoff.handoff.profileId,
+    profileName: handoff.handoff.profileName,
+    versionId: handoff.handoff.versionId,
+    versionSource: handoff.handoff.versionSource,
+    versionMetadataPath: handoff.handoff.versionMetadataPath,
+    launcherProfilesPath: handoff.handoff.launcherProfilesPath,
+    gameDir: handoff.handoff.gameDir,
+    validatedModsCount: handoff.handoff.validatedModsCount,
+    warnings: handoff.handoff.warnings ?? [],
   }
 }
 
@@ -493,6 +569,7 @@ async function run() {
         const installPath = installData.report.installPath
         assert(installPath, `${pack.name} install report did not include installPath.`)
         const installed = await hashInstalledManifest(installPath, pack.profileId)
+        const launchRoute = await verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs)
         const durationMs = Date.now() - startedAt
         Object.assign(packResult, {
           ok: true,
@@ -504,6 +581,7 @@ async function run() {
           manifestPack: installed.manifestPack,
           manifestVersion: installed.manifestVersion,
           fileCount: installed.fileCount,
+          launchRoute,
         })
         await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
       } catch (error) {

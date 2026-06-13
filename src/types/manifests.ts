@@ -57,6 +57,7 @@ export interface NativeLoaderManifest {
 
 export interface ManifestFile {
   path: string
+  archivePath?: string
   url?: string
   assetName?: string
   sha256: string

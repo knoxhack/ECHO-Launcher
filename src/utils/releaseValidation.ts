@@ -236,10 +236,56 @@ function legacyModuleRequirementsFromFiles(manifest: PackManifest, normalizedPac
   return [...byModule.values()]
 }
 
+const neoForgeVersionByMinecraftVersion = new Map<string, string>([
+  ['26.1.2', '26.1.2.43-beta'],
+])
+
+function normalizedPackRootModulePath(file: PackManifest['files'][number], normalizedPack: OfficialPackId) {
+  const filePath = String(file.path ?? '').replace(/\\/g, '/')
+  if (!filePath.toLowerCase().startsWith('pack-root/')) return null
+  if (!file.moduleId) return null
+  const basename = pathBaseName(filePath)
+  if (normalizedPack.endsWith('-native-edition') && /\.echo-addon$/iu.test(basename)) return `addons/${basename}`
+  if ((normalizedPack.endsWith('-neoforge-edition') || normalizedPack.endsWith('-standalone-edition')) && /\.jar$/iu.test(basename)) return `mods/${basename}`
+  return null
+}
+
+function normalizeLegacyPackFiles(manifest: PackManifest, normalizedPack: OfficialPackId): PackManifest['files'] {
+  return (manifest.files ?? []).map((file) => {
+    const normalizedPath = normalizedPackRootModulePath(file, normalizedPack)
+    if (!normalizedPath) return file
+    return {
+      ...file,
+      archivePath: String(file.path ?? '').replace(/\\/g, '/'),
+      path: normalizedPath,
+    }
+  })
+}
+
+function normalizeLegacyNeoForgeLoader(manifest: PackManifest, normalizedPack: OfficialPackId): PackManifest['loader'] {
+  if (!normalizedPack.endsWith('-neoforge-edition') || manifest.loader?.type !== 'neoforge') return manifest.loader
+  const minecraftVersion = String(manifest.minecraftVersion ?? manifest.minecraft ?? '').trim()
+  const loaderVersion = String(manifest.loader.version ?? '').trim()
+  const replacement = neoForgeVersionByMinecraftVersion.get(loaderVersion) ?? (loaderVersion === minecraftVersion ? neoForgeVersionByMinecraftVersion.get(minecraftVersion) : undefined)
+  if (!replacement || replacement === loaderVersion) return manifest.loader
+  const next: PackManifest['loader'] = {
+    ...manifest.loader,
+    version: replacement,
+    minecraftLauncherVersionId: `neoforge-${replacement}`,
+  }
+  const installerSha = String(next.installer?.sha256 ?? '').toLowerCase()
+  if (installerSha === 'f'.repeat(64) || (next.installer?.assetName && !next.installer.assetName.includes(replacement))) {
+    delete next.installer
+  }
+  return next
+}
+
 function normalizeLegacyPackManifest(manifest: PackManifest, normalizedPack: OfficialPackId): PackManifest {
   const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
   const next: PackManifest = {
     ...manifest,
+    files: normalizeLegacyPackFiles(manifest, normalizedPack),
+    loader: normalizeLegacyNeoForgeLoader(manifest, normalizedPack),
     moduleArtifactFamily: manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(normalizedPack),
   }
   if (!Array.isArray(moduleRequirements)) {
