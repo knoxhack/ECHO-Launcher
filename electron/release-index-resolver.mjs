@@ -9,15 +9,24 @@
 // Keep it dependency-free and side-effect-free.
 
 const ashfallOfficialPackIds = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
+const skyRelayOfficialPackIds = ['sky-relay-native-edition', 'sky-relay-neoforge-edition', 'sky-relay-standalone-edition']
+const openlandsOfficialPackIds = ['openlands-native-edition', 'openlands-neoforge-edition', 'openlands-standalone-edition']
 const arcanaDivisionOfficialPackIds = ['arcana-division-native-edition', 'arcana-division-neoforge-edition', 'arcana-division-standalone-edition']
 
-export const officialPackIds = [...ashfallOfficialPackIds, ...arcanaDivisionOfficialPackIds]
+export const officialPackIds = [...ashfallOfficialPackIds, ...skyRelayOfficialPackIds, ...openlandsOfficialPackIds, ...arcanaDivisionOfficialPackIds]
 
 export function normalizeOfficialPackId(pack) {
   if (pack === 'ashfall') return 'ashfall-native-edition'
   if (pack === 'ashfall-native-loader') return 'ashfall-native-edition'
   if (pack === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
   if (pack === 'ashfall-standalone-runtime' || pack === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
+  if (pack === 'sky-relay' || pack === 'sky-relay-native-loader') return 'sky-relay-native-edition'
+  if (pack === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
+  if (pack === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
+  if (pack === 'openlands' || pack === 'openlands-native-loader') return 'openlands-native-edition'
+  if (pack === 'openlans' || pack === 'openlans-native-loader') return 'openlands-native-edition'
+  if (pack === 'openlands-neoforge' || pack === 'openlans-neoforge') return 'openlands-neoforge-edition'
+  if (pack === 'openlands-standalone-runtime' || pack === 'openlans-standalone-runtime') return 'openlands-standalone-edition'
   if (pack === 'arcana-division' || pack === 'arcana-division-native-loader') return 'arcana-division-native-edition'
   if (pack === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
   if (pack === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'

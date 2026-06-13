@@ -11,7 +11,6 @@ import {
   isUsableReleaseCache,
   latestPlayableRelease,
   latestPlayableReleaseForPack,
-  moduleArtifactFamilyForPack,
   moduleArtifactName,
   nativeLoaderMetadataStatus,
   normalizeOfficialPackId,
@@ -234,40 +233,39 @@ describe('releaseValidation', () => {
 
   it('normalizes legacy Ashfall pack ids to the Native Edition runtime pack', () => {
     expect(normalizeOfficialPackId('ashfall')).toBe('ashfall-native-edition')
-    expect(normalizeOfficialPackId('arcana-division')).toBe('arcana-division-native-edition')
-    expect(normalizeOfficialPackId('arcana-division-neoforge')).toBe('arcana-division-neoforge-edition')
-    expect(normalizeOfficialPackId('arcana-division-standalone-runtime')).toBe('arcana-division-standalone-edition')
     expect(isPlayablePackRelease({ ...baseRelease, pack: 'ashfall-native-edition' }, 'ashfall-native-edition')).toBe(true)
-    expect(isPlayablePackRelease({
-      ...baseRelease,
-      pack: 'arcana-division-native-edition',
-      channel: 'beta',
-      version: '1.0.0',
-    }, 'arcana-division-native-edition')).toBe(true)
     expect(latestPlayableReleaseForPack(releaseIndex({
       releases: [
         { ...baseRelease, id: 'native', pack: 'ashfall-native-edition', version: '0.1.1', publishedAt: '2026-05-11T12:00:00Z' },
         { ...baseRelease, id: 'standalone', pack: 'ashfall-standalone-edition', channel: 'experimental', version: '0.1.0', publishedAt: '2026-05-10T12:00:00Z' },
-        { ...baseRelease, id: 'arcana', pack: 'arcana-division-native-edition', channel: 'beta', version: '1.0.0', publishedAt: '2026-06-12T12:00:00Z' },
       ],
     }), 'ashfall-native-loader')?.version).toBe('0.1.1')
-    expect(latestPlayableReleaseForPack(releaseIndex({
-      releases: [
-        { ...baseRelease, id: 'arcana', pack: 'arcana-division-native-edition', channel: 'beta', version: '1.0.0', publishedAt: '2026-06-12T12:00:00Z' },
-      ],
-    }), 'arcana-division')?.version).toBe('1.0.0')
+  })
+
+  it('selects approved Arcana Division beta releases by official pack id', () => {
+    const arcanaRelease: ReleaseEntry = {
+      ...baseRelease,
+      id: 'arcana-native',
+      pack: 'arcana-division-native-edition',
+      channel: 'beta',
+      version: '1.0.0',
+      tagName: 'arcana-division-native-1.0.0-beta',
+      publishedAt: '2026-06-12T09:02:29Z',
+    }
+
+    expect(normalizeOfficialPackId('arcana-division')).toBe('arcana-division-native-edition')
+    expect(normalizeOfficialPackId('arcane-division')).toBe('arcana-division-native-edition')
+    expect(isPlayablePackRelease(arcanaRelease, 'arcana-division-native-loader')).toBe(true)
+    expect(latestPlayableReleaseForPack(releaseIndex({ releases: [baseRelease, arcanaRelease] }), 'arcana-division')?.version).toBe('1.0.0')
   })
 
   it('builds expected pack manifest asset names', () => {
     expect(packManifestAssetName('alpha', '0.1.0', 'ashfall-native-edition')).toBe('ashfall-native-edition-alpha-0.1.0.pack.json')
-    expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
     expect(packManifestAssetName('beta', '1.0.0', 'arcana-division-native-edition')).toBe('arcana-division-native-edition-beta-1.0.0.pack.json')
+    expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
   })
 
   it('builds expected module artifact names', () => {
-    expect(moduleArtifactFamilyForPack('arcana-division-native-edition')).toBe('echo-addon')
-    expect(moduleArtifactFamilyForPack('arcana-division-neoforge-edition')).toBe('neoforge')
-    expect(moduleArtifactFamilyForPack('arcana-division-standalone-edition')).toBe('standalone')
     expect(moduleArtifactName('echocore', '1.0.0', 'neoforge')).toBe('echocore-1.0.0-neoforge.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'standalone')).toBe('echocore-1.0.0-standalone.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'echo-addon')).toBe('echocore-1.0.0.echo-addon')
@@ -333,9 +331,6 @@ describe('releaseValidation', () => {
     expect(artifactForPackTarget(canonicalModule, 'ashfall-native-edition')?.name).toBe('echoarmory-1.0.0.echo-addon')
     expect(artifactForPackTarget(canonicalModule, 'ashfall-neoforge-edition')?.name).toBe('echoarmory-1.0.0-neoforge.jar')
     expect(artifactForPackTarget(canonicalModule, 'ashfall-standalone-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
-    expect(artifactForPackTarget(canonicalModule, 'arcana-division-native-edition')?.name).toBe('echoarmory-1.0.0.echo-addon')
-    expect(artifactForPackTarget(canonicalModule, 'arcana-division-neoforge-edition')?.name).toBe('echoarmory-1.0.0-neoforge.jar')
-    expect(artifactForPackTarget(canonicalModule, 'arcana-division-standalone-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
   })
 
   it('rejects development visibility source-packaged module artifacts', () => {
@@ -554,55 +549,75 @@ describe('releaseValidation', () => {
     expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
   })
 
-  it('accepts all Arcana Division beta edition manifests', () => {
-    const native = validatePackManifest({
+  it('accepts all three Arcana Division beta pack manifests', () => {
+    const nativeManifest = validatePackManifest({
+      ...baseManifest(),
       pack: 'arcana-division-native-edition',
       version: '1.0.0',
       channel: 'beta',
-      minecraft: '26.1.2',
-      artifactMode: 'zip',
-      artifactName: 'arcana-division-native-edition-1.0.0.zip',
-      artifactSha256: 'a'.repeat(64),
-      nativeLoader: baseNativeLoader(),
-      launch: { mainClass: 'com.echo.arcana.ArcanaDivisionMain', gameArgs: [], jvmArgs: [] },
-      moduleRequirements: [{ id: 'echoarcanadivisionprotocol', version: '1.0.0' }],
-      files: [],
-      changelog: ['Arcana beta'],
-      worldgenWarning: true,
+      moduleRequirements: Array.from({ length: 24 }, (_, index) => ({
+        id: `echoarcana${index}`,
+        version: '1.0.0',
+      })),
     })
-    const neoforge = validatePackManifest({
+    const neoforgeManifest = validatePackManifest({
       pack: 'arcana-division-neoforge-edition',
       version: '1.0.0',
       channel: 'beta',
       minecraft: '26.1.2',
-      artifactMode: 'zip',
-      artifactName: 'arcana-division-neoforge-edition-1.0.0.zip',
-      artifactSha256: 'b'.repeat(64),
-      loader: { type: 'neoforge', version: '26.1.2' },
-      launch: { mainClass: 'net.neoforged.fml.startup.Client', gameArgs: [], jvmArgs: [] },
-      moduleRequirements: [{ id: 'echoarcanadivisionprotocol', version: '1.0.0' }],
-      files: [],
+      loader: {
+        type: 'neoforge',
+        version: '26.1.2',
+        installer: {
+          assetName: 'neoforge-26.1.2-installer.jar',
+          sha256: 'f'.repeat(64),
+          installMode: 'client',
+        },
+      },
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-neoforge.jar',
+          assetName: 'echocore-1.0.0-neoforge.jar',
+          sha256: 'c'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
       changelog: ['Arcana beta'],
       worldgenWarning: true,
     })
-    const standalone = validatePackManifest({
+    const standaloneManifest = validatePackManifest({
       pack: 'arcana-division-standalone-edition',
       version: '1.0.0',
       channel: 'beta',
-      artifactMode: 'zip',
-      artifactName: 'arcana-division-standalone-edition-1.0.0.zip',
-      artifactSha256: 'c'.repeat(64),
-      runtime: { requiredJava: '17' },
-      launch: { mainClass: 'com.echo.arcana.ArcanaStandaloneMain', gameArgs: [], jvmArgs: [] },
-      moduleRequirements: [{ id: 'echoarcanadivisionprotocol', version: '1.0.0' }],
-      files: [],
+      minecraft: 'standalone',
+      runtime: { requiredJava: 'none' },
+      launch: { mainClass: 'com.echo.runtime.ArcanaDivisionStandaloneMain', gameArgs: [], jvmArgs: [] },
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
+      modules: ['echocore'],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-standalone.jar',
+          assetName: 'echocore-1.0.0-standalone.jar',
+          sha256: 'd'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
       changelog: ['Arcana beta'],
       worldgenWarning: true,
     })
 
-    expect(native.pack).toBe('arcana-division-native-edition')
-    expect(neoforge.pack).toBe('arcana-division-neoforge-edition')
-    expect(standalone.pack).toBe('arcana-division-standalone-edition')
+    expect(nativeManifest.pack).toBe('arcana-division-native-edition')
+    expect(nativeManifest.moduleRequirements).toHaveLength(24)
+    expect(neoforgeManifest.pack).toBe('arcana-division-neoforge-edition')
+    expect(standaloneManifest.pack).toBe('arcana-division-standalone-edition')
   })
 
   it('rejects unsafe module requirement paths', () => {

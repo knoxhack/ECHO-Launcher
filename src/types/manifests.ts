@@ -8,11 +8,23 @@ export type AshfallRuntimePackId =
   | 'ashfall-native-edition'
   | 'ashfall-neoforge-edition'
   | 'ashfall-standalone-edition'
+export type SkyRelayRuntimePackId =
+  | 'sky-relay-native-edition'
+  | 'sky-relay-neoforge-edition'
+  | 'sky-relay-standalone-edition'
+export type OpenlandsRuntimePackId =
+  | 'openlands-native-edition'
+  | 'openlands-neoforge-edition'
+  | 'openlands-standalone-edition'
 export type ArcanaDivisionRuntimePackId =
   | 'arcana-division-native-edition'
   | 'arcana-division-neoforge-edition'
   | 'arcana-division-standalone-edition'
-export type OfficialPackId = AshfallRuntimePackId | ArcanaDivisionRuntimePackId
+export type OfficialPackId =
+  | AshfallRuntimePackId
+  | SkyRelayRuntimePackId
+  | OpenlandsRuntimePackId
+  | ArcanaDivisionRuntimePackId
 
 export interface LoaderInstaller {
   url?: string

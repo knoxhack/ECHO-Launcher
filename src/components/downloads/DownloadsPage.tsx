@@ -53,7 +53,7 @@ export function DownloadsPage() {
     [releaseIndex?.diagnostics],
   )
   const canInstallSelectedRelease = Boolean(manifestPath || isPlayablePackRelease(selectedRelease, selectedProfile.id))
-  const strictReleaseMissing = acceptedCount === 0 && !manifestPath
+  const strictReleaseMissing = channelReleases.length === 0 && !manifestPath
 
   const totals = useMemo(() => {
     if (!installReport) return { total: 0, completed: 0, blocked: 0 }
@@ -65,7 +65,9 @@ export function DownloadsPage() {
 
   const progress = totals.total === 0 ? 0 : Math.round((totals.completed / totals.total) * 100)
   const displayedProgress = installing ? installProgress : installReport?.ok ? 100 : progress
-  const installAction = selectedRelease?.version && selectedProfile.status === 'healthy' && selectedProfile.version !== selectedRelease.version ? 'Update Ashfall' : 'Install Ashfall'
+  const installAction = selectedRelease?.version && selectedProfile.status === 'healthy' && selectedProfile.version !== selectedRelease.version
+    ? `Update ${selectedProfile.name}`
+    : `Install ${selectedProfile.name}`
   const completedOperationLabel = installReport?.operation === 'update' ? 'Update' : installReport?.operation === 'verify' ? 'Verification' : 'Install'
   const progressLabel = installing ? installStage : installReport?.ok ? `${completedOperationLabel} complete` : installReport ? 'Install needs attention' : 'Install/update progress'
 
@@ -97,8 +99,8 @@ export function DownloadsPage() {
       return
     }
     const file = await invokeNative('dialog:select-file', {
-      title: 'Import Ashfall pack manifest',
-      filters: [{ name: 'Ashfall Manifest', extensions: ['json'] }],
+      title: `Import ${selectedProfile.name} pack manifest`,
+      filters: [{ name: 'ECHO Pack Manifest', extensions: ['json'] }],
     })
     if (file.canceled || !file.path) return
     try {
@@ -223,7 +225,7 @@ export function DownloadsPage() {
             <p className="text-xs font-semibold uppercase text-cyan-soft">Downloads</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">Install & Update Pipeline</h2>
             <p className="mt-2 text-sm leading-6 text-slate-300">
-              Installs Ashfall from approved Catalog install packages, verifies SHA-256 hashes, and writes a local install report for Minecraft Launcher handoff.
+              Installs the selected official pack from approved Catalog packages, verifies SHA-256 hashes, and writes a local install report for launch handoff.
             </p>
           </div>
           <div className="grid grid-cols-4 gap-3">
@@ -282,7 +284,7 @@ export function DownloadsPage() {
           <div className="mt-5 rounded-lg border border-amber-echo/40 bg-amber-echo/10 p-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-amber-100">Strict Ashfall release assets are missing</p>
+                <p className="text-sm font-semibold text-amber-100">Strict release assets are missing for {selectedProfile.name}</p>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
                   Tester installs stay locked until the Catalog entry includes trusted metadata, the hashed pack manifest, and the matching compressed pack archive.
                 </p>
@@ -325,7 +327,7 @@ export function DownloadsPage() {
                   ))}
                 </select>
               ) : (
-                <p className="mt-1 text-xs text-slate-300">Catalog releases are still loading, or this pack is not installed yet.</p>
+                <p className="mt-1 text-xs text-slate-300">Catalog releases are still loading, or this pack is not published yet.</p>
               )}
             </div>
             <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4">
@@ -384,7 +386,7 @@ export function DownloadsPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">
-                Select an approved Catalog release or import a strict local manifest, then install. Ashfall installs require echo-release.json plus the hashed pack manifest and the metadata-named compressed pack archive.
+                Select an approved Catalog release or import a strict local manifest, then install. Official pack installs require trusted release metadata plus the hashed pack manifest and the matching compressed pack archive.
               </div>
             )}
           </GlassCard>

@@ -103,8 +103,9 @@ function validateZipManifestReleaseAssets(manifest, entryAssets = []) {
 }
 
 function moduleArtifactFamilyForPack(pack) {
-  if (String(pack ?? '').endsWith('-neoforge-edition')) return 'neoforge'
-  if (String(pack ?? '').endsWith('-standalone-edition')) return 'standalone'
+  const normalizedPack = String(pack ?? '').trim().toLowerCase()
+  if (normalizedPack.endsWith('-neoforge-edition')) return 'neoforge'
+  if (normalizedPack.endsWith('-standalone-edition')) return 'standalone'
   return 'echo-addon'
 }
 
