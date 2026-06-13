@@ -308,6 +308,7 @@ function fallbackName(id: OfficialPackId) {
 }
 
 function phaseForCatalogStatus(status: string, fallback?: OfficialModpack) {
+  if (status === 'catalog-mismatch') return 'Catalog Mismatch'
   if (status === 'warning') return 'Warning Gated'
   if (status === 'blocked') return 'Blocked'
   if (status === 'rejected') return 'Rejected'
@@ -318,10 +319,14 @@ function phaseForCatalogStatus(status: string, fallback?: OfficialModpack) {
 function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseIndex): OfficialModpack {
   const fallback = fallbackById.get(pack.id)
   const release = latestReleaseForPack(index, pack.id)
-  const catalogStatus = String(pack.catalogStatus ?? (release ? 'approved' : '')).toLowerCase()
-  const locked = ['unpublished', 'warning', 'rejected', 'blocked'].includes(catalogStatus)
+  const rawCatalogStatus = String(pack.catalogStatus ?? (release ? 'approved' : '')).toLowerCase()
+  const approvedWithoutRelease = rawCatalogStatus === 'approved' && !release
+  const catalogStatus = approvedWithoutRelease ? 'catalog-mismatch' : rawCatalogStatus
+  const locked = ['unpublished', 'warning', 'rejected', 'blocked', 'catalog-mismatch'].includes(catalogStatus)
   const status: OfficialModpackStatus = !locked && release ? 'playable' : 'preview'
-  const diagnostic = pack.diagnostic ?? (locked ? fallback?.diagnostic : undefined)
+  const diagnostic = approvedWithoutRelease
+    ? 'Catalog entry is approved-looking, but no approved release is installable yet.'
+    : pack.diagnostic ?? (locked ? fallback?.diagnostic : undefined)
 
   return {
     id: pack.id,
@@ -338,7 +343,7 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
     detail: diagnostic ?? fallback?.detail ?? 'This pack appears in channel metadata and unlocks after approved strict release assets are available.',
     image: fallback?.image ?? orbitalCardImage,
     moduleCount: fallback?.moduleCount ?? null,
-    catalogStatus: pack.catalogStatus,
+    catalogStatus: catalogStatus || pack.catalogStatus,
     diagnostic,
     sourceRepo: pack.repoUrl,
   }

@@ -48,8 +48,8 @@ function cardTone(packState?: NativePackState): HealthStatus {
   return packState.blockers[0]?.status ?? 'warning'
 }
 
-function cardLabel(pack: OfficialModpack, packState?: NativePackState) {
-  if (!packState) return pack.status === 'playable' ? 'Checking' : pack.phase
+function cardLabel(packState?: NativePackState) {
+  if (!packState) return 'Checking'
   if (packState.ok) return 'Playable'
   if (packState.localManifest.status === 'invalid') return 'Invalid Manifest'
   if (!packState.catalog.ok && !packState.install.installed) return 'Unavailable'
@@ -320,8 +320,10 @@ const OfficialPackCard = memo(function OfficialPackCard({
   const ActionIcon = actionIcons[action?.kind ?? 'unavailable']
   const disabled = busy || !packState || !action?.enabled
   const status = cardTone(packState)
-  const label = cardLabel(pack, packState)
-  const detail = packState?.blockers[0]?.detail ?? packState?.primaryAction.reason ?? pack.detail
+  const label = cardLabel(packState)
+  const detail = packState
+    ? packState.blockers[0]?.detail ?? packState.primaryAction.reason ?? pack.detail
+    : 'Reading exact pack state from the desktop backend.'
 
   useEffect(() => {
     if (!selected) return
@@ -346,7 +348,7 @@ const OfficialPackCard = memo(function OfficialPackCard({
           {selected ? <StatusChip compact label="Selected" status="update_available" /> : null}
           <StatusChip compact label={label} status={status} />
           <span className="rounded-full border border-white/20 bg-black/45 px-3 py-1 text-xs font-semibold uppercase text-slate-200 backdrop-blur">
-            {packState?.route.shortLabel ?? pack.phase}
+            {packState?.route.shortLabel ?? 'Checking'}
           </span>
         </div>
         <div className="absolute bottom-5 left-5 right-5">
@@ -360,7 +362,7 @@ const OfficialPackCard = memo(function OfficialPackCard({
         <p className="min-h-12 text-sm leading-6 text-slate-300">{detail}</p>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <PackStat icon={Boxes} label="Manifest" value={packState?.localManifest.status ?? 'checking'} />
-          <PackStat icon={RadioTower} label="Catalog" value={packState?.catalog.ok ? 'approved' : packState?.catalog.status ?? pack.catalogStatus ?? 'pending'} />
+          <PackStat icon={RadioTower} label="Catalog" value={packState ? (packState.catalog.ok ? 'approved' : packState.catalog.status) : 'checking'} />
           <PackStat icon={Wrench} label="Install" value={packState?.install.installed ? 'installed' : 'missing'} />
           <PackStat icon={ShieldAlert} label="Action" value={action?.kind ?? 'checking'} />
         </div>

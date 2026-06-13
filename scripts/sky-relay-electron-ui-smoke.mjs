@@ -615,6 +615,13 @@ async function run() {
             .slice(-12)
         }
       })
+      const hasGlobalInstallUpdate = Array.from(document.querySelectorAll('button')).some((button) => /install\\s*\\/\\s*update|install all|update all/i.test(button.textContent ?? ''))
+      const previewGating = {
+        noGlobalInstallUpdate: !hasGlobalInstallUpdate,
+        cardsHaveScopedActions: cards.every((card) => card.hasScopedAction),
+        cardsHaveDiagnostics: cards.every((card) => card.hasDiagnosticsAction),
+        cardsHaveStateRows: cards.every((card) => card.hasManifestState && card.hasCatalogState && card.hasInstallState && card.hasActionState)
+      }
       return {
         title: document.title,
         href: location.href,
@@ -624,8 +631,9 @@ async function run() {
         nativeBridgeAvailable: Boolean(window.echoNative?.invoke),
         officialPacksLabelVisible: /official\\s+(echo\\s+)?packs/i.test(bodyText),
         cards,
-        hasGlobalInstallUpdate: Array.from(document.querySelectorAll('button')).some((button) => /install\\s*\\/\\s*update|install all|update all/i.test(button.textContent ?? '')),
-        hasScopedSkyRelayAction: Boolean(cards.find((card) => card.name === ${JSON.stringify(SMOKE_PACK.name)})?.hasScopedAction)
+        hasGlobalInstallUpdate,
+        hasScopedSkyRelayAction: Boolean(cards.find((card) => card.name === ${JSON.stringify(SMOKE_PACK.name)})?.hasScopedAction),
+        previewGating
       }
     })()`)
 
@@ -637,6 +645,10 @@ async function run() {
     assert(ui.officialPacksLabelVisible, 'Official ECHO Packs label was not visible.')
     assert(!ui.hasGlobalInstallUpdate, 'A global install/update affordance appeared in the Library.')
     assert(ui.hasScopedSkyRelayAction, 'Sky Relay Native Edition did not expose a scoped pack action.')
+    assert(ui.previewGating?.noGlobalInstallUpdate, 'Preview gating failed: global install/update is visible.')
+    assert(ui.previewGating?.cardsHaveScopedActions, 'Preview gating failed: cards do not have scoped actions.')
+    assert(ui.previewGating?.cardsHaveDiagnostics, 'Preview gating failed: cards do not have diagnostics actions.')
+    assert(ui.previewGating?.cardsHaveStateRows, 'Preview gating failed: cards do not expose state rows.')
     for (const card of ui.cards) {
       const cardDebug = JSON.stringify(card.actionPreview ?? [])
       assert(card.found, `${card.name} card was not found.`)
@@ -815,6 +827,7 @@ async function run() {
         nativeBridgeBootstrap: 'passed',
         skyRelayLibraryCardsVisible: 'passed',
         skyRelayScopedCardActions: 'passed',
+        skyRelayPreviewGating: 'passed',
         skyRelayHeadingOverflow: 'passed',
         packagedElectronInstallClickThrough: 'passed',
         packagedElectronUpdateReconciliationClickThrough: 'passed',

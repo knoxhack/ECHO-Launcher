@@ -120,6 +120,31 @@ function ashfallWarningIndexFixture(): ReleaseIndex {
   }
 }
 
+function approvedLookingWithoutReleaseFixture(): ReleaseIndex {
+  return {
+    cacheVersion: 4,
+    source: { provider: 'release-index', channelUrl: 'https://example.test/channels/alpha/launcher-channel.json' },
+    fetchedAt: '2026-06-12T12:00:00Z',
+    releases: [],
+    packs: [
+      {
+        id: 'sky-relay-native-edition',
+        name: 'Sky Relay Native Edition',
+        channel: 'alpha',
+        loader: 'echo-native-loader',
+        moduleArtifactFamily: 'echo-addon',
+        catalogStatus: 'approved',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/sky-relay-native.json',
+      },
+    ],
+    acceptedCount: 0,
+    rejectedReleases: [],
+    diagnostics: [],
+    latestPlayableRelease: null,
+    warnings: ['Sky Relay modpack entry is warning-gated.'],
+  }
+}
+
 describe('official modpack catalog', () => {
   it('keeps visual fallback data for every official launcher pack family', () => {
     expect(officialModpacks.map((pack) => pack.id)).toEqual([...officialPackIds])
@@ -195,5 +220,17 @@ describe('official modpack catalog', () => {
     expect(cards[0]?.detail).toMatch(/Phase 7-10/)
     expect(cards[1]?.detail).toMatch(/missing moduleRequirements/)
     expect(cards[2]?.detail).toMatch(/missing moduleRequirements/)
+  })
+
+  it('does not treat approved-looking channel rows as playable without an approved release', () => {
+    const skyRelay = officialModpacksFromReleaseIndex(approvedLookingWithoutReleaseFixture()).find((pack) => pack.id === 'sky-relay-native-edition')
+
+    expect(skyRelay).toMatchObject({
+      status: 'preview',
+      phase: 'Catalog Mismatch',
+      version: 'Catalog pending',
+      catalogStatus: 'catalog-mismatch',
+    })
+    expect(skyRelay?.detail).toMatch(/approved-looking/)
   })
 })

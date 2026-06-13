@@ -7581,13 +7581,19 @@ function latestCatalogReleaseForProfile(index, profile) {
 function packCatalogMetadata(index, profile) {
   const pack = (index?.packs ?? []).find((item) => item.id === profile?.id)
   const release = latestCatalogReleaseForProfile(index, profile)
-  const catalogStatus = String(pack?.catalogStatus ?? (release ? 'approved' : 'missing')).toLowerCase()
+  const available = Boolean(release?.trust === 'verified-metadata' && release.manifestSha256)
+  const rawCatalogStatus = String(pack?.catalogStatus ?? (release ? 'approved' : 'missing')).toLowerCase()
+  const approvedWithoutInstallableRelease = rawCatalogStatus === 'approved' && !available
+  const catalogStatus = approvedWithoutInstallableRelease ? 'missing' : rawCatalogStatus
+  const diagnostic = approvedWithoutInstallableRelease
+    ? 'Catalog entry is approved-looking, but no approved release is installable yet.'
+    : pack?.diagnostic ?? null
   return {
     pack,
     release,
-    available: Boolean(release?.trust === 'verified-metadata' && release.manifestSha256),
+    available,
     status: catalogStatus,
-    diagnostic: pack?.diagnostic ?? null,
+    diagnostic,
   }
 }
 
