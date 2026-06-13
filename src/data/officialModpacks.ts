@@ -3,6 +3,7 @@ import orbitalCardImage from '../assets/modpacks/orbital-card.webp'
 import type { OfficialPackId } from '../types/manifests'
 import type { ReleaseEntry, ReleaseIndex, ReleaseIndexChannelPack } from '../types/releases'
 import type { LauncherRuntimeModeId } from '../types/standaloneRuntime'
+import { normalizeOfficialPackId } from '../../electron/release-index-resolver.mjs'
 
 export type OfficialModpackStatus = 'playable' | 'preview'
 export type OfficialModpackBetaGate = 'open' | 'metadata' | 'runtime'
@@ -320,8 +321,9 @@ function phaseForCatalogStatus(status: string, fallback?: OfficialModpack) {
 }
 
 function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseIndex): OfficialModpack {
-  const fallback = fallbackById.get(pack.id)
-  const release = latestReleaseForPack(index, pack.id)
+  const normalizedPackId = (normalizeOfficialPackId(pack.id) ?? pack.id) as OfficialPackId
+  const fallback = fallbackById.get(normalizedPackId)
+  const release = latestReleaseForPack(index, normalizedPackId)
   const rawCatalogStatus = String(pack.catalogStatus ?? (release ? 'approved' : '')).toLowerCase()
   const approvedWithoutRelease = rawCatalogStatus === 'approved' && !release
   const catalogStatus = approvedWithoutRelease ? 'catalog-mismatch' : rawCatalogStatus
@@ -332,17 +334,17 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
     : pack.diagnostic ?? (locked ? fallback?.diagnostic : undefined)
 
   return {
-    id: pack.id,
-    name: pack.name || fallback?.name || fallbackName(pack.id),
-    runtimeMode: fallback?.runtimeMode ?? runtimeModeFor(pack.id),
+    id: normalizedPackId,
+    name: pack.name || fallback?.name || fallbackName(normalizedPackId),
+    runtimeMode: fallback?.runtimeMode ?? runtimeModeFor(normalizedPackId),
     betaGate: status === 'playable' ? 'open' : fallback?.betaGate ?? 'metadata',
     catalogId: pack.id,
     status,
     phase: locked ? phaseForCatalogStatus(catalogStatus, fallback) : release ? `Approved ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
     version: release?.version ?? (locked ? fallback?.version ?? 'Catalog gated' : fallback?.version ?? 'Catalog pending'),
-    minecraft: fallback?.minecraft ?? (pack.id.endsWith('-standalone-edition') ? 'Standalone' : '26.1.2'),
+    minecraft: fallback?.minecraft ?? (normalizedPackId.endsWith('-standalone-edition') ? 'Standalone' : '26.1.2'),
     channel: release?.channel ?? pack.channel ?? fallback?.channel ?? 'alpha',
-    summary: fallback?.summary ?? `${pack.name || fallbackName(pack.id)} from the official Release Index catalog.`,
+    summary: fallback?.summary ?? `${pack.name || fallbackName(normalizedPackId)} from the official Release Index catalog.`,
     detail: diagnostic ?? fallback?.detail ?? 'This pack appears in channel metadata and unlocks after approved strict release assets are available.',
     image: fallback?.image ?? orbitalCardImage,
     moduleCount: fallback?.moduleCount ?? null,

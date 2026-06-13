@@ -13,15 +13,15 @@ const { pathToFileURL } = require('node:url')
 const zlib = require('node:zlib')
 const AdmZip = require('adm-zip')
 const {
-  buildReleaseAssetLookup,
-  findReleaseAssetForManifestFile,
   githubAssetSha256,
   moduleArtifactFamilyForPack,
   moduleArtifactName,
   releaseAssetUrl,
+  resolveManifestReleaseAssets,
   resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 } = require('./release-assets.cjs')
+const { isNewerPackVersion, versionParts } = require('./version-compare.cjs')
 const {
   BLOCKING_UI_STATES,
   readPackOsStateFromRoot,
@@ -89,6 +89,13 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.0'
+const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
+const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar'
+const ECHO_NATIVE_LOADER_SHA1 = 'a5b1964dd959fe9186c06a6b45af623b687d8449'
+const ECHO_NATIVE_LOADER_SIZE = 1_119_541
+const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
 const RELEASE_METADATA_ASSET = 'echo-release.json'
 const RELEASE_CACHE_VERSION = 4
 const LEGACY_ASHFALL_PROFILE_ID = 'ashfall'
@@ -229,8 +236,8 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     id: 'openlands-standalone-edition',
     name: 'Openlands Standalone Edition',
     runtimeMode: 'native-runtime',
-    channel: 'alpha',
-    channelLabel: 'Planned',
+    channel: 'experimental',
+    channelLabel: 'Experimental',
     installFolder: 'Openlands Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
@@ -1610,6 +1617,11 @@ async function readInstalledProfileManifestState(installPath, expectedPackId) {
       message: error instanceof Error ? error.message : String(error),
     }
   }
+}
+
+async function detectInstallOperation(installPath, expectedPackId) {
+  const state = await readInstalledProfileManifestState(installPath, expectedPackId)
+  return state?.valid ? 'update' : 'install'
 }
 
 async function readInstalledProfileManifest(installPath, expectedPackId) {
@@ -3345,6 +3357,15 @@ async function downloadFile(payload = {}) {
   return { destination, sha256, verified }
 }
 
+function isGitHubReleaseAssetApiUrl(url) {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname === 'api.github.com' && /\/repos\/[^/]+\/[^/]+\/releases\/assets\/\d+$/u.test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
 async function backupFileIfExists(sourcePath, backupRoot, relativePath) {
   if (!(await exists(sourcePath))) return null
   const backupPath = safeJoin(backupRoot, relativePath)
@@ -3797,37 +3818,19 @@ function selectReleaseEntry(index, channel, version, pack) {
     .filter((release) => !normalizedPack || normalizeOfficialPackId(release.pack) === normalizedPack)
     .filter((release) => release.channel === channel)
     .filter((release) => !version || release.version === version)
-    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    .sort((a, b) => {
+      const aDate = Date.parse(a.publishedAt)
+      const bDate = Date.parse(b.publishedAt)
+      if (Number.isFinite(aDate) && Number.isFinite(bDate)) return bDate - aDate
+      if (Number.isFinite(aDate)) return -1
+      if (Number.isFinite(bDate)) return 1
+      return String(b.publishedAt ?? '').localeCompare(String(a.publishedAt ?? ''))
+    })
   return candidates[0] ?? null
 }
 
 function resolveManifestAssets(manifest, entry) {
-  const lookup = buildReleaseAssetLookup(entry.assets)
-  const artifact =
-    manifest.artifactMode === 'zip' && manifest.artifactName && lookup.byName.has(manifest.artifactName)
-      ? lookup.byName.get(manifest.artifactName)
-      : null
-  const files = (manifest.files ?? []).map((file) => {
-    if (file.url) return file
-    const asset = findReleaseAssetForManifestFile(file, lookup)
-    if (!asset) return file
-    return { ...file, url: releaseAssetUrl(asset), size: file.size || asset.size }
-  })
-  const installer = manifest.loader?.installer
-  const resolvedInstaller =
-    installer && !installer.url && installer.assetName && lookup.byName.has(installer.assetName)
-      ? { ...installer, url: releaseAssetUrl(lookup.byName.get(installer.assetName)) }
-      : installer
-  return {
-    ...manifest,
-    artifactUrl: releaseAssetUrl(artifact),
-    artifactSize: artifact?.size ?? manifest.artifactSize,
-    files,
-    loader: {
-      ...manifest.loader,
-      installer: resolvedInstaller,
-    },
-  }
+  return resolveManifestReleaseAssets(manifest, entry.assets)
 }
 
 async function resolveInstallableManifest(manifest, entry, payload = {}) {
@@ -3846,6 +3849,9 @@ async function resolveInstallableManifest(manifest, entry, payload = {}) {
   if (hasMissingRequiredModules) {
     const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
     return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
+  }
+  if (Array.isArray(requirements) && requirements.length > 0) {
+    return resolveManifestAssets(resolveModuleRequirements(manifest, []), entry)
   }
   return resolveManifestAssets(manifest, entry)
 }
@@ -3922,7 +3928,8 @@ async function downloadVerifiedArtifact(file) {
     if (cached.toLowerCase() === String(file.sha256).toLowerCase()) return cachePath
     await fs.rm(cachePath, { force: true })
   }
-  const download = await downloadFile({ url: file.url, destination: cachePath, sha256: file.sha256 })
+  const headers = isGitHubReleaseAssetApiUrl(file.url) ? { Accept: 'application/octet-stream' } : undefined
+  const download = await downloadFile({ url: file.url, destination: cachePath, sha256: file.sha256, headers })
   if (!download.verified) throw new Error(`Artifact verification failed for ${file.path}.`)
   return cachePath
 }
@@ -4079,6 +4086,15 @@ async function expectedMinecraftRuntimeFiles(manifest = {}) {
       })
       if (nativeArtifact && !expected.some((file) => file.path === nativeArtifact.path)) expected.push(nativeArtifact)
     }
+  }
+
+  const nativeLoaderVersionJson = manifest.nativeLoader?.versionJson
+    ? normalizeEchoNativeLoaderVersionJson(manifest.nativeLoader.versionJson, manifest)
+    : null
+  for (const library of nativeLoaderVersionJson?.libraries ?? []) {
+    if (!minecraftLibraryAllowed(library)) continue
+    const artifact = runtimeArtifactFromDownload(library.downloads?.artifact, paths.libraries, 'native-loader-library', { libraryName: library.name })
+    if (artifact && !expected.some((file) => file.path === artifact.path)) expected.push(artifact)
   }
 
   const assetIndex = metadata.assetIndex
@@ -4433,7 +4449,7 @@ async function installLegacyReleaseZip(payload, profile, entry) {
   const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
   const previousManifestBackupPath = await backupFileIfExists(manifestPath, backupRoot, '.echo/installed-manifest.json')
   if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
-  const operation = previousManifestBackupPath ? 'update' : 'install'
+  const operation = await detectInstallOperation(installPath, payload.profileId ?? profile?.id)
 
   for (const entryItem of entries) {
     if (entryItem.isDirectory) continue
@@ -4524,7 +4540,7 @@ async function installLegacyReleaseZip(payload, profile, entry) {
     await profileSave({
       ...profile,
       installPath,
-      version: manifest.version ?? profile.version,
+      version: payload.version ?? manifest.version ?? profile.version,
       minecraft: manifest.minecraft ?? profile.minecraft,
       neoforge: manifest.loader?.version ?? profile.neoforge,
       status: ok ? 'healthy' : 'warning',
@@ -4773,7 +4789,8 @@ function minecraftLauncherProfileName(profile, runtimeMode) {
 
 function nativeLoaderMinecraftVersionId(manifest) {
   const version = String(manifest.nativeLoader?.version ?? '').trim()
-  return String(manifest.nativeLoader?.minecraftLauncherVersionId ?? '').trim() || (version ? `echo-native-loader-${version}` : '')
+  const packId = normalizeOfficialPackId(manifest?.pack) ?? safeFileName(manifest?.pack ?? 'pack').toLowerCase()
+  return version && packId ? `echo-${packId}-native-loader-${version}` : ''
 }
 
 function minecraftLauncherVersionId(manifest, runtimeMode) {
@@ -4969,9 +4986,88 @@ function launcherVersionManifestRequirement(manifest, versionId, runtimeMode) {
   }
 }
 
+function echoNativeLoaderDownloadArtifact() {
+  return {
+    path: ECHO_NATIVE_LOADER_LIBRARY_PATH,
+    url: ECHO_NATIVE_LOADER_DOWNLOAD_URL,
+    sha1: ECHO_NATIVE_LOADER_SHA1,
+    size: ECHO_NATIVE_LOADER_SIZE,
+  }
+}
+
+function libraryHasEchoNativeLoaderDownload(library) {
+  if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) return false
+  const artifact = library?.downloads?.artifact
+  return Boolean(
+    artifact?.url &&
+      artifact?.path &&
+      String(artifact.sha1 ?? '').toLowerCase() === ECHO_NATIVE_LOADER_SHA1 &&
+      Number(artifact.size ?? 0) === ECHO_NATIVE_LOADER_SIZE,
+  )
+}
+
+function nativeLoaderLibraryWithDownload(library = {}) {
+  return {
+    ...library,
+    name: ECHO_NATIVE_LOADER_LIBRARY_NAME,
+    downloads: {
+      ...(library.downloads && typeof library.downloads === 'object' ? library.downloads : {}),
+      artifact: echoNativeLoaderDownloadArtifact(),
+    },
+  }
+}
+
+function nativePackJvmArguments(manifest) {
+  return [
+    `-Decho.native.packId=${normalizeOfficialPackId(manifest?.pack) ?? String(manifest?.pack ?? '')}`,
+    `-Decho.native.packVersion=${String(manifest?.version ?? '')}`,
+    '-Decho.native.addonsClasspath=true',
+  ]
+}
+
+function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId = nativeLoaderMinecraftVersionId(manifest), packLibraries = []) {
+  const source = versionJson && typeof versionJson === 'object' && !Array.isArray(versionJson) ? versionJson : {}
+  const libraries = Array.isArray(source.libraries) ? source.libraries : []
+  let found = false
+  const normalizedLibraries = libraries
+    .filter((library) => library?.echoLauncher?.packAddon !== true)
+    .map((library) => {
+      if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) return library
+      found = true
+      return nativeLoaderLibraryWithDownload(library)
+    })
+  if (!found) normalizedLibraries.push(nativeLoaderLibraryWithDownload())
+  for (const library of packLibraries) {
+    if (!normalizedLibraries.some((candidate) => candidate?.echoLauncher?.sourcePath === library?.echoLauncher?.sourcePath)) {
+      normalizedLibraries.push(library)
+    }
+  }
+  const sourceArguments = source.arguments && typeof source.arguments === 'object' && !Array.isArray(source.arguments)
+    ? source.arguments
+    : { game: [], jvm: [] }
+  const jvmArguments = [
+    ...(Array.isArray(sourceArguments.jvm) ? sourceArguments.jvm : []),
+    ...nativePackJvmArguments(manifest),
+  ].filter((value, index, values) => value && values.indexOf(value) === index)
+  return stripNullishLauncherFields({
+    ...source,
+    id: versionId,
+    inheritsFrom: source.inheritsFrom ?? minecraftVersionFromManifest(manifest),
+    mainClass: source.mainClass || ECHO_NATIVE_LOADER_MAIN_CLASS,
+    arguments: {
+      ...sourceArguments,
+      game: Array.isArray(sourceArguments.game) ? sourceArguments.game : [],
+      jvm: jvmArguments,
+    },
+    libraries: normalizedLibraries,
+  })
+}
+
 function validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
-  const versionJson = runtime.versionJson
+  const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
+    ? normalizeEchoNativeLoaderVersionJson(runtime.versionJson, manifest, versionId)
+    : runtime.versionJson
   const requirement = launcherVersionManifestRequirement(manifest, versionId, runtimeMode)
   if (runtime.runtimeMode === 'native-loader-minecraft' && !runtime.version) {
     return {
@@ -5050,6 +5146,41 @@ function validateMinecraftLauncherVersionDocument(document, manifest, versionId,
   if (!Array.isArray(document.libraries) || document.libraries.length === 0) {
     return { valid: false, source: 'invalid', reason: `${launcherRuntimeManifestDefinition(manifest, runtimeMode).librariesLabel} are missing` }
   }
+  if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
+    if (!document.libraries.some((library) => libraryHasEchoNativeLoaderDownload(library))) {
+      return { valid: false, source: 'invalid', reason: 'Native Loader library download metadata is missing or stale' }
+    }
+    for (const library of document.libraries.filter((item) => item?.echoLauncher?.packAddon === true)) {
+      const artifact = library.downloads?.artifact
+      const artifactUrl = String(artifact?.url ?? '').trim().toLowerCase()
+      if (artifactUrl.startsWith('file:')) {
+        return { valid: false, source: 'invalid', reason: `Native Loader pack addon '${library.echoLauncher?.sourcePath ?? library.name}' uses an unsupported file URL.` }
+      }
+      const expectedLibraryPath = artifactPathFromMavenCoordinate(String(library.name ?? ''))?.replace(/\\/g, '/')
+      const actualLibraryPath = String(artifact?.path ?? '').replace(/\\/g, '/')
+      if (!expectedLibraryPath || actualLibraryPath !== expectedLibraryPath) {
+        return { valid: false, source: 'invalid', reason: `Native Loader pack addon '${library.echoLauncher?.sourcePath ?? library.name}' is not stored at its Minecraft library coordinate path.` }
+      }
+    }
+    const expectedAddons = (manifest.files ?? [])
+      .filter((file) => file?.required !== false)
+      .filter((file) => /^addons\/.+\.echo-addon$/iu.test(String(file.path ?? '').replace(/\\/g, '/')))
+      .map((file) => ({
+        path: String(file.path ?? '').replace(/\\/g, '/'),
+        sha256: String(file.sha256 ?? '').toLowerCase(),
+      }))
+    const missingAddons = expectedAddons.filter((expected) =>
+      !document.libraries.some(
+        (library) =>
+          library?.echoLauncher?.packAddon === true &&
+          library?.echoLauncher?.sourcePath === expected.path &&
+          (!expected.sha256 || String(library?.echoLauncher?.sourceSha256 ?? '').toLowerCase() === expected.sha256),
+      ),
+    )
+    if (missingAddons.length > 0) {
+      return { valid: false, source: 'invalid', reason: `Native Loader pack addon classpath is missing: ${missingAddons.slice(0, 5).map((entry) => entry.path).join(', ')}` }
+    }
+  }
   return {
     valid: true,
     source: document.echoLauncher?.managedBy === 'ECHO Launcher' ? 'echo-managed' : 'installed',
@@ -5101,6 +5232,186 @@ function artifactPathFromMavenCoordinate(coordinate) {
   return path.join(...group.split('.'), artifact, version, fileName)
 }
 
+function nativeLoaderRequiredClientArtifacts(minecraftRoot, manifestOrDocument) {
+  const versionJson = manifestOrDocument?.nativeLoader?.versionJson
+    ? normalizeEchoNativeLoaderVersionJson(manifestOrDocument.nativeLoader.versionJson, manifestOrDocument)
+    : manifestOrDocument
+  const artifacts = []
+  for (const library of versionJson?.libraries ?? []) {
+    if (!minecraftLibraryAllowed(library)) continue
+    if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) continue
+    const artifact = library.downloads?.artifact ?? echoNativeLoaderDownloadArtifact()
+    const relativePath = String(artifact.path ?? ECHO_NATIVE_LOADER_LIBRARY_PATH).replace(/\\/g, '/')
+    artifacts.push({
+      label: 'ECHO Native Loader client library',
+      libraryName: ECHO_NATIVE_LOADER_LIBRARY_NAME,
+      path: path.join(minecraftRoot, 'libraries', relativePath),
+      relativePath,
+      url: artifact.url ?? ECHO_NATIVE_LOADER_DOWNLOAD_URL,
+      sha1: artifact.sha1 ?? ECHO_NATIVE_LOADER_SHA1,
+      size: artifact.size ?? ECHO_NATIVE_LOADER_SIZE,
+    })
+  }
+  if (artifacts.length === 0) {
+    const artifact = echoNativeLoaderDownloadArtifact()
+    artifacts.push({
+      label: 'ECHO Native Loader client library',
+      libraryName: ECHO_NATIVE_LOADER_LIBRARY_NAME,
+      path: path.join(minecraftRoot, 'libraries', artifact.path),
+      relativePath: artifact.path,
+      url: artifact.url,
+      sha1: artifact.sha1,
+      size: artifact.size,
+    })
+  }
+  return artifacts
+}
+
+function nativePackLibraryPath(libraryName) {
+  const resolved = artifactPathFromMavenCoordinate(libraryName)
+  if (!resolved) throw new Error(`Native Loader pack addon library coordinate is invalid: ${libraryName}`)
+  return resolved.replace(/\\/g, '/')
+}
+
+function nativePackLibraryName(manifest, file, index) {
+  const packId = normalizeOfficialPackId(manifest?.pack) ?? safeFileName(manifest?.pack ?? 'pack').toLowerCase()
+  const moduleId = safeFileName(file?.moduleId ?? path.basename(String(file?.path ?? ''), path.extname(String(file?.path ?? ''))) ?? `addon-${index}`).toLowerCase()
+  const version = safeFileName(manifest?.version ?? '0').toLowerCase() || '0'
+  return `dev.echo.packs:${packId}-${moduleId}-${index + 1}:${version}`
+}
+
+async function ensureNativeLoaderPackLibraries(minecraftRoot, manifest, installPath) {
+  const libraries = []
+  const addonFiles = (manifest.files ?? [])
+    .filter((file) => file?.required !== false)
+    .filter((file) => /^addons\/.+\.echo-addon$/iu.test(String(file.path ?? '').replace(/\\/g, '/')))
+  for (let index = 0; index < addonFiles.length; index += 1) {
+    const file = addonFiles[index]
+    const sourcePath = String(file.path ?? '').replace(/\\/g, '/')
+    const sourceAbsolutePath = safeJoin(installPath, sourcePath)
+    if (!(await exists(sourceAbsolutePath))) {
+      throw new Error(`Native Loader addon library source is missing: ${sourcePath}. Run Install or Repair before Play.`)
+    }
+    const expectedSha256 = String(file.sha256 ?? '').toLowerCase()
+    if (expectedSha256) {
+      const actualSha256 = await sha256File(sourceAbsolutePath)
+      if (actualSha256.toLowerCase() !== expectedSha256) {
+        throw new Error(`Native Loader addon library source is corrupt: ${sourcePath}. Run Repair before Play.`)
+      }
+    }
+    const libraryName = nativePackLibraryName(manifest, file, index)
+    const libraryPath = nativePackLibraryPath(libraryName)
+    const absolutePath = path.join(minecraftRoot, 'libraries', libraryPath)
+    await ensureDir(path.dirname(absolutePath))
+    await fs.copyFile(sourceAbsolutePath, absolutePath)
+    const stats = await fs.stat(absolutePath)
+    const sha1 = await sha1File(absolutePath)
+    libraries.push({
+      name: libraryName,
+      downloads: {
+        artifact: {
+          path: libraryPath,
+          sha1,
+          size: stats.size,
+        },
+      },
+      echoLauncher: {
+        managedBy: 'ECHO Launcher',
+        packAddon: true,
+        pack: manifest.pack,
+        sourcePath,
+        sourceSha256: expectedSha256 || undefined,
+      },
+    })
+  }
+  return libraries
+}
+
+function nativeLoaderPackLibraryArtifacts(minecraftRoot, document) {
+  const artifacts = []
+  for (const library of document?.libraries ?? []) {
+    if (!minecraftLibraryAllowed(library)) continue
+    if (library?.echoLauncher?.packAddon !== true) continue
+    const artifact = library.downloads?.artifact
+    const relativePath = String(artifact?.path ?? '').replace(/\\/g, '/')
+    if (!relativePath) continue
+    artifacts.push({
+      label: `Native Loader pack addon ${library.echoLauncher?.sourcePath ?? library.name ?? relativePath}`,
+      libraryName: library.name,
+      path: path.join(minecraftRoot, 'libraries', relativePath),
+      relativePath,
+      url: artifact.url,
+      sha1: artifact.sha1,
+      size: artifact.size,
+      sourcePath: library.echoLauncher?.sourcePath,
+    })
+  }
+  return artifacts
+}
+
+async function missingNativeLoaderPackLibraryArtifacts(minecraftRoot, document) {
+  const missing = []
+  for (const artifact of nativeLoaderPackLibraryArtifacts(minecraftRoot, document)) {
+    if (!(await exists(artifact.path))) {
+      missing.push({ ...artifact, reason: 'missing' })
+      continue
+    }
+    const stats = await fs.stat(artifact.path)
+    const actualSha1 = artifact.sha1 ? await sha1File(artifact.path) : ''
+    if ((artifact.sha1 && actualSha1.toLowerCase() !== String(artifact.sha1).toLowerCase()) || (artifact.size && stats.size !== artifact.size)) {
+      missing.push({ ...artifact, reason: 'corrupt' })
+    }
+  }
+  return missing
+}
+
+async function missingNativeLoaderClientArtifacts(minecraftRoot, manifestOrDocument) {
+  const missing = []
+  for (const artifact of nativeLoaderRequiredClientArtifacts(minecraftRoot, manifestOrDocument)) {
+    if (!(await exists(artifact.path))) {
+      missing.push({ ...artifact, reason: 'missing' })
+      continue
+    }
+    const stats = await fs.stat(artifact.path)
+    const actualSha1 = artifact.sha1 ? await sha1File(artifact.path) : ''
+    if ((artifact.sha1 && actualSha1.toLowerCase() !== String(artifact.sha1).toLowerCase()) || (artifact.size && stats.size !== artifact.size)) {
+      missing.push({ ...artifact, reason: 'corrupt' })
+    }
+  }
+  return missing
+}
+
+async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, installPath) {
+  const before = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
+  const packLibraries = installPath ? await ensureNativeLoaderPackLibraries(minecraftRoot, manifest, installPath) : []
+  if (before.length === 0) return { created: false, packLibraries, warnings: [] }
+
+  for (const artifact of nativeLoaderRequiredClientArtifacts(minecraftRoot, manifest)) {
+    await downloadSha1Artifact({
+      kind: 'native-loader-library',
+      path: artifact.relativePath,
+      absolutePath: artifact.path,
+      url: artifact.url,
+      sha1: artifact.sha1,
+      size: artifact.size,
+      libraryName: artifact.libraryName,
+    })
+  }
+
+  const after = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
+  if (after.length > 0) {
+    throw new Error(`Native Loader client library preparation failed: ${after.map((artifact) => `${artifact.label} (${artifact.reason})`).join(', ')}.`)
+  }
+
+  return {
+    created: true,
+    packLibraries,
+    warnings: [
+      `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} into Minecraft Launcher libraries.`,
+    ],
+  }
+}
+
 function neoforgeRequiredClientArtifactPaths(minecraftRoot, manifest) {
   const loaderVersion = manifest.loader?.version
   if (!loaderVersion) return []
@@ -5122,13 +5433,15 @@ async function missingNeoForgeClientArtifacts(minecraftRoot, manifest) {
   return missing
 }
 
-function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode) {
+function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = []) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode)
   if (!validation.ok) {
     throw new Error(`${validation.reason} Publish a strict Ashfall release with ${runtime.loaderKey === 'native-loader' ? 'nativeLoader.versionJson' : 'loader.versionJson'} including id, inheritsFrom, mainClass, arguments, and libraries.`)
   }
-  const versionJson = stripNullishLauncherFields(validation.versionJson)
+  const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
+    ? normalizeEchoNativeLoaderVersionJson(validation.versionJson, manifest, versionId, packLibraries)
+    : stripNullishLauncherFields(validation.versionJson)
   return {
     ...versionJson,
     echoLauncher: {
@@ -5234,6 +5547,21 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
   if (await exists(expectedJson)) {
     const document = await readJson(expectedJson, null)
     const validation = validateMinecraftLauncherVersionDocument(document, manifest, expected, runtimeMode)
+    if (validation.valid && normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
+      const missingArtifacts = [
+        ...(await missingNativeLoaderClientArtifacts(minecraftRoot, document)),
+        ...(await missingNativeLoaderPackLibraryArtifacts(minecraftRoot, document)),
+      ]
+      if (missingArtifacts.length > 0) {
+        return {
+          versionId: expected,
+          ready: false,
+          source: 'missing',
+          metadataPath: expectedJson,
+          reason: `Native Loader classpath artifact is ${missingArtifacts.map((artifact) => artifact.reason).includes('corrupt') ? 'corrupt' : 'missing'}: ${missingArtifacts.map((artifact) => artifact.relativePath).join(', ')}`,
+        }
+      }
+    }
     return {
       versionId: expected,
       ready: validation.valid,
@@ -5245,12 +5573,22 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
   return { versionId: expected, ready: false, source: 'missing', metadataPath: expectedJson }
 }
 
-async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode) {
+function repairableEchoManagedRuntimeMetadata(versionId, metadataPath, reason) {
+  const id = String(versionId ?? '')
+  if (!id.startsWith('echo-')) return false
+  if (!metadataPath || path.basename(metadataPath) !== `${id}.json`) return false
+  if (/release manifest/iu.test(String(reason ?? ''))) return false
+  return true
+}
+
+async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode, installPath) {
   const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, profile)
   const baseVersion = await ensureMinecraftLauncherBaseVersionMetadata(minecraftRoot, manifest)
   const runtimeArtifacts = normalizedMode === 'neoforge-minecraft'
     ? await ensureNeoForgeClientArtifacts(minecraftRoot, manifest, profile, operationId)
-    : { created: false, warnings: [] }
+    : normalizedMode === 'native-loader-minecraft'
+      ? await ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, installPath ?? profile.installPath)
+      : { created: false, warnings: [] }
   const initial = await findMinecraftLauncherVersion(minecraftRoot, manifest, normalizedMode)
   const warnings = [...baseVersion.warnings, ...runtimeArtifacts.warnings]
   if (initial.source === 'invalid' && !initial.metadataPath) {
@@ -5258,7 +5596,7 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
   }
   if (initial.ready) return { ...initial, created: baseVersion.created || runtimeArtifacts.created, warnings }
 
-  const metadata = buildEchoManagedVersionManifest(manifest, initial.versionId, normalizedMode)
+  const metadata = buildEchoManagedVersionManifest(manifest, initial.versionId, normalizedMode, runtimeArtifacts.packLibraries ?? [])
   await ensureDir(path.dirname(initial.metadataPath))
   await writeJson(initial.metadataPath, metadata)
 
@@ -5779,7 +6117,11 @@ async function minecraftLauncherProfileStatus(payload = {}) {
   warnings.push(...(dependency.launcherDependencyWarnings ?? []))
 
   const profileOwnedOrAvailable = !existing || isEchoManagedMinecraftProfile(existing, profileId)
-  const runtimeMetadataUsable = source !== 'invalid'
+  const runtimeMetadataRepairable = source === 'invalid' && repairableEchoManagedRuntimeMetadata(versionId, metadataPath, reason)
+  const runtimeMetadataUsable = source !== 'invalid' || runtimeMetadataRepairable
+  if (runtimeMetadataRepairable) {
+    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${versionId}' is ECHO-managed but stale; ECHO will rewrite it during handoff.`)
+  }
   return {
     ok: profileOwnedOrAvailable && runtimeMetadataUsable,
     runtimeMode,
@@ -5826,7 +6168,7 @@ async function minecraftLauncherHandoff(payload = {}) {
   }
 
   const { profile, manifest, installPath } = await resolveProfileAndManifest(payload)
-  const versionPrep = await ensureMinecraftLauncherVersionMetadata(status.minecraftRoot, manifest, profile, payload.operationId, runtimeMode)
+  const versionPrep = await ensureMinecraftLauncherVersionMetadata(status.minecraftRoot, manifest, profile, payload.operationId, runtimeMode, installPath)
   const statusWithVersion = {
     ...status,
     runtimeMode,
@@ -5873,7 +6215,7 @@ async function minecraftLauncherHandoff(payload = {}) {
     : { removedProfiles: [], warnings: [] }
   if (profileCleanup.removedProfiles.length > 0) {
     warnings.push(
-      `Removed ${profileCleanup.removedProfiles.length} generic NeoForge launcher profile${profileCleanup.removedProfiles.length === 1 ? '' : 's'} (${profileCleanup.removedProfiles.join(', ')}) so Minecraft Launcher uses Ashfall with the ECHO mods folder.`,
+      `Removed ${profileCleanup.removedProfiles.length} generic NeoForge launcher profile${profileCleanup.removedProfiles.length === 1 ? '' : 's'} (${profileCleanup.removedProfiles.join(', ')}) so Minecraft Launcher uses ${profile.name} with the ECHO-managed instance folder.`,
     )
   }
   warnings.push(...profileCleanup.warnings)
@@ -5993,8 +6335,9 @@ async function minecraftLauncherHandoff(payload = {}) {
     : ''
   await appendLauncherLog(
     'INFO',
-    `Minecraft Launcher ${runtimeLabel} handoff profile ${statusWithVersion.profileId} updated for ${profile.name}; ${modsValidation.validatedModsCount} Ashfall ${modsValidation.validatedFileLabel ?? 'runtime file'}${modsValidation.validatedModsCount === 1 ? '' : 's'} validated in ${installPath}.${removedProfileMessage}`,
+    `Minecraft Launcher ${runtimeLabel} handoff profile ${statusWithVersion.profileId} updated for ${profile.name}; ${modsValidation.validatedModsCount} ${modsValidation.validatedFileLabel ?? 'runtime file'}${modsValidation.validatedModsCount === 1 ? '' : 's'} validated in ${installPath}.${removedProfileMessage}`,
   )
+  const validatedRuntimeFiles = `${modsValidation.validatedModsCount} ${modsValidation.validatedFileLabel ?? 'runtime file'}${modsValidation.validatedModsCount === 1 ? '' : 's'}`
 
   return {
     ...statusWithVersion,
@@ -6016,8 +6359,8 @@ async function minecraftLauncherHandoff(payload = {}) {
     validatedModsCount: modsValidation.validatedModsCount,
     updatedProfile: true,
     message: opened.opened
-      ? `Minecraft Launcher opened with the Ashfall ${runtimeLabel} profile ready (${opened.launcherDependencySource ?? 'system'}). ${modsValidation.validatedModsCount} Ashfall mod jars are available in the ECHO instance.${removedProfileMessage}`
-      : `Ashfall ${runtimeLabel} profile is ready in Minecraft Launcher. ${modsValidation.validatedModsCount} Ashfall mod jars are available in the ECHO instance; finish/open the official launcher manually from ${opened.launcherExecutablePath ?? opened.launcherInstallPath ?? MINECRAFT_DOWNLOAD_URL}.${removedProfileMessage}`,
+      ? `Minecraft Launcher opened with the ${profile.name} ${runtimeLabel} profile ready (${opened.launcherDependencySource ?? 'system'}). ${validatedRuntimeFiles} are available in the ECHO instance.${removedProfileMessage}`
+      : `${profile.name} ${runtimeLabel} profile is ready in Minecraft Launcher. ${validatedRuntimeFiles} are available in the ECHO instance; finish/open the official launcher manually from ${opened.launcherExecutablePath ?? opened.launcherInstallPath ?? MINECRAFT_DOWNLOAD_URL}.${removedProfileMessage}`,
   }
 }
 
@@ -6941,10 +7284,11 @@ async function installZipPackArtifact(payload, profile, manifest) {
   }
 
   const previousManifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
-  const previousManifest = await readJson(previousManifestPath, null)
+  const previousManifestState = await readInstalledProfileManifestState(installPath, payload.profileId ?? profile?.id)
+  const previousManifest = previousManifestState?.manifest ?? null
   const previousManifestBackupPath = await backupFileIfExists(previousManifestPath, backupRoot, '.echo/installed-manifest.json')
   if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
-  const operation = Array.isArray(previousManifest?.files) ? 'update' : 'install'
+  const operation = previousManifestState?.valid ? 'update' : 'install'
   reportOperation({ phaseId: 'install', label: 'Checking existing Ashfall files', progress: 18 })
   const before = await verifyManifest({
     manifest,
@@ -6993,14 +7337,22 @@ async function installZipPackArtifact(payload, profile, manifest) {
         reportFileProgress(index, file, 0, true)
         let extracted
         try {
-          extracted = await extractManifestFileFromZip(zipPath, zip, file, destination, {
-            onProgress: ({ written }) => reportFileProgress(index, file, written, false),
-          })
+          if (file.url) {
+            const cachedArtifact = await downloadVerifiedArtifact(file)
+            downloaded.push(file.assetName ?? file.path)
+            await ensureDir(path.dirname(destination))
+            await fs.copyFile(cachedArtifact, destination)
+            extracted = { sha256: file.sha256, size: Number(file.size ?? (await fs.stat(destination)).size) }
+          } else {
+            extracted = await extractManifestFileFromZip(zipPath, zip, file, destination, {
+              onProgress: ({ written }) => reportFileProgress(index, file, written, false),
+            })
+          }
         } catch (error) {
           failed.push({ path: file.path, reason: error instanceof Error ? error.message : String(error) })
           continue
         }
-        verificationCacheDirty = (await stageVerifiedCacheEntry(verificationCache, installPath, file.path, extracted.sha256, 'zip-install')) || verificationCacheDirty
+        verificationCacheDirty = (await stageVerifiedCacheEntry(verificationCache, installPath, file.path, extracted.sha256, file.url ? 'artifact-install' : 'zip-install')) || verificationCacheDirty
         ;(existed ? updated : installed).push(file.path)
         completedInstallBytes += extracted.size
         reportFileProgress(index, file, extracted.size, true)
@@ -7116,7 +7468,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     await profileSave({
       ...profile,
       installPath,
-      version: manifest.version ?? profile.version,
+      version: payload.version ?? manifest.version ?? profile.version,
       minecraft: minecraftVersionFromManifest(manifest),
       neoforge: manifest.loader?.version ?? profile.neoforge,
       ramGb: manifest.ramMb ? Math.max(2, Math.round(manifest.ramMb / 1024)) : profile.ramGb,
@@ -7360,7 +7712,7 @@ async function installRun(payload = {}) {
   const previousManifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
   const previousManifestBackupPath = await backupFileIfExists(previousManifestPath, backupRoot, '.echo/installed-manifest.json')
   if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
-  const operation = previousManifestBackupPath ? 'update' : 'install'
+  const operation = await detectInstallOperation(installPath, payload.profileId ?? profile?.id)
 
   const installFiles = manifest.files ?? []
   const operationId = payload.operationId
@@ -7477,7 +7829,7 @@ async function installRun(payload = {}) {
     await profileSave({
       ...profile,
       installPath,
-      version: manifest.version ?? profile.version,
+      version: payload.version ?? manifest.version ?? profile.version,
       minecraft: manifest.minecraft ?? profile.minecraft,
       neoforge: manifest.loader?.version ?? profile.neoforge,
       status: ok ? 'healthy' : 'warning',
@@ -7795,24 +8147,6 @@ function startupRecoveryHtml(reason) {
 </html>`
 }
 
-function versionParts(version) {
-  const normalized = String(version ?? '').trim().replace(/^v/iu, '')
-  const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/u)
-  if (!match) return null
-  return [Number(match[1] ?? 0), Number(match[2] ?? 0), Number(match[3] ?? 0)]
-}
-
-function isNewerPackVersion(candidate, current) {
-  const candidateParts = versionParts(candidate)
-  const currentParts = versionParts(current)
-  if (!candidateParts || !currentParts) return false
-  for (let index = 0; index < candidateParts.length; index += 1) {
-    if (candidateParts[index] > currentParts[index]) return true
-    if (candidateParts[index] < currentParts[index]) return false
-  }
-  return false
-}
-
 function packOsIdForPackState(packId) {
   const aliases = {
     'arcana-division-native-edition': 'arcana_division',
@@ -8026,7 +8360,15 @@ async function appPackState(payload = {}) {
 
   const installed = localManifest.status === 'valid'
   const needsFileRepair = Boolean((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0)
-  const needsUpdate = Boolean(installed && release?.version && isNewerPackVersion(release.version, localManifest.version ?? profile.version))
+  const currentVersion = localManifest.version ?? profile.version
+  const currentVersionParts = currentVersion ? versionParts(currentVersion) : null
+  const needsUpdate = Boolean(
+    installed &&
+      release?.version &&
+      (currentVersionParts
+        ? isNewerPackVersion(release.version, currentVersion)
+        : currentVersion !== release.version),
+  )
   let primaryAction
   if (localManifest.status === 'invalid') {
     primaryAction = catalog.ok

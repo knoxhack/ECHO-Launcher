@@ -8,6 +8,7 @@ import {
   createEchoPackExport,
   discoverPackFiles,
   fileAssetName,
+  nativeLoaderManifestFromInstance,
   readCurseForgeInstance,
   sha256Buffer,
   shouldIncludeRelativePath,
@@ -363,6 +364,35 @@ describe('default Ashfall pack export', () => {
     expect(zip.getEntry('saves/world/level.dat')).toBeNull()
     expect(zip.getEntry('logs/latest.log')).toBeNull()
     expect(zip.getEntry('minecraftinstance.json')).toBeNull()
+  })
+
+  it('emits native-loader version JSON with a pinned download artifact', () => {
+    const manifest = nativeLoaderManifestFromInstance({
+      minecraftVersion: '26.1.2',
+      mainClass: 'com.echo.NativeLoaderClient',
+      gameArgs: [],
+      jvmArgs: [],
+    })
+
+    expect(manifest.version).toBe('1.0.0')
+    expect(manifest.minecraftLauncherVersionId).toBe('echo-native-loader-1.0.0')
+    expect(manifest.versionJson).toMatchObject({
+      id: 'echo-native-loader-1.0.0',
+      inheritsFrom: '26.1.2',
+      mainClass: 'com.echo.NativeLoaderClient',
+    })
+    expect(manifest.versionJson.libraries).toHaveLength(1)
+    expect(manifest.versionJson.libraries[0]).toMatchObject({
+      name: 'com.echo:native-loader:1.0.0',
+      downloads: {
+        artifact: {
+          path: 'com/echo/native-loader/1.0.0/native-loader-1.0.0.jar',
+          url: expect.stringContaining('native-loader-1.0.0.jar'),
+          sha1: expect.stringMatching(/^[a-f0-9]{40}$/u),
+          size: expect.any(Number),
+        },
+      },
+    })
   })
 
   it('rejects malformed CurseForge metadata before generating artifacts', async () => {

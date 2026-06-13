@@ -7,6 +7,7 @@ const {
   findReleaseAssetForManifestFile,
   moduleArtifactName,
   releaseAssetUrl,
+  resolveManifestReleaseAssets,
   resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 } = require('./release-assets.cjs')
@@ -161,6 +162,136 @@ describe('release asset resolution', () => {
         side: 'both',
       },
     ])
+  })
+
+  it('uses public GitHub browser download URLs for module artifacts', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'openlands-native-edition',
+        moduleRequirements: [
+          {
+            id: 'echocommonloot',
+            version: '0.1.0',
+          },
+        ],
+        modules: [],
+        files: [],
+      },
+      [
+        {
+          name: 'echocommonloot-0.1.0.echo-addon',
+          url: 'https://api.github.com/repos/knoxhack/ECHO-Modules/releases/assets/445555480',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',
+          sha256: sha('f'),
+          size: 6350,
+        },
+      ],
+    )
+
+    expect(resolved.files[0]).toMatchObject({
+      path: 'addons/echocommonloot-0.1.0.echo-addon',
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',
+      sha256: sha('f'),
+    })
+  })
+
+  it('normalizes existing manifest file API URLs to public browser download URLs', () => {
+    const resolved = resolveManifestReleaseAssets(
+      {
+        artifactMode: 'zip',
+        artifactName: 'openlands-native-edition-0.1.0.zip',
+        artifactUrl: 'https://example.test/old.zip',
+        loader: {
+          installer: {
+            assetName: 'native-loader-1.0.0.jar',
+            url: 'https://api.github.com/repos/knoxhack/ECHO-Native-Platform/releases/assets/111',
+          },
+        },
+        files: [
+          {
+            path: 'addons/echocommonloot-0.1.0.echo-addon',
+            assetName: 'echocommonloot-0.1.0.echo-addon',
+            url: 'https://api.github.com/repos/knoxhack/ECHO-Modules/releases/assets/445555480',
+            sha256: sha('f'),
+            size: 0,
+          },
+        ],
+      },
+      [
+        {
+          name: 'openlands-native-edition-0.1.0.zip',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0/openlands-native-edition-0.1.0.zip',
+          size: 10,
+        },
+        {
+          name: 'native-loader-1.0.0.jar',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar',
+          size: 20,
+        },
+        {
+          name: 'echocommonloot-0.1.0.echo-addon',
+          url: 'https://api.github.com/repos/knoxhack/ECHO-Modules/releases/assets/445555480',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',
+          sha256: sha('f'),
+          size: 6350,
+        },
+      ],
+    )
+
+    expect(resolved.artifactUrl).toBe(
+      'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0/openlands-native-edition-0.1.0.zip',
+    )
+    expect(resolved.loader.installer.url).toBe(
+      'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar',
+    )
+    expect(resolved.files[0]).toMatchObject({
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',
+      size: 6350,
+    })
+  })
+
+  it('normalizes module requirement metadata without fetching when files already cover requirements', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'ashfall-native-edition',
+        moduleRequirements: [
+          {
+            id: 'echocore',
+            version: '1.0.0',
+            artifactFamily: 'echo-addon',
+            assetName: 'echocore-1.0.0.echo-addon',
+            path: 'addons/echocore-1.0.0.echo-addon',
+            sha256: sha('a'),
+            size: 100,
+          },
+        ],
+        modules: [],
+        files: [
+          {
+            path: 'addons/echocore-1.0.0.echo-addon',
+            assetName: 'echocore-1.0.0.echo-addon',
+            sha256: sha('a'),
+            size: 100,
+            required: true,
+            moduleId: 'echocore',
+            side: 'both',
+          },
+        ],
+      },
+      [],
+    )
+
+    expect(resolved.files).toHaveLength(1)
+    expect(resolved.modules).toEqual(['echocore'])
+    expect(resolved.moduleRequirements[0]).toMatchObject({
+      id: 'echocore',
+      version: '1.0.0',
+      artifactFamily: 'echo-addon',
+      assetName: 'echocore-1.0.0.echo-addon',
+      path: 'addons/echocore-1.0.0.echo-addon',
+      sha256: sha('a'),
+      size: 100,
+    })
   })
 
   it('adds missing module requirement files without duplicating existing zip files', () => {

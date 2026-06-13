@@ -13,7 +13,7 @@ function releaseAssetSha256(asset) {
 }
 
 function releaseAssetUrl(asset) {
-  return asset?.url ?? asset?.browser_download_url
+  return asset?.browser_download_url ?? asset?.url
 }
 
 function releasePathBasename(value) {
@@ -100,6 +100,44 @@ function validateZipManifestReleaseAssets(manifest, entryAssets = []) {
   }
 
   return { reasons, warnings, missingFileAssets }
+}
+
+function resolveManifestReleaseAssets(manifest, entryAssets = []) {
+  const lookup = buildReleaseAssetLookup(entryAssets)
+  const artifact =
+    manifest?.artifactMode === 'zip' && manifest?.artifactName && lookup.byName.has(manifest.artifactName)
+      ? lookup.byName.get(manifest.artifactName)
+      : null
+  const files = (manifest?.files ?? []).map((file) => {
+    const asset = findReleaseAssetForManifestFile(file, lookup)
+    if (!asset) return file
+    const url = releaseAssetUrl(asset)
+    return {
+      ...file,
+      ...(url ? { url } : {}),
+      size: file.size || asset.size,
+    }
+  })
+  const installer = manifest?.loader?.installer
+  const installerAsset = installer?.assetName ? lookup.byName.get(installer.assetName) : null
+  const installerUrl = releaseAssetUrl(installerAsset)
+  const resolvedInstaller = installerAsset
+    ? {
+        ...installer,
+        ...(installerUrl ? { url: installerUrl } : {}),
+        size: installer.size || installerAsset.size,
+      }
+    : installer
+  return {
+    ...manifest,
+    artifactUrl: releaseAssetUrl(artifact) ?? manifest?.artifactUrl,
+    artifactSize: artifact?.size ?? manifest?.artifactSize,
+    files,
+    loader: {
+      ...manifest?.loader,
+      installer: resolvedInstaller,
+    },
+  }
 }
 
 function moduleArtifactFamilyForPack(pack) {
@@ -267,6 +305,7 @@ module.exports = {
   normalizeModuleRequirements,
   releaseAssetSha256,
   releaseAssetUrl,
+  resolveManifestReleaseAssets,
   resolveModuleRequirements,
   validateZipManifestReleaseAssets,
 }
