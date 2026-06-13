@@ -241,12 +241,18 @@ async function clickVisibleButton(cdp, text) {
 }
 
 async function navigateHome(cdp) {
-  await waitFor('Home navigation button', 30_000, async () => clickVisibleButton(cdp, 'Home'))
-  await waitFor('Home page', 30_000, async () => evaluate(cdp, `(() => {
+  const homeReady = async () => evaluate(cdp, `(() => {
     if (document.getElementById('home-pack-select')) return true
     const bodyText = document.body.innerText
     return /SELECTED\\s+PACK/i.test(bodyText) && /Install|Play|Repair|Update|Unavailable/i.test(bodyText)
-  })()`))
+  })()`)
+  if (await homeReady()) return
+  await waitFor('Home navigation button or Home page', 30_000, async () => {
+    if (await homeReady()) return true
+    await clickVisibleButton(cdp, 'Home')
+    return true
+  })
+  await waitFor('Home page', 30_000, homeReady)
 }
 
 async function selectHomePack(cdp, pack) {
@@ -513,6 +519,7 @@ async function run() {
     stdout: [],
     stderr: [],
   }
+  await writeJson(args.out, report)
 
   let cdp = null
   try {
@@ -610,5 +617,5 @@ async function run() {
 
 run().catch(async (error) => {
   console.error(error instanceof Error ? error.stack : String(error))
-  process.exitCode = 1
+  process.exit(1)
 })
