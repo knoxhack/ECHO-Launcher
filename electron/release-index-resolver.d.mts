@@ -30,6 +30,12 @@ export declare const officialPackIds: OfficialPackId[]
 
 export declare function normalizeOfficialPackId(pack?: string | null): OfficialPackId | undefined
 
+export declare function assertSelectedManifestPack<T>(
+  manifest: T,
+  selectedPack?: string | null,
+  options?: { displayName?: (pack: string) => string },
+): T
+
 export declare function canonicalArtifactRecords(artifacts: unknown): CanonicalArtifactRecord[]
 
 export declare function installableArtifactRecords(artifacts: unknown): CanonicalArtifactRecord[]

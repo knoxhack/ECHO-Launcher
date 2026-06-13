@@ -4,6 +4,7 @@ import type { ReleaseEntry, ReleaseIndex } from '../types/releases'
 import { normalizeOfficialPackId, officialPackIds } from '../../electron/release-index-resolver.mjs'
 
 export {
+  assertSelectedManifestPack,
   artifactForPackTarget,
   canonicalArtifactRecords,
   dependencyClosure,

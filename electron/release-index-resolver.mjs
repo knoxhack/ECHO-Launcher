@@ -34,6 +34,17 @@ export function normalizeOfficialPackId(pack) {
   return officialPackIds.includes(pack) ? pack : undefined
 }
 
+export function assertSelectedManifestPack(manifest, selectedPack, options = {}) {
+  const expected = normalizeOfficialPackId(selectedPack)
+  if (!expected) return manifest
+  const actual = normalizeOfficialPackId(manifest?.pack ?? manifest?.id)
+  if (actual && actual !== expected) {
+    const displayName = typeof options.displayName === 'function' ? options.displayName : (pack) => pack
+    throw new Error(`Selected manifest is for ${displayName(actual)}, not ${displayName(expected)}.`)
+  }
+  return manifest
+}
+
 export function canonicalArtifactRecords(artifacts) {
   const records = []
   const visit = (node, role = 'asset') => {

@@ -6,20 +6,22 @@ interface ReadinessStore {
   readiness: AppReadinessState | null
   loading: boolean
   error: string | null
-  refreshReadiness: () => Promise<AppReadinessState | null>
+  refreshReadiness: (profileId?: string) => Promise<AppReadinessState | null>
 }
 
-let readinessInFlight: Promise<AppReadinessState | null> | null = null
+const readinessInFlight = new Map<string, Promise<AppReadinessState | null>>()
 
 export const useReadinessStore = create<ReadinessStore>()((set) => ({
   readiness: null,
   loading: false,
   error: null,
-  refreshReadiness: () => {
+  refreshReadiness: (profileId) => {
     if (!isNativeAvailable()) return Promise.resolve(null)
-    if (readinessInFlight) return readinessInFlight
+    const key = profileId ?? '__default__'
+    const pending = readinessInFlight.get(key)
+    if (pending) return pending
     set({ loading: true, error: null })
-    readinessInFlight = invokeNative('app:get-readiness')
+    const request = invokeNative('app:get-readiness', profileId ? { profileId } : undefined)
       .then((readiness) => {
         set({ readiness, loading: false })
         return readiness
@@ -30,8 +32,9 @@ export const useReadinessStore = create<ReadinessStore>()((set) => ({
         return null
       })
       .finally(() => {
-        readinessInFlight = null
+        readinessInFlight.delete(key)
       })
-    return readinessInFlight
+    readinessInFlight.set(key, request)
+    return request
   },
 }))

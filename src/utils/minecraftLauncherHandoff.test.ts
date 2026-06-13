@@ -55,6 +55,10 @@ describe('minecraftLauncherHandoff', () => {
     expect(isEchoManagedMinecraftProfile({ echoLauncher: { managedBy: 'ECHO Launcher' } })).toBe(true)
     expect(isEchoManagedMinecraftProfile({ name: 'Vanilla' })).toBe(false)
     expect(isReservedEchoMinecraftProfileKey('echo-ashfall')).toBe(true)
+    expect(isReservedEchoMinecraftProfileKey('echo-ashfall-neoforge-edition')).toBe(true)
+    expect(isReservedEchoMinecraftProfileKey('echo-sky-relay-native-edition-native-loader')).toBe(true)
+    expect(isReservedEchoMinecraftProfileKey('echo-openlands-neoforge-edition')).toBe(true)
+    expect(isReservedEchoMinecraftProfileKey('echo-arcana-division-standalone-edition')).toBe(true)
     expect(isEchoManagedMinecraftProfile({ name: 'Ashfall' }, 'echo-ashfall')).toBe(true)
   })
 
@@ -95,6 +99,69 @@ describe('minecraftLauncherHandoff', () => {
       },
     })
     expect(updated.profiles['echo-ashfall'].created).toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('upgrades marker-stripped official ECHO Minecraft profiles safely', () => {
+    const updated = upsertEchoMinecraftProfile(
+      {
+        profiles: {
+          'echo-ashfall-neoforge-edition': {
+            name: 'Ashfall NeoForge Edition',
+            type: 'custom',
+            created: '2026-06-13T00:00:00.000Z',
+          },
+        },
+      },
+      {
+        ...baseInput(),
+        profileKey: 'echo-ashfall-neoforge-edition',
+        profileName: 'Ashfall NeoForge Edition',
+        echoProfileId: 'ashfall-neoforge-edition',
+        pack: 'ashfall-neoforge-edition',
+      },
+    )
+
+    expect(updated.profiles['echo-ashfall-neoforge-edition']).toMatchObject({
+      name: 'Ashfall NeoForge Edition',
+      lastVersionId: 'neoforge-26.1.2.29-beta',
+      echoManaged: true,
+      echoLauncher: {
+        managedBy: 'ECHO Launcher',
+        profileId: 'ashfall-neoforge-edition',
+        pack: 'ashfall-neoforge-edition',
+      },
+    })
+    expect(updated.profiles['echo-ashfall-neoforge-edition'].created).toBe('2026-06-13T00:00:00.000Z')
+  })
+
+  it('preserves plain user-created Minecraft profiles with the same loader version', () => {
+    const cleaned = cleanupConflictingNeoForgeLauncherProfiles(
+      {
+        profiles: {
+          Ashfall: {
+            name: 'Ashfall',
+            type: 'custom',
+            lastVersionId: 'neoforge-26.1.2.29-beta',
+            gameDir: 'D:\\Player\\Ashfall',
+          },
+          'echo-ashfall-neoforge-edition': {
+            name: 'Ashfall NeoForge Edition',
+            type: 'custom',
+            lastVersionId: 'neoforge-26.1.2.29-beta',
+            gameDir: 'C:\\Games\\ECHO\\Ashfall NeoForge Edition',
+          },
+        },
+      },
+      {
+        profileKey: 'echo-ashfall-neoforge-edition',
+        minecraftVersionId: 'neoforge-26.1.2.29-beta',
+        gameDir: 'C:\\Games\\ECHO\\Ashfall NeoForge Edition',
+      },
+    )
+
+    expect(cleaned.document.profiles?.Ashfall).toBeDefined()
+    expect(cleaned.removedProfiles).toEqual([])
+    expect(cleaned.warnings.join(' ')).toContain("Another Minecraft Launcher profile 'Ashfall' uses neoforge-26.1.2.29-beta")
   })
 
   it('updates only the ECHO-managed profile while preserving the launcher document', () => {

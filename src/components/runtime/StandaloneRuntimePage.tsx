@@ -81,8 +81,8 @@ export function StandaloneRuntimePage() {
 
   useEffect(() => {
     void refresh()
-    void refreshReadiness()
-  }, [refresh, refreshReadiness])
+    void refreshReadiness(runtimeProfile?.id ?? selectedProfile?.id)
+  }, [refresh, refreshReadiness, runtimeProfile?.id, selectedProfile?.id])
 
   const handleLaunch = async () => {
     if (selectedMode === 'native-runtime') {

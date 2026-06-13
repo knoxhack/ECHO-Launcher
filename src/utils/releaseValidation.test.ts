@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CanonicalReleaseIndexEntry, ReleaseEntry, ReleaseIndex } from '../types/releases'
 import {
+  assertSelectedManifestPack,
   artifactChecksumStatus,
   artifactForPackTarget,
   dependencyClosure,
@@ -322,6 +323,38 @@ describe('releaseValidation', () => {
     expect(normalizeOfficialPackId('openlans-neoforge')).toBe('openlands-neoforge-edition')
     expect(normalizeOfficialPackId('openlands-standalone-runtime')).toBe('openlands-standalone-edition')
     expect(isPlayablePackRelease({ ...baseRelease, pack: 'sky-relay-native-edition' }, 'sky-relay')).toBe(true)
+  })
+
+  it('rejects a manifest from another selected official pack before install work starts', () => {
+    expect(() =>
+      assertSelectedManifestPack(
+        { pack: 'ashfall-native-edition' },
+        'ashfall-standalone-edition',
+        {
+          displayName: (pack: string) =>
+            pack === 'ashfall-native-edition'
+              ? 'Ashfall Native Edition'
+              : pack === 'ashfall-standalone-edition'
+                ? 'Ashfall Standalone Edition'
+                : pack,
+        },
+      ),
+    ).toThrow('Selected manifest is for Ashfall Native Edition, not Ashfall Standalone Edition.')
+  })
+
+  it('keeps Ashfall Native, NeoForge, and Standalone manifest lanes isolated', () => {
+    const lanes = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'] as const
+
+    for (const selected of lanes) {
+      for (const manifestPack of lanes) {
+        const assertLane = () => assertSelectedManifestPack({ pack: manifestPack }, selected)
+        if (manifestPack === selected) {
+          expect(assertLane).not.toThrow()
+        } else {
+          expect(assertLane).toThrow(`Selected manifest is for ${manifestPack}, not ${selected}.`)
+        }
+      }
+    }
   })
 
   it('builds expected pack manifest asset names', () => {

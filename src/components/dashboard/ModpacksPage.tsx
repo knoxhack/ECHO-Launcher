@@ -1,6 +1,6 @@
 import { Archive, Boxes, Eye, FileInput, FolderSearch, LockKeyhole, Play, RadioTower, ShieldAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { officialModpacksFromReleaseIndex, type OfficialModpack } from '../../data/officialModpacks'
 import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
 import { useLauncherStore } from '../../stores/launcherStore'
@@ -99,7 +99,7 @@ export function ModpacksPage() {
     })
     if (file.canceled || !file.path) return
     try {
-      const imported = await invokeNative('manifest:import', { filePath: file.path })
+      const imported = await invokeNative('manifest:import', { filePath: file.path, profileId: selectedPack?.id })
       addToast('Manifest imported', `${imported.manifest.version} saved to ${imported.manifestPath}`, 'success')
     } catch (error) {
       addToast('Manifest import failed', error instanceof Error ? error.message : 'Unable to import manifest.', 'danger')
@@ -268,7 +268,7 @@ export function ModpacksPage() {
   )
 }
 
-function OfficialPackCard({
+const OfficialPackCard = memo(function OfficialPackCard({
   pack,
   packOsState,
   releaseIndex,
@@ -326,13 +326,27 @@ function OfficialPackCard({
   }
   const primaryActionLabel = ready ? 'Open Pack' : isPlayable ? 'Resolve Setup' : 'Inspect Gate'
 
+  useEffect(() => {
+    if (!selected) return
+    const image = new Image()
+    image.decoding = 'async'
+    image.src = pack.image
+  }, [pack.image, selected])
+
   return (
     <GlassCard
       className={cn('overflow-hidden p-0 transition duration-150', selected && 'ring-2 ring-cyan-echo/70')}
       tone={isPlayable ? (ready ? 'default' : 'amber') : 'default'}
     >
       <div className="relative aspect-[16/9] min-h-72 overflow-hidden">
-        <img alt="" className="absolute inset-0 h-full w-full object-cover transition duration-200 hover:opacity-95" src={pack.image} />
+        <img
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover transition duration-200 hover:opacity-95"
+          decoding="async"
+          fetchPriority={selected ? 'high' : 'auto'}
+          loading={selected ? 'eager' : 'lazy'}
+          src={pack.image}
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/15" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-transparent" />
         <div className="absolute left-5 top-5 flex flex-wrap gap-2">
@@ -382,7 +396,7 @@ function OfficialPackCard({
       </div>
     </GlassCard>
   )
-}
+})
 
 function PackStat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (

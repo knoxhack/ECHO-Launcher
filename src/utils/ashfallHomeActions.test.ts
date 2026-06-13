@@ -51,7 +51,7 @@ describe('getAshfallHomeActions', () => {
     expect(actions.primaryActionKind).toBe('launch-standalone')
   })
 
-  it('shows repair primary when an installed pack is blocked but has a manifest', () => {
+  it('keeps play primary when clean installed files have a blocked launch route', () => {
     const actions = getAshfallHomeActions(healthyProfile, { version: '1.0.0' })
     const recoveryActions = getAshfallHomeActions(
       healthyProfile,
@@ -60,9 +60,37 @@ describe('getAshfallHomeActions', () => {
     )
 
     expect(actions.primaryActionKind).toBe('play')
-    expect(recoveryActions.primaryActionLabel).toBe('Repair Ashfall Native Edition')
-    expect(recoveryActions.primaryActionKind).toBe('repair')
-    expect(recoveryActions.primaryBusyLabel).toBe('Repairing...')
+    expect(recoveryActions.primaryActionLabel).toBe('Play Ashfall Native Edition')
+    expect(recoveryActions.primaryActionKind).toBe('play')
+    expect(recoveryActions.primaryBusyLabel).toBe('Launching...')
+  })
+
+  it('shows repair primary only when the selected installed profile is already warning', () => {
+    const actions = getAshfallHomeActions(
+      { ...healthyProfile, status: 'warning' },
+      { version: '1.0.0' },
+      { canRepair: true },
+    )
+
+    expect(actions.primaryActionLabel).toBe('Repair Ashfall Native Edition')
+    expect(actions.primaryActionKind).toBe('repair')
+    expect(actions.primaryBusyLabel).toBe('Repairing...')
+  })
+
+  it('does not loop Sky Relay Native back to repair after clean files verify', () => {
+    const actions = getAshfallHomeActions(
+      {
+        ...healthyProfile,
+        id: 'sky-relay-native-edition',
+        name: 'Sky Relay Native Edition',
+        runtimeMode: 'native-loader-minecraft',
+      },
+      { version: '1.0.0' },
+      { canRepair: true, launchBlocked: true },
+    )
+
+    expect(actions.primaryActionLabel).toBe('Play Sky Relay Native Edition')
+    expect(actions.primaryActionKind).toBe('play')
   })
 
   it('does not show update action when the installed version is newer than the Catalog release', () => {

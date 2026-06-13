@@ -54,7 +54,7 @@ import type { MinecraftRuntimeModeId, StandaloneRuntimeLaunchPayload, Standalone
 type NativeCommandMap = {
   'app:get-bootstrap-state': { payload: undefined; result: NativeBootstrapState }
   'app:get-state': { payload: undefined; result: NativeAppState }
-  'app:get-readiness': { payload: undefined; result: AppReadinessState }
+  'app:get-readiness': { payload: { profileId?: string } | undefined; result: AppReadinessState }
   'packos:get-state': { payload: undefined; result: PackOsLauncherState }
   'native-loader:get-status': { payload: undefined; result: NativeLoaderAshfallStatus }
   'native-loader:launch-ashfall': { payload: { operationId?: string; profileId?: string } | undefined; result: NativeLoaderAshfallLaunchResult }
@@ -64,10 +64,10 @@ type NativeCommandMap = {
   'profile:list': { payload: undefined; result: LauncherProfile[] }
   'profile:save': { payload: LauncherProfile; result: LauncherProfile }
   'profile:duplicate': { payload: { profileId: string }; result: LauncherProfile }
-  'manifest:load': { payload: { manifestPath?: string; channel?: Channel; version?: string; refresh?: boolean; pack?: OfficialPackId } | undefined; result: PackManifest }
-  'manifest:import': { payload: { filePath: string }; result: { manifest: PackManifest; manifestPath: string } }
+  'manifest:load': { payload: { manifestPath?: string; channel?: Channel; version?: string; refresh?: boolean; pack?: OfficialPackId; profileId?: string } | undefined; result: PackManifest }
+  'manifest:import': { payload: { filePath: string; profileId?: string; pack?: OfficialPackId }; result: { manifest: PackManifest; manifestPath: string } }
   'manifest:verify': {
-    payload: { installPath?: string; manifestPath?: string; manifest?: PackManifest }
+    payload: { profileId?: string; pack?: OfficialPackId; installPath?: string; manifestPath?: string; manifest?: PackManifest }
     result: NativeVerifyResult
   }
   'settings:get': { payload: undefined; result: NativeLauncherSettings }

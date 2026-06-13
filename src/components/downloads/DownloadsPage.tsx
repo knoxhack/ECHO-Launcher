@@ -6,6 +6,7 @@ import { releaseService } from '../../services/ReleaseService'
 import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
 import { useLauncherStore } from '../../stores/launcherStore'
 import { useProfileStore } from '../../stores/profileStore'
+import { useReadinessStore } from '../../stores/readinessStore'
 import { useReleaseStore } from '../../stores/releaseStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { NativeInstallResult } from '../../types/native'
@@ -28,6 +29,7 @@ export function DownloadsPage() {
   const releaseIndex = useReleaseStore((state) => state.releaseIndex)
   const loadingReleases = useReleaseStore((state) => state.loadingReleases)
   const loadReleases = useReleaseStore((state) => state.loadReleases)
+  const refreshReadiness = useReadinessStore((state) => state.refreshReadiness)
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
   const [installing, setInstalling] = useState(false)
   const [installProgress, setInstallProgress] = useState(0)
@@ -93,6 +95,15 @@ export function DownloadsPage() {
     return () => window.clearTimeout(timer)
   }, [refreshReleases])
 
+  useEffect(() => {
+    const reset = window.setTimeout(() => {
+      setManifestPath(undefined)
+      setInstallReport(null)
+      setSelectedVersion(latestRelease?.version)
+    }, 0)
+    return () => window.clearTimeout(reset)
+  }, [latestRelease?.version, selectedProfile.id])
+
   const importManifest = async () => {
     if (!isNativeAvailable()) {
       addToast('Desktop app required', 'Manifest import reads local files and requires npm run desktop.', 'warning')
@@ -104,7 +115,7 @@ export function DownloadsPage() {
     })
     if (file.canceled || !file.path) return
     try {
-      const imported = await invokeNative('manifest:import', { filePath: file.path })
+      const imported = await invokeNative('manifest:import', { filePath: file.path, profileId: selectedProfile.id })
       setManifestPath(imported.manifestPath)
       addToast('Manifest imported', `${imported.manifest.version} saved to ${imported.manifestPath}`, 'success')
     } catch (error) {
@@ -146,6 +157,7 @@ export function DownloadsPage() {
     const operationId = launchService.createOperationId('install')
     let pollTimer: number | undefined
     const pollStatus = async () => {
+      if (document.visibilityState !== 'visible') return
       try {
         const status = await launchService.getOperationStatus(operationId)
         if (status.status === 'idle') return
@@ -182,6 +194,7 @@ export function DownloadsPage() {
       invokeNative('profile:list')
         .then(setProfiles)
         .catch(() => undefined)
+      void refreshReadiness(selectedProfile.id)
       addToast(
         result.ok ? 'Install/update complete' : 'Install/update completed with blocked files',
         result.ok

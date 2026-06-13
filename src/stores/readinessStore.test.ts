@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { bundledProfiles } from '../data/bundledProfiles'
 import type { AppReadinessState } from '../types/native'
+import { officialPackIds } from '../utils/releaseValidation'
 import { useReadinessStore } from './readinessStore'
 
 const readiness = {
@@ -78,6 +79,48 @@ describe('readiness store', () => {
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(useReadinessStore.getState().readiness).toBe(readiness)
     expect(useReadinessStore.getState().loading).toBe(false)
+  })
+
+  it('keeps in-flight readiness requests separated by profile id', async () => {
+    const invoke = vi.fn((_, payload?: { profileId?: string }) =>
+      Promise.resolve({
+        ...readiness,
+        profile: {
+          ...readiness.profile,
+          id: payload?.profileId ?? readiness.profile.id,
+        },
+      }),
+    )
+    vi.stubGlobal('window', { echoNative: { invoke } })
+
+    await Promise.all([
+      useReadinessStore.getState().refreshReadiness('ashfall-native-edition'),
+      useReadinessStore.getState().refreshReadiness('ashfall-standalone-edition'),
+    ])
+
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke).toHaveBeenCalledWith('app:get-readiness', { profileId: 'ashfall-native-edition' })
+    expect(invoke).toHaveBeenCalledWith('app:get-readiness', { profileId: 'ashfall-standalone-edition' })
+  })
+
+  it('requests selected-pack readiness for every official pack id', async () => {
+    const invoke = vi.fn((_, payload?: { profileId?: string }) =>
+      Promise.resolve({
+        ...readiness,
+        profile: {
+          ...readiness.profile,
+          id: payload?.profileId ?? readiness.profile.id,
+        },
+      }),
+    )
+    vi.stubGlobal('window', { echoNative: { invoke } })
+
+    for (const profileId of officialPackIds) {
+      const result = await useReadinessStore.getState().refreshReadiness(profileId)
+      expect(result?.profile.id).toBe(profileId)
+    }
+
+    expect(invoke).toHaveBeenCalledTimes(officialPackIds.length)
   })
 })
 

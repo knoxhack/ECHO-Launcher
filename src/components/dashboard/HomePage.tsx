@@ -133,10 +133,10 @@ export function HomePage() {
   const packOsReason = packOsPrimaryReason(packOs, selectedProfileId)
 
   useEffect(() => {
-    void refreshReadiness()
+    void refreshReadiness(selectedProfile.id)
     void refreshPackOs()
     if (isNativeAvailable()) void refreshStandaloneRuntime()
-  }, [refreshPackOs, refreshReadiness, refreshStandaloneRuntime])
+  }, [refreshPackOs, refreshReadiness, refreshStandaloneRuntime, selectedProfile.id])
 
   useEffect(() => {
     let disposed = false
@@ -168,7 +168,7 @@ export function HomePage() {
               refresh: false,
             })).manifest
           : nativeLoaderProfile?.manifestPath
-            ? await invokeNative('manifest:load', { manifestPath: nativeLoaderProfile.manifestPath })
+            ? await invokeNative('manifest:load', { manifestPath: nativeLoaderProfile.manifestPath, profileId: nativeLoaderProfile.id })
             : null
 
         if (disposed) return
@@ -212,7 +212,7 @@ export function HomePage() {
     return () => {
       disposed = true
     }
-  }, [advancedMode, creatorMode, nativeLoaderProfile?.manifestPath, nativeLoaderRelease?.version, selectedProfile.name])
+  }, [advancedMode, creatorMode, nativeLoaderProfile?.channel, nativeLoaderProfile?.id, nativeLoaderProfile?.manifestPath, nativeLoaderRelease?.version, selectedProfile.name])
 
   useEffect(() => {
     if (!isNativeAvailable()) return
@@ -245,7 +245,9 @@ export function HomePage() {
 
   useEffect(() => {
     if (!repairActive) return
-    const timer = window.setInterval(tickRepair, 420)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') tickRepair()
+    }, 420)
     return () => window.clearInterval(timer)
   }, [repairActive, tickRepair])
 
@@ -262,15 +264,22 @@ export function HomePage() {
 
   useEffect(() => {
     const pollMs = Math.max(10, officialStatusPollSeconds || 30) * 1000
-    const firstRefresh = window.setTimeout(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return
       void refreshOfficialStatus(officialServerStatusUrl, officialStatusFallback)
-    }, 700)
-    const timer = window.setInterval(() => {
-      void refreshOfficialStatus(officialServerStatusUrl, officialStatusFallback)
-    }, pollMs)
+    }
+    const firstRefresh = window.setTimeout(refreshIfVisible, 700)
+    const timer = window.setInterval(refreshIfVisible, pollMs)
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshOfficialStatus(officialServerStatusUrl, officialStatusFallback)
+      }
+    }
+    document.addEventListener('visibilitychange', refreshOnVisible)
     return () => {
       window.clearTimeout(firstRefresh)
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshOnVisible)
     }
   }, [officialServerStatusUrl, officialStatusFallback, officialStatusPollSeconds, refreshOfficialStatus])
 
@@ -288,6 +297,7 @@ export function HomePage() {
     const operationId = launchService.createOperationId('handoff')
     let pollTimer: number | undefined
     const pollStatus = async () => {
+      if (document.visibilityState !== 'visible') return
       try {
         const status = await launchService.getOperationStatus(operationId)
         if (status.status === 'idle') return
@@ -328,7 +338,7 @@ export function HomePage() {
       invokeNative('profile:list')
         .then(setProfiles)
         .catch(() => undefined)
-      void refreshReadiness()
+      void refreshReadiness(selectedProfile.id)
       void refreshPackOs()
       setLaunchState({
         active: false,
@@ -360,7 +370,7 @@ export function HomePage() {
   }
 
   const installOrUpdateSelectedPack = async (operation: 'install' | 'update') => {
-    const manifestPath = latestRelease?.version ? undefined : selectedProfile.manifestPath ?? readiness?.install.manifestPath
+    const manifestPath = latestRelease?.version ? undefined : selectedProfile.manifestPath
     if (!latestRelease?.version && !manifestPath) {
       addToast(
         `${operation === 'install' ? 'Install' : 'Update'} unavailable`,
@@ -389,6 +399,7 @@ export function HomePage() {
     const operationId = launchService.createOperationId(operation)
     let pollTimer: number | undefined
     const pollStatus = async () => {
+      if (document.visibilityState !== 'visible') return
       try {
         const status = await launchService.getOperationStatus(operationId)
         if (status.status === 'idle') return
@@ -423,7 +434,7 @@ export function HomePage() {
       invokeNative('profile:list')
         .then(setProfiles)
         .catch(() => undefined)
-      void refreshReadiness()
+      void refreshReadiness(selectedProfile.id)
       void refreshPackOs()
       addToast(
         result.ok ? (operation === 'install' ? `${selectedProfile.name} installed` : `${selectedProfile.name} updated`) : `${selectedProfile.name} ${operation} needs attention`,
@@ -442,8 +453,8 @@ export function HomePage() {
   }
 
   const repairSelectedPack = async () => {
-    const installPath = selectedProfile.installPath ?? readiness?.install.installPath
-    const manifestPath = selectedProfile.manifestPath ?? readiness?.install.manifestPath
+    const installPath = selectedProfile.installPath
+    const manifestPath = selectedProfile.manifestPath
     if (!installPath || !manifestPath) {
       addToast('Repair unavailable', 'Select a pack with an install folder and imported manifest first.', 'warning')
       return
@@ -469,22 +480,25 @@ export function HomePage() {
         channel: selectedProfile.channel,
         version: latestRelease?.version,
       })
+      const filesClean = result.after.missing.length === 0 && result.after.corrupt.length === 0
       setHandoffProgress(result.ok ? 100 : 96)
-      setHandoffStage(result.ok ? 'Repair complete' : 'Repair needs attention')
+      setHandoffStage(result.ok ? (selectedRuntimeBlocked ? 'Files repaired, launch still needs attention' : 'Repair complete') : 'Repair needs attention')
       setHandoffDetail(
-        result.ok
+        result.ok && selectedRuntimeBlocked && filesClean
+          ? `Files verified, but ${selectedRoute.label} still needs diagnostics.`
+          : result.ok
           ? `Repaired ${result.repaired.length} and verified ${result.after.valid.length} files.`
           : `${result.skipped.length + result.after.missing.length + result.after.corrupt.length} files still need attention.`,
       )
       invokeNative('profile:list')
         .then(setProfiles)
         .catch(() => undefined)
-      void refreshReadiness()
+      void refreshReadiness(selectedProfile.id)
       void refreshPackOs()
       addToast(
-        result.ok ? `${selectedProfile.name} repaired` : `${selectedProfile.name} repair needs attention`,
-        result.ok ? `Report: ${result.reportPath}` : 'Open Tools > Repair for the full repair report.',
-        result.ok ? 'success' : 'danger',
+        result.ok && selectedRuntimeBlocked ? 'Files repaired, launch still needs attention' : result.ok ? `${selectedProfile.name} repaired` : `${selectedProfile.name} repair needs attention`,
+        result.ok && selectedRuntimeBlocked ? `Open Diagnostics for ${selectedRoute.label}. Report: ${result.reportPath}` : result.ok ? `Report: ${result.reportPath}` : 'Open Tools > Repair for the full repair report.',
+        result.ok ? (selectedRuntimeBlocked ? 'warning' : 'success') : 'danger',
       )
     } catch (error) {
       setHandoffProgress(96)
@@ -509,6 +523,7 @@ export function HomePage() {
     const operationId = launchService.createOperationId('native-loader')
     let pollTimer: number | undefined
     const pollStatus = async () => {
+      if (document.visibilityState !== 'visible') return
       try {
         const status = await launchService.getOperationStatus(operationId)
         if (status.status === 'idle') return
@@ -582,7 +597,8 @@ export function HomePage() {
     (selectedRuntimeMode === 'native-runtime'
       ? 'Standalone runtime verification controls launch readiness.'
       : `Minecraft Launcher profile and ${selectedProfile.name} files are verified before handoff.`)
-  const minecraftReady = readiness?.minecraftLauncher?.ok ?? true
+  const selectedReadiness = readiness?.profile?.id === selectedProfile.id ? readiness : null
+  const minecraftReady = selectedReadiness?.minecraftLauncher?.ok ?? true
   const selectedRoute = getAshfallHomeRoute(selectedProfile)
   const selectedLaunchButton = buildRuntimeLaunchButtonState({
     mode: selectedRuntimeMode,
@@ -595,8 +611,8 @@ export function HomePage() {
   })
   const selectedRuntimeIsMinecraft = minecraftRuntimeModes.has(selectedRuntimeMode)
   const selectedRuntimeBlocked = selectedLaunchButton.disabled || (selectedRuntimeIsMinecraft && packOsBlocked)
-  const selectedPackCanRepair = Boolean((selectedProfile.installPath ?? readiness?.install.installPath) && (selectedProfile.manifestPath ?? readiness?.install.manifestPath))
-  const selectedPackCanInstallFrom = Boolean(latestRelease?.version || selectedProfile.manifestPath || readiness?.install.manifestPath)
+  const selectedPackCanRepair = Boolean(selectedProfile.installPath && selectedProfile.manifestPath)
+  const selectedPackCanInstallFrom = Boolean(latestRelease?.version || selectedProfile.manifestPath)
   const homeActions = getSelectedPackHomeActions(selectedProfile, latestRelease, {
     canRepair: selectedPackCanRepair,
     launchBlocked: selectedRuntimeBlocked,
@@ -644,7 +660,7 @@ export function HomePage() {
           }
         : {
             status: minecraftReady ? 'healthy' : 'warning',
-            detail: readiness?.minecraftLauncher.warnings.join(' ') || 'Minecraft Launcher profile is ready.',
+            detail: selectedReadiness?.minecraftLauncher.warnings.join(' ') || 'Minecraft Launcher profile is ready.',
           }
   const officialRuntimeState = getOfficialServerRuntimeState(officialStatus, officialStatusLoading, officialStatusError)
   const officialRuntimeLabel = officialRuntimeState === 'online' ? 'Online' : officialRuntimeState === 'unavailable' ? 'Unavailable' : officialRuntimeState === 'offline' ? 'Offline' : 'Checking'
@@ -726,23 +742,23 @@ export function HomePage() {
       title: latestRelease?.version ? `Approved ${latestRelease.version}` : 'No approved release loaded',
       detail: latestRelease?.manifestSha256
         ? 'Install package includes verified checksum metadata.'
-        : selectedProfile.manifestPath || readiness?.install.manifestPath
+        : selectedProfile.manifestPath
           ? 'Local manifest is available for repair or reinstall while the Catalog gate is unresolved.'
           : 'Refresh the Catalog or open Library for release diagnostics.',
-      status: latestRelease?.version ? 'healthy' : selectedProfile.manifestPath || readiness?.install.manifestPath ? 'operational' : 'warning',
+      status: latestRelease?.version ? 'healthy' : selectedProfile.manifestPath ? 'operational' : 'warning',
       actionLabel: 'Library',
       action: openLibrary,
     },
     {
       id: 'install',
       label: 'Install',
-      title: readiness?.install.installed ? 'Installed' : 'Not installed yet',
-      detail: readiness?.install.installed
-        ? readiness.install.installPath ?? selectedProfile.installPath ?? 'Install path ready.'
+      title: selectedReadiness?.install.installed ? 'Installed' : 'Not installed yet',
+      detail: selectedReadiness?.install.installed
+        ? selectedReadiness.install.installPath ?? selectedProfile.installPath ?? 'Install path ready.'
         : 'Use the primary action to install this pack.',
-      status: readiness?.install.installed ? 'healthy' : 'missing',
-      actionLabel: readiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? 'Repair' : undefined) : 'Library',
-      action: readiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? repairSelectedPack : undefined) : openLibrary,
+      status: selectedReadiness?.install.installed ? 'healthy' : 'missing',
+      actionLabel: selectedReadiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? 'Repair' : undefined) : 'Library',
+      action: selectedReadiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? repairSelectedPack : undefined) : openLibrary,
     },
     {
       id: 'route',

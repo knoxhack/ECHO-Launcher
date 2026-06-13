@@ -361,6 +361,7 @@ function startPolling(get: () => CommunityChatStore) {
   clearPollTimer()
   if (!activeOfficialChatRequest?.communityApiUrl) return
   pollTimer = globalThis.setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
     void get().refreshOfficialChat(false)
   }, OFFICIAL_CHAT_POLL_INTERVAL_MS) as unknown as number
 }

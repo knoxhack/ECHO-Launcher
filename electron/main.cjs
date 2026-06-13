@@ -55,6 +55,7 @@ const {
   minecraftLauncherRootsForPlatform,
 } = require('./platform-support.cjs')
 const {
+  assertSelectedManifestPack,
   normalizeOfficialPackId,
   canonicalArtifactRecords,
   artifactForPackTarget,
@@ -360,10 +361,47 @@ function defaultChannelForPack(pack) {
   return profileDefinition(normalized ?? CANONICAL_PROFILE_ID).channel ?? CANONICAL_CHANNEL
 }
 
-
 function profileDefinition(profileId) {
   const normalized = normalizeOfficialPackId(profileId) ?? CANONICAL_PROFILE_ID
   return ASHFALL_PROFILE_DEFINITIONS.find((definition) => definition.id === normalized) ?? ASHFALL_PROFILE_DEFINITIONS[0]
+}
+
+function officialPackDisplayName(pack) {
+  const normalized = normalizeOfficialPackId(pack)
+  if (!normalized) return String(pack ?? 'unknown pack')
+  return profileDefinition(normalized).name ?? normalized
+}
+
+function manifestPackId(manifest) {
+  return normalizeOfficialPackId(manifest?.pack ?? manifest?.id)
+}
+
+function assertManifestMatchesSelectedPack(manifest, selectedPack) {
+  return assertSelectedManifestPack(manifest, selectedPack, { displayName: officialPackDisplayName })
+}
+
+function validateSelectedPackManifest(manifest, selectedPack, options = {}) {
+  assertManifestMatchesSelectedPack(manifest, selectedPack)
+  const validated = validatePackManifest(manifest, options)
+  return assertManifestMatchesSelectedPack(validated, selectedPack)
+}
+
+function selectLauncherProfile(profiles = [], payload = {}, fallbackToFirst = true) {
+  const requestedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack)
+  if ((payload.profileId || payload.pack) && !requestedPack) {
+    throw new Error(`Unknown official pack profile: ${payload.profileId ?? payload.pack}.`)
+  }
+  if (requestedPack) {
+    const profile = profiles.find((item) => item.id === requestedPack)
+    if (!profile) throw new Error(`Selected profile not found: ${officialPackDisplayName(requestedPack)}.`)
+    return profile
+  }
+  return fallbackToFirst ? profiles[0] : undefined
+}
+
+function moduleCountFromManifest(manifest, fallback) {
+  const requirements = manifest?.moduleRequirements ?? manifest?.requiredModules ?? manifest?.modules
+  return Array.isArray(requirements) ? requirements.length : fallback
 }
 
 function manifestRequiresNeoForge(manifest) {
@@ -1401,7 +1439,18 @@ async function readInstalledProfileManifest(installPath, expectedPackId) {
   return {
     installPath: normalizedInstallPath,
     manifestPath,
-    manifest,
+    manifest: { ...manifest, pack: packId ?? manifest.pack },
+  }
+}
+
+async function readProfileManifestForProfile(manifestPath, expectedPackId) {
+  if (!manifestPath) return null
+  try {
+    const raw = await readJson(normalizePath(manifestPath), null)
+    if (!raw) return null
+    return validateSelectedPackManifest(raw, expectedPackId, { allowLocalPlaceholders: false })
+  } catch {
+    return null
   }
 }
 
@@ -1434,6 +1483,9 @@ async function selectProfileInstallPath(paths, profiles = [], baseProfile) {
   }
 
   if (source.installPath && !isLegacyPrivateInstancePath(paths, source.installPath)) {
+    const sourceInstalled = await readInstalledProfileManifest(source.installPath)
+    const sourcePack = manifestPackId(sourceInstalled?.manifest)
+    if (sourcePack && sourcePack !== baseProfile.id) return normalizePath(defaultInstallPath)
     return normalizePath(source.installPath)
   }
 
@@ -1453,9 +1505,13 @@ async function normalizeProfileList(paths, profiles = []) {
       : null
     const source = preferred ?? legacy ?? named ?? {}
     const installPath = await selectProfileInstallPath(paths, profiles, base)
-    const installed = await readInstalledProfileManifest(installPath, base.id)
+    const installedAny = await readInstalledProfileManifest(installPath)
+    const installed = installedAny && manifestPackId(installedAny.manifest) === base.id ? installedAny : null
     const installedManifestPath = installed?.manifestPath ?? path.join(installPath, '.echo', 'installed-manifest.json')
     const installedManifest = installed?.manifest ?? null
+    const sourceManifest = await readProfileManifestForProfile(source.manifestPath, base.id)
+    const hasMismatchedInstalledManifest = Boolean(installedAny?.manifest && manifestPackId(installedAny.manifest) !== base.id)
+    const hasRejectedSourceManifest = Boolean(source.manifestPath && !sourceManifest && !installedManifest)
     normalized.push({
       ...base,
       ramGb: Number(source.ramGb ?? base.ramGb),
@@ -1463,16 +1519,16 @@ async function normalizeProfileList(paths, profiles = []) {
       playtime: source.playtime ?? base.playtime,
       enabledAddons: Array.isArray(source.enabledAddons) && source.enabledAddons.length ? source.enabledAddons : base.enabledAddons,
       installPath,
-      manifestPath: installedManifest ? installedManifestPath : source.manifestPath ?? base.manifestPath,
-      version: installedManifest?.version ?? source.version ?? base.version,
-      minecraft: installedManifest ? minecraftVersionFromManifest(installedManifest) : source.minecraft ?? base.minecraft,
-      neoforge: installedManifest?.loader?.version ?? source.neoforge ?? base.neoforge,
-      moduleCount: Array.isArray(installedManifest?.modules) ? installedManifest.modules.length : source.moduleCount ?? base.moduleCount,
-      status: installedManifest ? 'healthy' : source.status ?? base.status,
+      manifestPath: installedManifest ? installedManifestPath : sourceManifest ? normalizePath(source.manifestPath) : base.manifestPath,
+      version: installedManifest?.version ?? sourceManifest?.version ?? base.version,
+      minecraft: installedManifest ? minecraftVersionFromManifest(installedManifest) : sourceManifest ? minecraftVersionFromManifest(sourceManifest) : base.minecraft,
+      neoforge: installedManifest?.loader?.version ?? sourceManifest?.loader?.version ?? base.neoforge,
+      moduleCount: moduleCountFromManifest(installedManifest, moduleCountFromManifest(sourceManifest, base.moduleCount)),
+      status: installedManifest ? 'healthy' : hasMismatchedInstalledManifest || hasRejectedSourceManifest ? 'warning' : source.status && source.status !== 'healthy' ? source.status : base.status,
       id: base.id,
       name: base.name,
       runtimeMode: base.runtimeMode,
-      channel: CANONICAL_CHANNEL,
+      channel: base.channel ?? CANONICAL_CHANNEL,
       channelLabel: base.channelLabel,
     })
   }
@@ -1548,7 +1604,7 @@ async function profileSave(profile) {
     id: base.id,
     name: base.name,
     runtimeMode: base.runtimeMode,
-    channel: CANONICAL_CHANNEL,
+    channel: base.channel ?? CANONICAL_CHANNEL,
     channelLabel: base.channelLabel,
   }
   const next = current.map((item) => (item.id === nextProfile.id ? nextProfile : item))
@@ -1658,27 +1714,29 @@ async function profileDuplicate(profileId) {
 }
 
 async function manifestLoad(payload = {}) {
+  const selectedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack)
   if (payload.manifestPath) {
     const manifestPath = normalizePath(payload.manifestPath)
     const manifest = await readJson(manifestPath, null)
     if (!manifest) {
       throw new Error(`Pack manifest was not found at ${manifestPath}. Install or refresh the latest approved Catalog release.`)
     }
-    return validatePackManifest(manifest, { allowLocalPlaceholders: false })
+    return validateSelectedPackManifest(manifest, selectedPack, { allowLocalPlaceholders: false })
   }
   const fetched = await releaseFetchManifest({
     channel: payload.channel ?? CANONICAL_CHANNEL,
     version: payload.version,
     refresh: payload.refresh ?? false,
-    pack: payload.pack,
+    pack: selectedPack ?? payload.pack,
   })
-  return fetched.manifest
+  return assertManifestMatchesSelectedPack(fetched.manifest, selectedPack)
 }
 
 async function manifestImport(payload = {}) {
   if (!payload.filePath) throw new Error('Manifest file path is required.')
   const sourcePath = normalizePath(payload.filePath)
-  const manifest = validatePackManifest(await readJson(sourcePath, null), { allowLocalPlaceholders: false })
+  const selectedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack)
+  const manifest = validateSelectedPackManifest(await readJson(sourcePath, null), selectedPack, { allowLocalPlaceholders: false })
   const paths = getPaths()
   const safeVersion = String(manifest.version).replace(/[^a-z0-9.-]/gi, '-')
   const destination = path.join(paths.manifests, `${manifest.pack}-${manifest.channel}-${safeVersion}.json`)
@@ -1911,10 +1969,18 @@ function relativeRuntimePath(target) {
 }
 
 async function verifyManifest(payload = {}) {
-  const profiles = payload.installPath ? [] : await profileList().catch(() => [])
-  const profile = profiles.find((item) => item.id === payload.profileId) ?? profiles[0]
-  const manifest = payload.manifest ?? (await manifestLoad({ ...payload, pack: payload.pack ?? profile?.id }))
-  const installPath = normalizePath(payload.installPath ?? profile?.installPath ?? manifest.localInstallRoot ?? defaultAshfallInstallPath(getPaths()))
+  const profiles = await profileList().catch(() => [])
+  const profile = selectLauncherProfile(profiles, payload, !payload.installPath)
+  const selectedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack ?? profile?.id ?? payload.manifest?.pack)
+  const manifest = payload.manifest
+    ? validateSelectedPackManifest(payload.manifest, selectedPack)
+    : await manifestLoad({ ...payload, pack: selectedPack ?? payload.pack })
+  const installPath = normalizePath(
+    payload.installPath ??
+      profile?.installPath ??
+      manifest.localInstallRoot ??
+      defaultInstallPathForProfile(getPaths(), selectedPack ?? CANONICAL_PROFILE_ID),
+  )
   const results = []
   const files = manifest.files ?? []
   const onProgress = typeof payload.onProgress === 'function' ? payload.onProgress : null
@@ -3843,11 +3909,13 @@ async function deleteReleaseAssetsByName(owner, repo, token, release, names) {
 }
 
 async function resolveInstallManifest(payload, profile) {
-  if (payload.manifest) return validatePackManifest(payload.manifest)
-  if (payload.manifestPath) return manifestLoad(payload)
-  const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(payload.pack ?? profile?.id)
-  const fetched = await releaseFetchManifest({ channel, version: payload.version, refresh: payload.refresh ?? true, pack: payload.pack ?? profile?.id })
-  return fetched.manifest
+  const selectedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack ?? profile?.id)
+  if (!selectedPack) throw new Error('Selected official pack profile is required.')
+  if (payload.manifest) return validateSelectedPackManifest(payload.manifest, selectedPack)
+  if (payload.manifestPath) return manifestLoad({ ...payload, pack: selectedPack })
+  const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(selectedPack)
+  const fetched = await releaseFetchManifest({ channel, version: payload.version, refresh: payload.refresh ?? true, pack: selectedPack })
+  return assertManifestMatchesSelectedPack(fetched.manifest, selectedPack)
 }
 
 function legacyZipAssetForEntry(entry) {
@@ -4248,9 +4316,15 @@ function launchState(status = 'idle', message = 'Minecraft is not running.') {
 
 async function resolveProfileAndManifest(payload = {}) {
   const profiles = await profileList()
-  const profile = profiles.find((item) => item.id === payload.profileId) ?? profiles[0]
+  const profile = selectLauncherProfile(profiles, payload, true)
   if (!profile) throw new Error('No launcher profile is available.')
-  const manifest = payload.manifest ?? (await manifestLoad({ manifestPath: payload.manifestPath ?? profile.manifestPath, pack: profile.id }))
+  const manifest = payload.manifest
+    ? validateSelectedPackManifest(payload.manifest, profile.id)
+    : await manifestLoad({
+        ...payload,
+        manifestPath: payload.manifestPath ?? profile.manifestPath,
+        pack: profile.id,
+      })
   const installPath = normalizePath(payload.installPath ?? profile.installPath ?? manifest.localInstallRoot)
   return { profile, manifest, installPath }
 }
@@ -4300,8 +4374,26 @@ function minecraftLauncherVersionId(manifest, runtimeMode) {
   return manifest.loader?.minecraftLauncherVersionId ?? `neoforge-${manifest.loader?.version ?? 'unknown'}`
 }
 
+let reservedEchoMinecraftProfileIdsCache = null
+
+function reservedEchoMinecraftProfileIds() {
+  if (!reservedEchoMinecraftProfileIdsCache) {
+    reservedEchoMinecraftProfileIdsCache = new Set([
+      minecraftLauncherProfileId(LEGACY_ASHFALL_PROFILE_ID),
+      minecraftLauncherProfileId(LEGACY_ASHFALL_PROFILE_ID, 'native-loader-minecraft'),
+      minecraftLauncherProfileId('ashfall-neoforge'),
+      minecraftLauncherProfileId('ashfall-neoforge', 'native-loader-minecraft'),
+    ])
+    for (const packId of OFFICIAL_PACK_IDS) {
+      reservedEchoMinecraftProfileIdsCache.add(minecraftLauncherProfileId(packId, 'neoforge-minecraft'))
+      reservedEchoMinecraftProfileIdsCache.add(minecraftLauncherProfileId(packId, 'native-loader-minecraft'))
+    }
+  }
+  return reservedEchoMinecraftProfileIdsCache
+}
+
 function isReservedEchoMinecraftProfileId(profileId) {
-  return profileId === minecraftLauncherProfileId(CANONICAL_PROFILE_ID) || profileId === minecraftLauncherProfileId(LEGACY_ASHFALL_PROFILE_ID)
+  return reservedEchoMinecraftProfileIds().has(String(profileId ?? ''))
 }
 
 function isEchoManagedMinecraftProfile(profile, profileId) {
@@ -4368,7 +4460,7 @@ function cleanupConflictingMinecraftLauncherProfiles(document, profileId, versio
       continue
     }
 
-    warnings.push(`Another Minecraft Launcher profile '${label}' uses ${versionId} without the Ashfall game directory. ECHO left it untouched.`)
+    warnings.push(`Another Minecraft Launcher profile '${label}' uses ${versionId} with a different game directory. ECHO left it untouched.`)
   }
 
   return { removedProfiles, warnings }
@@ -5544,7 +5636,7 @@ async function launchPrepareHandoff(payload = {}) {
     kind: 'handoff',
     status: 'running',
     phaseId: 'release',
-    label: 'Checking Ashfall install',
+    label: `Checking ${officialPackDisplayName(payload.profileId ?? CANONICAL_PROFILE_ID)} install`,
     progress: 4,
     message: '',
   })
@@ -5592,18 +5684,18 @@ async function launchPrepareHandoff(payload = {}) {
 
     if (updatePolicy === 'skip') {
       const profiles = await profileList()
-      const profile = profiles.find((item) => item.id === (payload.profileId ?? CANONICAL_PROFILE_ID)) ?? profiles[0]
+      const profile = selectLauncherProfile(profiles, payload, true)
       if (!profile) throw new Error('No launcher profile is available.')
-      const installPath = normalizePath(payload.installPath ?? profile.installPath ?? defaultAshfallInstallPath(getPaths()))
+      const installPath = normalizePath(payload.installPath ?? profile.installPath ?? defaultInstallPathForProfile(getPaths(), profile.id))
       const installed = await readInstalledProfileManifest(installPath, profile.id)
       if (!installed?.manifest) {
-        const message = 'Ashfall is not installed yet. Install Ashfall before using Play.'
-        phases.push(phaseSnapshot('check', 'Check installed Ashfall files', 'failed', { message }))
+        const message = `${profile.name} is not installed yet. Install ${profile.name} before using Play.`
+        phases.push(phaseSnapshot('check', `Check installed ${profile.name} files`, 'failed', { message }))
         updateOperationStatus(operationId, {
           kind: 'handoff',
           status: 'failed',
           phaseId: 'check',
-          label: 'Ashfall install required',
+          label: `${profile.name} install required`,
           progress: 96,
           message,
         })
@@ -5625,8 +5717,9 @@ async function launchPrepareHandoff(payload = {}) {
       }
 
       const manifest = installed.manifest
-      const verification = await runPhase('check', 'Check installed Ashfall files', 12, () =>
+      const verification = await runPhase('check', `Check installed ${profile.name} files`, 12, () =>
         verifyManifest({
+          profileId: profile.id,
           manifest,
           installPath: installed.installPath,
           onProgress: (progress) => {
@@ -5673,9 +5766,9 @@ async function launchPrepareHandoff(payload = {}) {
         kind: 'handoff',
         status: 'running',
         phaseId: 'check',
-        label: 'Ashfall already installed',
+        label: `${profile.name} already installed`,
         progress: 86,
-        message: `${verification.valid.length} files verified locally. No Ashfall update was applied.`,
+        message: `${verification.valid.length} files verified locally. No ${profile.name} update was applied.`,
       })
       const install = await createVerifiedInstallReport(profile, manifest, installed.installPath, verification)
       const handoff = await runPhase('handoff', `Prepare ${runtimeLabel} profile`, 95, () =>
@@ -5716,9 +5809,9 @@ async function launchPrepareHandoff(payload = {}) {
     }
 
     const { profile } = await resolveProfileAndManifest({ ...payload, profileId: payload.profileId ?? CANONICAL_PROFILE_ID })
-    const release = await runPhase('release', 'Refresh Ashfall release metadata', 8, () =>
+    const release = await runPhase('release', `Refresh ${profile.name} release metadata`, 8, () =>
       releaseFetchManifest({
-        channel: CANONICAL_CHANNEL,
+        channel: profile.channel ?? CANONICAL_CHANNEL,
         version: payload.version,
         refresh: payload.refreshRelease,
         pack: profile.id,
@@ -5732,8 +5825,9 @@ async function launchPrepareHandoff(payload = {}) {
     let verification = null
 
     if (installed && installedVersion === releaseVersion) {
-      verification = await runPhase('check', 'Check installed Ashfall files', 12, () =>
+      verification = await runPhase('check', `Check installed ${profile.name} files`, 12, () =>
         verifyManifest({
+          profileId: profile.id,
           manifest: release.manifest,
           installPath,
           onProgress: (progress) => {
@@ -5754,9 +5848,9 @@ async function launchPrepareHandoff(payload = {}) {
           kind: 'handoff',
           status: 'running',
           phaseId: 'check',
-          label: 'Ashfall already installed',
+          label: `${profile.name} already installed`,
           progress: 86,
-          message: `${verification.valid.length} files verified locally. No Ashfall archive download needed.`,
+          message: `${verification.valid.length} files verified locally. No ${profile.name} archive download needed.`,
         })
         install = await createVerifiedInstallReport(profile, release.manifest, installPath, verification)
       }
@@ -5767,16 +5861,16 @@ async function launchPrepareHandoff(payload = {}) {
         'install',
         installed
           ? installedVersion === releaseVersion
-            ? 'Repair Ashfall files'
-            : 'Update Ashfall files'
-          : 'Install Ashfall files',
+            ? `Repair ${profile.name} files`
+            : `Update ${profile.name} files`
+          : `Install ${profile.name} files`,
         18,
         () =>
           installRun({
             profileId: profile.id,
             installPath,
             manifestPath: release.manifestPath,
-            channel: CANONICAL_CHANNEL,
+            channel: profile.channel ?? CANONICAL_CHANNEL,
             version: release.entry.version,
             installRuntime: false,
             operationId,
@@ -6064,7 +6158,7 @@ async function packExport(payload = {}) {
     outputDir,
     outputPath,
     version,
-    channel: CANONICAL_CHANNEL,
+    channel: profile.channel ?? manifest.channel ?? CANONICAL_CHANNEL,
     manifest,
     extraIncludePaths: Array.isArray(payload.extraIncludePaths) ? payload.extraIncludePaths : [],
     changelog: Array.isArray(payload.changelog) ? payload.changelog : undefined,
@@ -6602,7 +6696,7 @@ async function repairZipPackArtifact(payload, profile, manifest) {
 async function repairRun(payload = {}) {
   const paths = getPaths()
   const profiles = await profileList()
-  const profile = profiles.find((item) => item.id === payload.profileId) ?? profiles[0]
+  const profile = selectLauncherProfile(profiles, payload, true)
   const manifest = await resolveInstallManifest(payload, profile)
   if (manifest.artifactMode === 'zip') {
     return repairZipPackArtifact(payload, profile, manifest)
@@ -6712,7 +6806,7 @@ async function installRun(payload = {}) {
   }
   const paths = getPaths()
   const profiles = await profileList()
-  const profile = profiles.find((item) => item.id === payload.profileId) ?? profiles[0]
+  const profile = selectLauncherProfile(profiles, payload, true)
   if (!payload.manifest && !payload.manifestPath) {
     const entry = await resolveReleaseEntry({ ...payload, refresh: payload.refresh ?? true }, profile)
     if (entry.trust !== 'verified-metadata') {
@@ -7197,13 +7291,14 @@ function loadAppIcon() {
   return icon.isEmpty() ? undefined : icon
 }
 
-async function appReadiness() {
+async function appReadiness(payload = {}) {
   await seedDesktopData()
   const settings = await readSettings()
   const profiles = await profileList()
-  const profile = profiles[0]
+  const profile = selectLauncherProfile(profiles, payload, true)
   const installPath = profile?.installPath ? normalizePath(profile.installPath) : undefined
-  const installed = Boolean(installPath && (await readInstalledProfileManifest(installPath)))
+  const installedManifest = installPath ? await readInstalledProfileManifest(installPath, profile?.id) : null
+  const installed = Boolean(installedManifest)
   const logs = await logsRead({ installPath }).catch(() => ({ files: [], latest: '' }))
   let catalog = {
     configured: true,
@@ -7242,12 +7337,12 @@ async function appReadiness() {
   const packOs = await readPackOsStateForSettings(settings).catch((error) =>
     unknownPackOsState({
       generatedAt: isoNow(),
-      selectedPackId: CANONICAL_PROFILE_ID,
+      selectedPackId: profile?.id ?? CANONICAL_PROFILE_ID,
       warnings: [error instanceof Error ? error.message : String(error)],
     }),
   )
   const warnings = [
-    ...(installed ? [] : ['Ashfall is not installed yet.']),
+    ...(installed ? [] : [`${profile?.name ?? 'Selected pack'} is not installed yet.`]),
     ...(catalog.ok ? [] : catalog.warnings),
     ...(minecraftLauncher.ok ? [] : minecraftLauncher.warnings ?? []),
     ...(packOs.warnings ?? []),
@@ -7262,8 +7357,8 @@ async function appReadiness() {
       installed,
       status: profile?.status ?? 'missing',
       installPath,
-      manifestPath: profile?.manifestPath,
-      version: profile?.version,
+      manifestPath: installedManifest?.manifestPath ?? profile?.manifestPath,
+      version: installedManifest?.manifest?.version ?? profile?.version,
     },
     catalog,
     minecraftLauncher,

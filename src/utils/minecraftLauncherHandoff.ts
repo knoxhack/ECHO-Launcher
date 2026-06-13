@@ -89,8 +89,34 @@ export function echoMinecraftLauncherProfileId(profileId: string, runtimeMode: '
   return runtimeMode === 'native-loader-minecraft' && !baseId.endsWith('-native-loader') ? `${baseId}-native-loader` : baseId
 }
 
+const officialEchoProfileIds = [
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'sky-relay-native-edition',
+  'sky-relay-neoforge-edition',
+  'sky-relay-standalone-edition',
+  'openlands-native-edition',
+  'openlands-neoforge-edition',
+  'openlands-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
+]
+
+const reservedEchoMinecraftProfileKeys = new Set([
+  echoMinecraftLauncherProfileId('ashfall'),
+  echoMinecraftLauncherProfileId('ashfall', 'native-loader-minecraft'),
+  echoMinecraftLauncherProfileId('ashfall-neoforge'),
+  echoMinecraftLauncherProfileId('ashfall-neoforge', 'native-loader-minecraft'),
+  ...officialEchoProfileIds.flatMap((profileId) => [
+    echoMinecraftLauncherProfileId(profileId),
+    echoMinecraftLauncherProfileId(profileId, 'native-loader-minecraft'),
+  ]),
+])
+
 export function isReservedEchoMinecraftProfileKey(profileKey?: string) {
-  return profileKey === echoMinecraftLauncherProfileId('ashfall-neoforge') || profileKey === echoMinecraftLauncherProfileId('ashfall')
+  return reservedEchoMinecraftProfileKeys.has(profileKey ?? '')
 }
 
 export function deriveMinecraftLauncherVersionId(loaderVersion: string, explicitVersionId?: string) {
@@ -181,7 +207,7 @@ export function cleanupConflictingNeoForgeLauncherProfiles(
       continue
     }
 
-    warnings.push(`Another Minecraft Launcher profile '${label}' uses ${input.minecraftVersionId} without the Ashfall game directory. ECHO left it untouched.`)
+    warnings.push(`Another Minecraft Launcher profile '${label}' uses ${input.minecraftVersionId} with a different game directory. ECHO left it untouched.`)
   }
 
   return {

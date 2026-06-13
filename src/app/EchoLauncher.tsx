@@ -120,7 +120,7 @@ export function EchoLauncher() {
               addToast('Launcher update available', launcherUpdatePrimaryDetail(updateState), 'info')
             }
           })
-          void refreshReadiness()
+          void refreshReadiness(useLauncherStore.getState().selectedProfileId)
         })
       })
       .catch((error: unknown) => {
@@ -138,6 +138,7 @@ export function EchoLauncher() {
   useEffect(() => {
     if (!isNativeAvailable() || !launcherUpdate || !['checking', 'downloading'].includes(launcherUpdate.status)) return
     const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       void refreshLauncherUpdate()
     }, 1500)
     return () => window.clearInterval(id)

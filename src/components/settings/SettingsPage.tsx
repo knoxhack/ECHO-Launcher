@@ -61,6 +61,7 @@ const presetLabels: { id: PerformancePreset; label: string }[] = [
 
 export function SettingsPage() {
   const addToast = useLauncherStore((state) => state.addToast)
+  const selectedProfileId = useLauncherStore((state) => state.selectedProfileId)
   const launcherUpdate = useLauncherUpdateStore((state) => state.state)
   const launcherUpdateLoading = useLauncherUpdateStore((state) => state.loading)
   const refreshLauncherUpdate = useLauncherUpdateStore((state) => state.refresh)
@@ -99,7 +100,7 @@ export function SettingsPage() {
       invokeNative('paths:get'),
       releaseService.getSettings(),
       refreshLauncherUpdate(),
-      invokeNative('app:get-readiness'),
+      invokeNative('app:get-readiness', { profileId: selectedProfileId }),
       invokeNative('mobile-bridge:get-state'),
     ])
       .then(([paths, desktopSettings, , readinessState, mobileBridgeState]) => {
@@ -121,7 +122,7 @@ export function SettingsPage() {
         setChatNotifications(desktopSettings.chatNotifications)
       })
       .catch((error: unknown) => addToast('Unable to read desktop settings', error instanceof Error ? error.message : 'Desktop settings lookup failed.', 'warning'))
-  }, [addToast, refreshLauncherUpdate, setDesktopSettings])
+  }, [addToast, refreshLauncherUpdate, selectedProfileId, setDesktopSettings])
 
   useEffect(() => {
     if (isNativeAvailable()) return
@@ -513,7 +514,7 @@ export function SettingsPage() {
     }
     try {
       const dependency = await invokeNative('minecraft-launcher:ensure-dependency')
-      const nextReadiness = await invokeNative('app:get-readiness')
+      const nextReadiness = await invokeNative('app:get-readiness', { profileId: selectedProfileId })
       setReadiness(nextReadiness)
       addToast(
         dependency.ok ? 'Minecraft Launcher dependency ready' : 'Minecraft Launcher installer started',

@@ -88,7 +88,7 @@ export function TopBar() {
         <CyberButton
           icon={Cloud}
           onClick={async () => {
-            const next = await refreshReadiness()
+            const next = await refreshReadiness(selectedProfile.id)
             if (!next) {
               addToast('Readiness unavailable', 'Native filesystem actions are available in the desktop app.', 'warning')
               return

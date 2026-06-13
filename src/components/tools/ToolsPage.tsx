@@ -166,7 +166,8 @@ export function ToolsPage() {
           },
     [logEntries],
   )
-  const readinessWarnings = readiness?.warnings.length ?? 0
+  const selectedReadiness = readiness?.profile?.id === selectedProfile.id ? readiness : null
+  const readinessWarnings = selectedReadiness?.warnings.length ?? 0
   const selectedPackOs = selectedPackOsPack(packOs, selectedProfileId)
   const packOsCommands = packOsSafeCommands(packOs, selectedPackOs)
   const runtimeChecks = [
@@ -178,27 +179,27 @@ export function ToolsPage() {
     },
     {
       id: 'install',
-      name: 'Ashfall Install',
-      status: readiness?.install.installed ? 'healthy' : 'warning',
-      detail: readiness?.install.installed ? `Installed at ${readiness.install.installPath}` : 'Ashfall is not installed yet.',
+      name: `${selectedProfile.name} Install`,
+      status: selectedReadiness?.install.installed ? 'healthy' : 'warning',
+      detail: selectedReadiness?.install.installed ? `Installed at ${selectedReadiness.install.installPath}` : `${selectedProfile.name} is not installed yet.`,
     },
     {
       id: 'release',
       name: 'Catalog',
-      status: readiness?.catalog.ok ? 'healthy' : 'warning',
-      detail: readiness?.catalog.warnings.join(' ') || `${readiness?.catalog.releases ?? 0} approved releases loaded.`,
+      status: selectedReadiness?.catalog.ok ? 'healthy' : 'warning',
+      detail: selectedReadiness?.catalog.warnings.join(' ') || `${selectedReadiness?.catalog.releases ?? 0} approved releases loaded.`,
     },
     {
       id: 'launcher-profile',
       name: 'Minecraft Launcher Profile',
-      status: readiness?.minecraftLauncher.ok ? 'healthy' : 'warning',
-      detail: readiness?.minecraftLauncher.warnings.join(' ') || 'Handoff profile is ready.',
+      status: selectedReadiness?.minecraftLauncher.ok ? 'healthy' : 'warning',
+      detail: selectedReadiness?.minecraftLauncher.warnings.join(' ') || 'Handoff profile is ready.',
     },
     {
       id: 'logs',
       name: 'Logs',
-      status: readiness?.logs.available ? 'healthy' : 'warning',
-      detail: readiness?.logs.available ? `${readiness.logs.count} log files available.` : 'No launcher or install logs found yet.',
+      status: selectedReadiness?.logs.available ? 'healthy' : 'warning',
+      detail: selectedReadiness?.logs.available ? `${selectedReadiness.logs.count} log files available.` : 'No launcher or install logs found yet.',
     },
   ] as const
   const resolvedExportVersion = exportVersion.trim() || selectedProfile?.version || fallbackExportVersion
@@ -206,7 +207,7 @@ export function ToolsPage() {
   const resolvedExportPath = exportOutputDir ? joinOutputPath(exportOutputDir, resolvedExportFileName) : resolvedExportFileName
 
   useEffect(() => {
-    void refreshReadiness()
+    void refreshReadiness(selectedProfile.id)
     void refreshPackOs()
     logAnalyzer
       .readLatestLogs(selectedProfile.installPath)
@@ -214,7 +215,7 @@ export function ToolsPage() {
         if (entries.length > 0) setLogEntries(entries)
       })
       .catch((error: unknown) => addToast('Log read failed', error instanceof Error ? error.message : 'Unable to read local logs.', 'warning'))
-  }, [addToast, refreshPackOs, refreshReadiness, selectedProfile.installPath])
+  }, [addToast, refreshPackOs, refreshReadiness, selectedProfile.id, selectedProfile.installPath])
 
   useEffect(() => {
     let disposed = false
@@ -230,13 +231,17 @@ export function ToolsPage() {
 
   useEffect(() => {
     if (!repairActive) return
-    const timer = window.setInterval(tickRepair, 400)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') tickRepair()
+    }, 400)
     return () => window.clearInterval(timer)
   }, [repairActive, tickRepair])
 
   useEffect(() => {
     if (!verifyActive) return
-    const timer = window.setInterval(tickVerification, 360)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') tickVerification()
+    }, 360)
     return () => window.clearInterval(timer)
   }, [tickVerification, verifyActive])
 
@@ -247,6 +252,7 @@ export function ToolsPage() {
       const result = await repairService.runRepair({
         profileId: selectedProfile.id,
         installPath: selectedProfile.installPath,
+        manifestPath: selectedProfile.manifestPath,
         backupConfigs: true,
         channel: selectedProfile.channel,
       })
@@ -260,7 +266,7 @@ export function ToolsPage() {
         currentFile: result.skipped[0]?.path ?? result.repaired[0] ?? 'repair report complete',
       })
       addToast(
-        result.ok ? 'Repair install complete' : 'Repair completed with unresolved files',
+        result.ok ? (result.after.missing.length || result.after.corrupt.length ? 'Files repaired, launch still needs attention' : 'Repair install complete') : 'Repair completed with unresolved files',
         result.ok
           ? `Repaired ${result.repaired.length} files. Report: ${result.reportPath}`
           : `${result.after.missing.length + result.after.corrupt.length} files still need artifact URLs. Report: ${result.reportPath}`,
@@ -276,7 +282,11 @@ export function ToolsPage() {
     startVerification()
     addToast('Hash verification started', 'Scanning installed files against the selected manifest.', 'info')
     try {
-      const result = await invokeNative('manifest:verify', { installPath: selectedProfile.installPath })
+      const result = await invokeNative('manifest:verify', {
+        profileId: selectedProfile.id,
+        installPath: selectedProfile.installPath,
+        manifestPath: selectedProfile.manifestPath,
+      })
       setVerifyReport(result)
       finishVerification({
         scanned: result.scanned,
@@ -289,7 +299,7 @@ export function ToolsPage() {
         `${result.missing.length} missing and ${result.corrupt.length} corrupt files detected.`,
         result.missing.length || result.corrupt.length ? 'warning' : 'success',
       )
-      void refreshReadiness()
+      void refreshReadiness(selectedProfile.id)
     } catch (error) {
       finishVerification({ scanned: 0, total: 0, errors: 0, currentFile: 'verification failed' })
       addToast('Hash verification failed', error instanceof Error ? error.message : 'Unable to verify manifest files.', 'danger')
@@ -468,7 +478,7 @@ export function ToolsPage() {
         status.launcherExecutablePath ?? (status.launcherDependencyWarnings.join(' ') || 'Follow the official installer prompt, then retry Play.'),
         status.ok ? 'success' : 'warning',
       )
-      void refreshReadiness()
+      void refreshReadiness(selectedProfile.id)
     } catch (error) {
       addToast('Launcher dependency repair failed', error instanceof Error ? error.message : 'Unable to repair Minecraft Launcher dependency.', 'danger')
     }
@@ -523,19 +533,19 @@ export function ToolsPage() {
 
   return (
     <div className="space-y-6">
-      <GlassCard tone={readiness?.ok ? 'success' : 'amber'}>
+      <GlassCard tone={selectedReadiness?.ok ? 'success' : 'amber'}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase text-amber-echo">System Status</p>
-            <h2 className="mt-1 text-2xl font-semibold text-white">{readiness?.ok ? 'Ready' : 'Needs Attention'}</h2>
+            <h2 className="mt-1 text-2xl font-semibold text-white">{selectedReadiness?.ok ? 'Ready' : 'Needs Attention'}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-300">
-              {readiness?.warnings[0] ?? 'Ashfall install, Catalog, launcher profile, and logs are connected.'}
+              {selectedReadiness?.warnings[0] ?? `${selectedProfile.name} install, Catalog, launcher profile, and logs are connected.`}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <MetricCard icon={CheckCircle2} label="Installed" tone={readiness?.install.installed ? 'success' : 'amber'} value={readiness?.install.installed ? 'Yes' : 'No'} />
+            <MetricCard icon={CheckCircle2} label="Installed" tone={selectedReadiness?.install.installed ? 'success' : 'amber'} value={selectedReadiness?.install.installed ? 'Yes' : 'No'} />
             <MetricCard icon={FileWarning} label="Warnings" tone={readinessWarnings ? 'amber' : 'success'} value={`${readinessWarnings}`} />
-            <MetricCard icon={Bug} label="Logs" tone={readiness?.logs.available ? 'success' : 'amber'} value={`${readiness?.logs.count ?? 0}`} />
+            <MetricCard icon={Bug} label="Logs" tone={selectedReadiness?.logs.available ? 'success' : 'amber'} value={`${selectedReadiness?.logs.count ?? 0}`} />
           </div>
         </div>
       </GlassCard>
@@ -849,8 +859,8 @@ export function ToolsPage() {
                 <MetricCard icon={Bug} label="Errors" tone="danger" value={`${verifyReport?.corrupt.length ?? 0}`} />
               </div>
               <div className="mt-4 space-y-2 rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-4 text-sm">
-                <SummaryRow label="Generated" value={readiness?.generatedAt ? new Date(readiness.generatedAt).toLocaleString() : 'readiness not loaded'} />
-                <SummaryRow label="Catalog" value={readiness?.catalog.source ?? 'not loaded'} />
+                <SummaryRow label="Generated" value={selectedReadiness?.generatedAt ? new Date(selectedReadiness.generatedAt).toLocaleString() : 'readiness not loaded'} />
+                <SummaryRow label="Catalog" value={selectedReadiness?.catalog.source ?? 'not loaded'} />
                 <SummaryRow label="Install location" value={selectedProfile.installPath ?? 'not set'} />
                 <SummaryRow label="Profile" value={selectedProfile.name} />
               </div>

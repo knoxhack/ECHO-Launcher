@@ -103,11 +103,11 @@ export function getSelectedPackHomeActions(
   latestRelease: HomeActionRelease,
   options: AshfallHomeActionOptions = {},
 ): AshfallHomeActions {
-  const needsInstall = profile.status !== 'healthy' || !profile.installPath
+  const needsInstall = !profile.installPath || profile.status === 'missing' || profile.status === 'failed'
   const needsUpdate = !needsInstall && Boolean(latestRelease?.version && isNewerVersion(latestRelease.version, profile.version))
   const route = getAshfallHomeRoute(profile)
   const packName = options.packName ?? profile.name ?? 'Selected Pack'
-  const needsRepair = !needsInstall && !needsUpdate && Boolean(options.launchBlocked && options.canRepair)
+  const needsRepair = !needsInstall && !needsUpdate && profile.status === 'warning' && Boolean(options.canRepair)
   const primaryActionKind: AshfallHomeActionKind = needsInstall
     ? 'install'
     : needsUpdate

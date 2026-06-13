@@ -45,7 +45,9 @@ export function ServerPackPage() {
 
   useEffect(() => {
     if (!serverPackActive) return
-    const timer = window.setInterval(tickServerPack, 420)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') tickServerPack()
+    }, 420)
     return () => window.clearInterval(timer)
   }, [serverPackActive, tickServerPack])
 
