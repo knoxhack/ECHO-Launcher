@@ -103,6 +103,9 @@ const OFFICIAL_PACK_IDS = new Set([
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
+  'galactic-survey-native-edition',
+  'galactic-survey-neoforge-edition',
+  'galactic-survey-standalone-edition',
   'openlands-native-edition',
   'openlands-neoforge-edition',
   'openlands-standalone-edition',
@@ -169,6 +172,36 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     channel: 'alpha',
     channelLabel: 'Alpha',
     installFolder: 'Sky Relay Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'galactic-survey-native-edition',
+    name: 'Galactic Survey Native Edition',
+    runtimeMode: 'native-loader-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Draft',
+    installFolder: 'Galactic Survey Native Edition',
+    minecraft: '26.1.2',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'galactic-survey-neoforge-edition',
+    name: 'Galactic Survey NeoForge Edition',
+    runtimeMode: 'neoforge-minecraft',
+    channel: 'alpha',
+    channelLabel: 'Draft',
+    installFolder: 'Galactic Survey NeoForge Edition',
+    minecraft: '26.1.2',
+    neoforge: '26.1.2',
+  },
+  {
+    id: 'galactic-survey-standalone-edition',
+    name: 'Galactic Survey Standalone Edition',
+    runtimeMode: 'native-runtime',
+    channel: 'alpha',
+    channelLabel: 'Draft',
+    installFolder: 'Galactic Survey Standalone Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
@@ -1389,6 +1422,26 @@ function defaultProfiles(paths) {
     'echologisticsnetwork',
     'echoskyrelayprotocol',
   ]
+  const galacticSurveyEnabledAddons = [
+    'echocore',
+    'echoaddonapi',
+    'echoadaptercore',
+    'echonetcore',
+    'echoruntimeguard',
+    'echoterminal',
+    'echoindex',
+    'echolens',
+    'echoholomap',
+    'echomissioncore',
+    'echopowergrid',
+    'echologisticsnetwork',
+    'echoprogressioncore',
+    'echosoundcore',
+    'echogalacticcore',
+    'echoorbitalremnants',
+    'echovehiclecore',
+    'echogalacticsurveyprotocol',
+  ]
   const openlandsEnabledAddons = [
     'echocore',
     'echoadaptercore',
@@ -1425,6 +1478,7 @@ function defaultProfiles(paths) {
   ]
   const enabledAddonsForProfile = (id) => {
     if (String(id).startsWith('sky-relay-')) return skyRelayEnabledAddons
+    if (String(id).startsWith('galactic-survey-')) return galacticSurveyEnabledAddons
     if (String(id).startsWith('openlands-')) return openlandsEnabledAddons
     if (String(id).startsWith('arcana-division-')) return arcanaDivisionEnabledAddons
     return ashfallEnabledAddons
@@ -1493,7 +1547,7 @@ async function readInstalledProfileManifestState(installPath, expectedPackId) {
       message: `Selected manifest is for ${officialPackDisplayName(packId)}, not ${officialPackDisplayName(expected)}.`,
     }
   }
-  if (!packId && !/(ashfall|sky relay|sky-relay)/i.test(packName)) {
+  if (!packId && !/(ashfall|sky relay|sky-relay|galactic survey|galactic-survey)/i.test(packName)) {
     return {
       valid: false,
       code: 'unknownPack',

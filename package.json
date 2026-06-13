@@ -42,6 +42,7 @@
     "test:e2e:sky-relay-launcher": "node scripts/sky-relay-launcher-lifecycle-smoke.mjs",
     "test:e2e:galactic-survey-launcher": "node scripts/galactic-survey-launcher-lifecycle-smoke.mjs",
     "test:e2e:sky-relay-electron-ui": "node scripts/sky-relay-electron-ui-smoke.mjs --clean",
+    "test:e2e:galactic-survey-electron-ui": "node scripts/galactic-survey-electron-ui-smoke.mjs --clean",
     "preview": "vite preview"
   },
   "dependencies": {
