@@ -34,49 +34,10 @@ export function Sidebar() {
       </nav>
 
       <div className="space-y-3 p-3">
-        <div className="rounded-lg border border-cyan-echo/20 bg-cyan-echo/[0.045] p-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Ecosystem Status</p>
-          <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-white">
-            <span className="h-2 w-2 rounded-full bg-success-echo shadow-[0_0_12px_#5dffb3]" />
-            All Systems Operational
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-wide text-slate-400">
-            <div>
-              <p>API Uptime</p>
-              <p className="mt-1 font-mono text-success-echo">99.98%</p>
-            </div>
-            <div className="border-l border-cyan-echo/15 pl-2">
-              <p>ECHO Network</p>
-              <p className="mt-1 font-mono text-success-echo">Online</p>
-            </div>
-          </div>
-        </div>
         <div className="rounded-lg border border-cyan-echo/15 bg-black/25 p-3">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Next Community Event</p>
-          <p className="mt-1 text-sm font-semibold text-white">ECHO Devstream</p>
-          <p className="mt-1 text-xs text-slate-400">May 24, 2026 / 3:00 PM UTC</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 rounded-lg border border-cyan-echo/10 bg-black/20 p-2 font-mono text-[9px] uppercase tracking-wide text-slate-500">
-          <div>
-            <p>Node</p>
-            <p className="mt-1 text-cyan-soft">O7</p>
-          </div>
-          <div>
-            <p>Ping</p>
-            <p className="mt-1 text-success-echo">12ms</p>
-          </div>
-          <div>
-            <p>Mode</p>
-            <p className="mt-1 text-amber-echo">Beta</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-between px-1 text-cyan-soft/60">
-          <div className="flex gap-2">
-            <span className="h-8 w-8 rounded-lg border border-cyan-echo/15 bg-white/[0.04]" />
-            <span className="h-8 w-8 rounded-lg border border-cyan-echo/15 bg-white/[0.04]" />
-            <span className="h-8 w-8 rounded-lg border border-cyan-echo/15 bg-white/[0.04]" />
-          </div>
-          <span className="font-mono text-lg">&laquo;</span>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Launcher</p>
+          <p className="mt-1 text-sm font-semibold text-white">v1.1.0</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">Pack state, installs, repair, and diagnostics are selected-pack scoped.</p>
         </div>
       </div>
     </aside>

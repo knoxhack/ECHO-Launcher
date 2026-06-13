@@ -281,10 +281,12 @@ export function validatePackManifest(value: unknown): PackManifest {
   }
 
   const manifestPaths = new Set<string>()
+  const requiredPaths: string[] = []
   for (const file of manifest.files) {
     if (!isSafeRelativePath(file.path)) {
       throw new Error(`Unsafe manifest path: ${file.path}`)
     }
+    if (file.required !== false) requiredPaths.push(file.path.replace(/\\/g, '/'))
     const normalizedPath = file.path.replace(/\\/g, '/').toLowerCase()
     if (manifestPaths.has(normalizedPath)) {
       throw new Error(`Duplicate manifest path: ${file.path}`)
@@ -296,6 +298,15 @@ export function validatePackManifest(value: unknown): PackManifest {
     if (manifest.artifactMode !== 'zip' && !file.url && !file.assetName) {
       throw new Error(`File ${file.path} must include a URL or release asset name.`)
     }
+  }
+
+  const addonFiles = requiredPaths.filter((filePath) => /^addons\/.+\.echo-addon$/iu.test(filePath))
+  const modJars = requiredPaths.filter((filePath) => /^mods\/.+\.jar$/iu.test(filePath))
+  if (normalizedPack.endsWith('-native-edition') && addonFiles.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} requires Native addon files under addons/*.echo-addon, but this manifest lists ${modJars.length} NeoForge mod jar${modJars.length === 1 ? '' : 's'}.`)
+  }
+  if (normalizedPack.endsWith('-neoforge-edition') && modJars.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} requires NeoForge mod jars under mods/*.jar, but this manifest lists ${addonFiles.length} Native addon file${addonFiles.length === 1 ? '' : 's'}.`)
   }
 
   const installer = manifest.loader?.installer

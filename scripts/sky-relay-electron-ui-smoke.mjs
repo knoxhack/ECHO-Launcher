@@ -346,6 +346,27 @@ async function clickButtonContaining(cdp, text) {
   return result
 }
 
+async function clickCardButtonContaining(cdp, cardHeading, buttonText) {
+  const result = await evaluate(cdp, `(() => {
+    const headingNeedle = ${JSON.stringify(cardHeading)}
+    const buttonNeedle = ${JSON.stringify(buttonText)}
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+    }
+    const heading = Array.from(document.querySelectorAll('h3')).find((element) => element.textContent?.trim() === headingNeedle)
+    if (!heading) return { clicked: false, reason: \`Card heading '\${headingNeedle}' was not found.\` }
+    const card = heading.closest('.cyber-panel') ?? heading.parentElement
+    const button = Array.from(card?.querySelectorAll('button') ?? []).find((element) => element.textContent?.includes(buttonNeedle) && !element.disabled && isVisible(element))
+    if (!button) return { clicked: false, reason: \`Enabled button '\${buttonNeedle}' was not found inside '\${headingNeedle}'.\` }
+    button.click()
+    return { clicked: true, text: button.textContent?.trim() ?? '' }
+  })()`)
+  assert(result.clicked, result.reason)
+  return result
+}
+
 async function clickTabContaining(cdp, text) {
   const result = await evaluate(cdp, `(() => {
     const needle = ${JSON.stringify(text)}
@@ -392,18 +413,6 @@ async function clickTabContaining(cdp, text) {
     button: 'left',
     clickCount: 1,
   })
-  return result
-}
-
-async function selectHomeProfile(cdp, packId) {
-  const result = await evaluate(cdp, `(() => {
-    const select = document.getElementById('home-pack-select')
-    if (!select) return { selected: false, reason: 'home-pack-select not found' }
-    select.value = ${JSON.stringify(packId)}
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    return { selected: true, value: select.value }
-  })()`)
-  assert(result.selected && result.value === packId, result.reason ?? `Failed to select ${packId}.`)
   return result
 }
 
@@ -592,10 +601,18 @@ async function run() {
               height: Math.round(rect.height)
             }
           },
-          statusPreview: cardText.includes('Preview'),
-          modeViewOnly: cardText.includes('View-only'),
-          playLocked: cardText.includes('Locked'),
-          noInstallProfile: cardText.includes('View-only preview. No install profile is created.')
+          hasManifestState: /manifest/i.test(cardText),
+          hasCatalogState: /catalog/i.test(cardText),
+          hasInstallState: /install/i.test(cardText),
+          hasActionState: /action/i.test(cardText),
+          hasDiagnosticsAction: cardText.includes('Diagnostics'),
+          hasHomeAction: cardText.includes('Home'),
+          hasScopedAction: /(Install|Update|Repair|Play|Unavailable|Checking)/u.test(cardText),
+          actionPreview: cardText
+            .split(/\\n/u)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .slice(-12)
         }
       })
       return {
@@ -605,10 +622,10 @@ async function run() {
         rootMounted: Boolean(document.getElementById('root')?.childElementCount),
         startupRecovery: Boolean(document.querySelector('[data-echo-startup-recovery]')),
         nativeBridgeAvailable: Boolean(window.echoNative?.invoke),
-        officialPacksLabelVisible: /official packs/i.test(bodyText),
+        officialPacksLabelVisible: /official\\s+(echo\\s+)?packs/i.test(bodyText),
         cards,
-        hasInstallSkyRelay: bodyText.includes('Install Sky Relay'),
-        hasPlaySkyRelay: bodyText.includes('Play Sky Relay')
+        hasGlobalInstallUpdate: Array.from(document.querySelectorAll('button')).some((button) => /install\\s*\\/\\s*update|install all|update all/i.test(button.textContent ?? '')),
+        hasScopedSkyRelayAction: Boolean(cards.find((card) => card.name === ${JSON.stringify(SMOKE_PACK.name)})?.hasScopedAction)
       }
     })()`)
 
@@ -617,31 +634,36 @@ async function run() {
     assert(!ui.startupRecovery, 'Startup recovery page was shown.')
     assert(ui.nativeBridgeAvailable, 'Native bridge is not available in Electron.')
     assert(ui.activeHeading === 'Library', `Expected Library page, got ${ui.activeHeading}`)
-    assert(ui.officialPacksLabelVisible, 'Official Packs label was not visible.')
-    assert(!ui.hasInstallSkyRelay, 'Sky Relay install affordance appeared before promotion.')
-    assert(!ui.hasPlaySkyRelay, 'Sky Relay play affordance appeared before promotion.')
+    assert(ui.officialPacksLabelVisible, 'Official ECHO Packs label was not visible.')
+    assert(!ui.hasGlobalInstallUpdate, 'A global install/update affordance appeared in the Library.')
+    assert(ui.hasScopedSkyRelayAction, 'Sky Relay Native Edition did not expose a scoped pack action.')
     for (const card of ui.cards) {
+      const cardDebug = JSON.stringify(card.actionPreview ?? [])
       assert(card.found, `${card.name} card was not found.`)
       assert(!card.heading.overflow, `${card.name} heading overflowed in packaged Electron.`)
-      assert(card.statusPreview, `${card.name} is missing Preview status.`)
-      assert(card.modeViewOnly, `${card.name} is missing View-only mode.`)
-      assert(card.playLocked, `${card.name} is missing Locked play state.`)
-      assert(card.noInstallProfile, `${card.name} is missing no-install profile messaging.`)
+      assert(card.hasManifestState, `${card.name} is missing manifest state. Card text: ${cardDebug}`)
+      assert(card.hasCatalogState, `${card.name} is missing catalog state. Card text: ${cardDebug}`)
+      assert(card.hasInstallState, `${card.name} is missing install state. Card text: ${cardDebug}`)
+      assert(card.hasActionState, `${card.name} is missing primary action state. Card text: ${cardDebug}`)
+      assert(card.hasDiagnosticsAction, `${card.name} is missing Diagnostics action. Card text: ${cardDebug}`)
+      assert(card.hasHomeAction, `${card.name} is missing Home action. Card text: ${cardDebug}`)
+      assert(card.hasScopedAction, `${card.name} is missing a scoped pack action. Card text: ${cardDebug}`)
     }
     for (const pack of SKY_RELAY_PACKS) {
       assert(bootstrap.profileIds.includes(pack.packId), `Bootstrap profiles missing ${pack.packId}.`)
     }
 
-    await waitFor('Home navigation', args.timeoutMs, async () => clickButtonContaining(cdp, 'Home'))
-    await selectHomeProfile(cdp, SMOKE_PACK.packId)
+    await waitFor('Sky Relay Home navigation', args.timeoutMs, async () => clickCardButtonContaining(cdp, SMOKE_PACK.name, 'Home'))
     await waitFor('Sky Relay Native selection', args.timeoutMs, async () => evaluate(cdp, `(() => {
-      const select = document.getElementById('home-pack-select')
+      const select = document.getElementById('home-pack-select') ?? Array.from(document.querySelectorAll('select')).find((element) =>
+        Array.from(element.options).some((option) => option.value === ${JSON.stringify(SMOKE_PACK.packId)}),
+      )
       const bodyText = document.body.innerText
       return select?.value === ${JSON.stringify(SMOKE_PACK.packId)} && bodyText.includes(${JSON.stringify(SMOKE_PACK.name)})
     })()`))
 
     const installStartedAt = Date.now() - 1000
-    const installClick = await waitFor('Sky Relay install button', args.timeoutMs, async () => clickButtonContaining(cdp, 'Install Ashfall'))
+    const installClick = await waitFor('Sky Relay install button', args.timeoutMs, async () => clickButtonContaining(cdp, `Install ${SMOKE_PACK.name}`))
     const installData = await waitForInstallReport(logsDir, installStartedAt, (report) =>
       report.profileId === SMOKE_PACK.packId &&
       report.operation === 'install' &&
@@ -683,7 +705,7 @@ async function run() {
       })
 
     const updateStartedAt = Date.now() - 1000
-    const updateClick = await waitFor('Sky Relay update reconciliation button', args.timeoutMs, async () => clickButtonContaining(cdp, 'Install Ashfall'))
+    const updateClick = await waitFor('Sky Relay update reconciliation button', args.timeoutMs, async () => clickButtonContaining(cdp, `Install ${SMOKE_PACK.name}`))
     const updateData = await waitForInstallReport(logsDir, updateStartedAt, (report) =>
       report.profileId === SMOKE_PACK.packId &&
       report.operation === 'update' &&
@@ -792,7 +814,7 @@ async function run() {
         packagedElectronRendererMounted: 'passed',
         nativeBridgeBootstrap: 'passed',
         skyRelayLibraryCardsVisible: 'passed',
-        skyRelayPreviewGating: 'passed',
+        skyRelayScopedCardActions: 'passed',
         skyRelayHeadingOverflow: 'passed',
         packagedElectronInstallClickThrough: 'passed',
         packagedElectronUpdateReconciliationClickThrough: 'passed',

@@ -594,8 +594,8 @@ describe('releaseValidation', () => {
       modules: ['echocore'],
       files: [
         {
-          path: 'mods/echocore-1.4.0.jar',
-          assetName: 'echocore-1.4.0.jar',
+          path: 'addons/echocore-1.4.0.echo-addon',
+          assetName: 'echocore-1.4.0.echo-addon',
           url: '',
           sha256: 'c'.repeat(64),
           size: 100,
@@ -626,7 +626,7 @@ describe('releaseValidation', () => {
       modules: ['echocore'],
       files: [
         {
-          path: 'mods/echocore-1.2.0.jar',
+          path: 'addons/echocore-1.2.0.echo-addon',
           sha256: 'c'.repeat(64),
           size: 100,
           required: true,
@@ -710,6 +710,61 @@ describe('releaseValidation', () => {
         worldgenWarning: true,
       }),
     ).toThrow(/must include moduleRequirements/)
+  })
+
+  it('rejects a Native Edition manifest that contains NeoForge jars instead of Native addons', () => {
+    expect(() =>
+      validatePackManifest({
+        ...baseManifest(),
+        pack: 'ashfall-native-edition',
+        files: [
+          {
+            path: 'mods/echocore-1.0.0-neoforge.jar',
+            assetName: 'echocore-1.0.0-neoforge.jar',
+            sha256: 'c'.repeat(64),
+            size: 100,
+            required: true,
+            moduleId: 'echocore',
+            side: 'both',
+          },
+        ],
+      }),
+    ).toThrow(/requires Native addon files/)
+  })
+
+  it('rejects a NeoForge Edition manifest that contains Native addons instead of mod jars', () => {
+    expect(() =>
+      validatePackManifest({
+        pack: 'sky-relay-neoforge-edition',
+        version: '0.1.0',
+        channel: 'alpha',
+        minecraft: '26.1.2',
+        loader: {
+          type: 'neoforge',
+          version: '26.1.2',
+          installer: {
+            assetName: 'neoforge-26.1.2-installer.jar',
+            sha256: 'f'.repeat(64),
+            installMode: 'client',
+          },
+        },
+        moduleRequirements: [{ id: 'echoskyrelayprotocol', version: '0.1.0' }],
+        modules: ['echoskyrelayprotocol'],
+        files: [
+          {
+            path: 'addons/echoskyrelayprotocol-0.1.0.echo-addon',
+            assetName: 'echoskyrelayprotocol-0.1.0.echo-addon',
+            sha256: 'd'.repeat(64),
+            size: 100,
+            required: true,
+            moduleId: 'echoskyrelayprotocol',
+            side: 'both',
+          },
+        ],
+        changelog: ['Sky Relay alpha'],
+        worldgenWarning: false,
+      }),
+    ).toThrow(/requires NeoForge mod jars/)
   })
 
   it('accepts all three Arcana Division beta pack manifests', () => {
@@ -1014,8 +1069,8 @@ function baseManifest() {
     moduleRequirements: [{ id: 'echocore', version: '1.4.0' }],
     files: [
       {
-        path: 'mods/echocore-1.4.0.jar',
-        assetName: 'echocore-1.4.0.jar',
+        path: 'addons/echocore-1.4.0.echo-addon',
+        assetName: 'echocore-1.4.0.echo-addon',
         sha256: 'c'.repeat(64),
         size: 100,
         required: true,

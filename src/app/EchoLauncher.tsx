@@ -6,6 +6,7 @@ import { useLauncherStore } from '../stores/launcherStore'
 import { useProfileStore } from '../stores/profileStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useReadinessStore } from '../stores/readinessStore'
+import { usePackStateStore } from '../stores/packStateStore'
 import { defaultAccountState, useAccountStore } from '../stores/accountStore'
 import { defaultLaunchState, useLaunchStore } from '../stores/launchStore'
 import { useReleaseStore } from '../stores/releaseStore'
@@ -62,6 +63,7 @@ export function EchoLauncher() {
   const checkLauncherUpdate = useLauncherUpdateStore((state) => state.check)
   const refreshLauncherUpdate = useLauncherUpdateStore((state) => state.refresh)
   const refreshReadiness = useReadinessStore((state) => state.refreshReadiness)
+  const refreshPackState = usePackStateStore((state) => state.refreshPackState)
   const visiblePages = useMemo(() => getVisibleNavItems({ advancedMode, creatorMode }).map((item) => item.id), [advancedMode, creatorMode])
   const officialPlayersKey = officialStatus?.players.join('\n') ?? ''
   const officialPlayers = useMemo(() => (officialPlayersKey ? officialPlayersKey.split('\n') : []), [officialPlayersKey])
@@ -120,7 +122,9 @@ export function EchoLauncher() {
               addToast('Launcher update available', launcherUpdatePrimaryDetail(updateState), 'info')
             }
           })
-          void refreshReadiness(useLauncherStore.getState().selectedProfileId)
+          const selectedProfileId = useLauncherStore.getState().selectedProfileId
+          void refreshReadiness(selectedProfileId)
+          void refreshPackState(selectedProfileId)
         })
       })
       .catch((error: unknown) => {
@@ -133,7 +137,7 @@ export function EchoLauncher() {
       disposed = true
       cancelStartupTasks()
     }
-  }, [addToast, checkLauncherUpdate, loadReleases, refreshReadiness, setAccount, setDesktopBackend, setDesktopSettings, setLaunchState, setLauncherUpdate, setProfiles, setReleaseIndex])
+  }, [addToast, checkLauncherUpdate, loadReleases, refreshPackState, refreshReadiness, setAccount, setDesktopBackend, setDesktopSettings, setLaunchState, setLauncherUpdate, setProfiles, setReleaseIndex])
 
   useEffect(() => {
     if (!isNativeAvailable() || !launcherUpdate || !['checking', 'downloading'].includes(launcherUpdate.status)) return

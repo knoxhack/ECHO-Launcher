@@ -3,6 +3,7 @@ import echoLogo from '../../assets/brand/echo-logo.webp'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useLauncherStore } from '../../stores/launcherStore'
 import { useLauncherUpdateStore } from '../../stores/launcherUpdateStore'
+import { usePackStateStore } from '../../stores/packStateStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReadinessStore } from '../../stores/readinessStore'
 import { defaultLaunchState, useLaunchStore } from '../../stores/launchStore'
@@ -24,6 +25,8 @@ export function TopBar() {
   const readiness = useReadinessStore((state) => state.readiness)
   const readinessLoading = useReadinessStore((state) => state.loading)
   const refreshReadiness = useReadinessStore((state) => state.refreshReadiness)
+  const packState = usePackStateStore((state) => state.states[selectedProfileId])
+  const refreshPackState = usePackStateStore((state) => state.refreshPackState)
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0]
   const activeDownloads = downloads.filter((download) => download.status === 'downloading').length
   const warningCount = readiness?.warnings.length ?? 0
@@ -52,7 +55,7 @@ export function TopBar() {
           <ShieldCheck className="h-4 w-4 text-success-echo" aria-hidden="true" />
           <span>{selectedProfile.name}</span>
           <span className="text-slate-500">/</span>
-          <span className="text-cyan-soft">Handoff</span>
+          <span className="text-cyan-soft">{packState?.ok ? 'Ready' : packState?.primaryAction.kind ?? 'Checking'}</span>
         </div>
         {launchState.active ? <StatusChip label="Minecraft Running" status="downloading" /> : null}
         {launcherUpdate && launcherUpdateVisibleInTopBar(launcherUpdate.status) ? (
@@ -88,7 +91,10 @@ export function TopBar() {
         <CyberButton
           icon={Cloud}
           onClick={async () => {
-            const next = await refreshReadiness(selectedProfile.id)
+            const [next] = await Promise.all([
+              refreshReadiness(selectedProfile.id),
+              refreshPackState(selectedProfile.id),
+            ])
             if (!next) {
               addToast('Readiness unavailable', 'Native filesystem actions are available in the desktop app.', 'warning')
               return

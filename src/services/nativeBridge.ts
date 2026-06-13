@@ -30,6 +30,7 @@ import type {
   MinecraftRuntimeStatus,
   NativeLogResult,
   NativeOperationStatus,
+  NativePackState,
   NativeDiagnosticExportResult,
   NativePaths,
   NativeRepairResult,
@@ -54,6 +55,7 @@ import type { MinecraftRuntimeModeId, StandaloneRuntimeLaunchPayload, Standalone
 type NativeCommandMap = {
   'app:get-bootstrap-state': { payload: undefined; result: NativeBootstrapState }
   'app:get-state': { payload: undefined; result: NativeAppState }
+  'app:get-pack-state': { payload: { profileId?: string } | undefined; result: NativePackState }
   'app:get-readiness': { payload: { profileId?: string } | undefined; result: AppReadinessState }
   'packos:get-state': { payload: undefined; result: PackOsLauncherState }
   'native-loader:get-status': { payload: undefined; result: NativeLoaderAshfallStatus }

@@ -383,6 +383,8 @@ function assertManifestMatchesSelectedPack(manifest, selectedPack) {
 function validateSelectedPackManifest(manifest, selectedPack, options = {}) {
   assertManifestMatchesSelectedPack(manifest, selectedPack)
   const validated = validatePackManifest(manifest, options)
+  const familyStatus = manifestArtifactFamilyStatus(validated, selectedPack)
+  if (!familyStatus.ok) throw new Error(familyStatus.message)
   return assertManifestMatchesSelectedPack(validated, selectedPack)
 }
 
@@ -402,6 +404,43 @@ function selectLauncherProfile(profiles = [], payload = {}, fallbackToFirst = tr
 function moduleCountFromManifest(manifest, fallback) {
   const requirements = manifest?.moduleRequirements ?? manifest?.requiredModules ?? manifest?.modules
   return Array.isArray(requirements) ? requirements.length : fallback
+}
+
+function requiredManifestFilePaths(manifest) {
+  return (manifest?.files ?? [])
+    .filter((file) => file?.required !== false)
+    .map((file) => String(file?.path ?? '').replace(/\\/g, '/'))
+    .filter(Boolean)
+}
+
+function manifestArtifactFamilyStatus(manifest, expectedPackId) {
+  const packId = normalizeOfficialPackId(expectedPackId ?? manifest?.pack ?? manifest?.id)
+  const packName = officialPackDisplayName(packId)
+  const paths = requiredManifestFilePaths(manifest)
+  const addonFiles = paths.filter((filePath) => /^addons\/.+\.echo-addon$/iu.test(filePath))
+  const modJars = paths.filter((filePath) => /^mods\/.+\.jar$/iu.test(filePath))
+
+  if (packId?.endsWith('-native-edition')) {
+    if (addonFiles.length === 0) {
+      return {
+        ok: false,
+        code: modJars.length > 0 ? 'wrongArtifactFamily' : 'missingNativeAddons',
+        message: `${packName} requires Native addon files under addons/*.echo-addon, but this manifest lists ${modJars.length} NeoForge mod jar${modJars.length === 1 ? '' : 's'} and ${addonFiles.length} Native addon file${addonFiles.length === 1 ? '' : 's'}.`,
+      }
+    }
+  }
+
+  if (packId?.endsWith('-neoforge-edition')) {
+    if (modJars.length === 0) {
+      return {
+        ok: false,
+        code: addonFiles.length > 0 ? 'wrongArtifactFamily' : 'missingNeoForgeMods',
+        message: `${packName} requires NeoForge mod jars under mods/*.jar, but this manifest lists ${addonFiles.length} Native addon file${addonFiles.length === 1 ? '' : 's'} and ${modJars.length} NeoForge mod jar${modJars.length === 1 ? '' : 's'}.`,
+      }
+    }
+  }
+
+  return { ok: true, code: 'ok', message: '' }
 }
 
 function manifestRequiresNeoForge(manifest) {
@@ -1423,23 +1462,94 @@ function uniqueNormalizedPaths(paths) {
   return normalized
 }
 
-async function readInstalledProfileManifest(installPath, expectedPackId) {
+async function readInstalledProfileManifestState(installPath, expectedPackId) {
   if (!installPath) return null
   const normalizedInstallPath = normalizePath(installPath)
   const manifestPath = path.join(normalizedInstallPath, '.echo', 'installed-manifest.json')
   const manifest = await readJson(manifestPath, null)
-  if (!manifest) return null
+  if (!manifest) {
+    return {
+      valid: false,
+      code: 'missing',
+      installPath: normalizedInstallPath,
+      manifestPath,
+      manifest: null,
+      pack: undefined,
+      message: 'No installed manifest was found for this pack.',
+    }
+  }
 
   const packId = normalizeOfficialPackId(manifest.pack ?? manifest.id)
   const packName = String(manifest.name ?? '').toLowerCase()
   const expected = normalizeOfficialPackId(expectedPackId)
-  if (expected && packId && packId !== expected) return null
-  if (!packId && !/(ashfall|sky relay|sky-relay)/i.test(packName)) return null
+  if (expected && packId && packId !== expected) {
+    return {
+      valid: false,
+      code: 'packMismatch',
+      installPath: normalizedInstallPath,
+      manifestPath,
+      manifest: { ...manifest, pack: packId ?? manifest.pack },
+      pack: packId,
+      message: `Selected manifest is for ${officialPackDisplayName(packId)}, not ${officialPackDisplayName(expected)}.`,
+    }
+  }
+  if (!packId && !/(ashfall|sky relay|sky-relay)/i.test(packName)) {
+    return {
+      valid: false,
+      code: 'unknownPack',
+      installPath: normalizedInstallPath,
+      manifestPath,
+      manifest,
+      pack: undefined,
+      message: `Installed manifest pack must be one of: ${Array.from(OFFICIAL_PACK_IDS).join(', ')}.`,
+    }
+  }
+
+  try {
+    const selectedPack = expected ?? packId
+    const validated = validateSelectedPackManifest(manifest, selectedPack, { allowLocalPlaceholders: false })
+    const familyStatus = manifestArtifactFamilyStatus(validated, selectedPack)
+    if (!familyStatus.ok) {
+      return {
+        valid: false,
+        code: familyStatus.code,
+        installPath: normalizedInstallPath,
+        manifestPath,
+        manifest: validated,
+        pack: selectedPack,
+        message: familyStatus.message,
+      }
+    }
+    return {
+      valid: true,
+      code: 'ok',
+      installPath: normalizedInstallPath,
+      manifestPath,
+      manifest: validated,
+      pack: selectedPack,
+      message: '',
+    }
+  } catch (error) {
+    return {
+      valid: false,
+      code: 'invalidManifest',
+      installPath: normalizedInstallPath,
+      manifestPath,
+      manifest: { ...manifest, pack: packId ?? manifest.pack },
+      pack: packId,
+      message: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+async function readInstalledProfileManifest(installPath, expectedPackId) {
+  const state = await readInstalledProfileManifestState(installPath, expectedPackId)
+  if (!state?.valid) return null
 
   return {
-    installPath: normalizedInstallPath,
-    manifestPath,
-    manifest: { ...manifest, pack: packId ?? manifest.pack },
+    installPath: state.installPath,
+    manifestPath: state.manifestPath,
+    manifest: state.manifest,
   }
 }
 
@@ -1448,7 +1558,8 @@ async function readProfileManifestForProfile(manifestPath, expectedPackId) {
   try {
     const raw = await readJson(normalizePath(manifestPath), null)
     if (!raw) return null
-    return validateSelectedPackManifest(raw, expectedPackId, { allowLocalPlaceholders: false })
+    const manifest = validateSelectedPackManifest(raw, expectedPackId, { allowLocalPlaceholders: false })
+    return manifestArtifactFamilyStatus(manifest, expectedPackId).ok ? manifest : null
   } catch {
     return null
   }
@@ -1505,12 +1616,12 @@ async function normalizeProfileList(paths, profiles = []) {
       : null
     const source = preferred ?? legacy ?? named ?? {}
     const installPath = await selectProfileInstallPath(paths, profiles, base)
-    const installedAny = await readInstalledProfileManifest(installPath)
-    const installed = installedAny && manifestPackId(installedAny.manifest) === base.id ? installedAny : null
+    const installedState = await readInstalledProfileManifestState(installPath, base.id)
+    const installed = installedState?.valid && manifestPackId(installedState.manifest) === base.id ? installedState : null
     const installedManifestPath = installed?.manifestPath ?? path.join(installPath, '.echo', 'installed-manifest.json')
     const installedManifest = installed?.manifest ?? null
     const sourceManifest = await readProfileManifestForProfile(source.manifestPath, base.id)
-    const hasMismatchedInstalledManifest = Boolean(installedAny?.manifest && manifestPackId(installedAny.manifest) !== base.id)
+    const hasInvalidInstalledManifest = Boolean(installedState && !installedState.valid && installedState.code !== 'missing')
     const hasRejectedSourceManifest = Boolean(source.manifestPath && !sourceManifest && !installedManifest)
     normalized.push({
       ...base,
@@ -1524,7 +1635,7 @@ async function normalizeProfileList(paths, profiles = []) {
       minecraft: installedManifest ? minecraftVersionFromManifest(installedManifest) : sourceManifest ? minecraftVersionFromManifest(sourceManifest) : base.minecraft,
       neoforge: installedManifest?.loader?.version ?? sourceManifest?.loader?.version ?? base.neoforge,
       moduleCount: moduleCountFromManifest(installedManifest, moduleCountFromManifest(sourceManifest, base.moduleCount)),
-      status: installedManifest ? 'healthy' : hasMismatchedInstalledManifest || hasRejectedSourceManifest ? 'warning' : source.status && source.status !== 'healthy' ? source.status : base.status,
+      status: installedManifest ? 'healthy' : hasInvalidInstalledManifest || hasRejectedSourceManifest ? 'warning' : source.status && source.status !== 'healthy' ? source.status : base.status,
       id: base.id,
       name: base.name,
       runtimeMode: base.runtimeMode,
@@ -1560,8 +1671,10 @@ async function seedDesktopData() {
   const profiles = await readJson(profilesPath, defaultProfiles(paths))
   const normalizedProfiles = await normalizeProfileList(paths, profiles)
   if (JSON.stringify(normalizedProfiles) !== JSON.stringify(profiles)) {
+    await backupLauncherProfileStore(profilesPath)
     await writeJson(profilesPath, normalizedProfiles)
   }
+  await repairReservedMinecraftLauncherProfiles(normalizedProfiles).catch((error) => appendLauncherLog('WARN', `Minecraft Launcher profile adoption skipped: ${error.message}`))
 
   if (!(await exists(paths.settings))) {
     await writeJson(paths.settings, DEFAULT_DESKTOP_SETTINGS)
@@ -1587,9 +1700,21 @@ async function profileList() {
   const profiles = await readJson(profilesPath, defaultProfiles(paths))
   const normalizedProfiles = await normalizeProfileList(paths, profiles)
   if (JSON.stringify(normalizedProfiles) !== JSON.stringify(profiles)) {
+    await backupLauncherProfileStore(profilesPath)
     await writeJson(profilesPath, normalizedProfiles)
   }
   return normalizedProfiles
+}
+
+async function backupLauncherProfileStore(profilesPath) {
+  const backupPath = path.join(getPaths().backups, 'launcher-profiles', `${nowStamp()}-profiles.json`)
+  await ensureDir(path.dirname(backupPath))
+  if (await exists(profilesPath)) {
+    await fs.copyFile(profilesPath, backupPath)
+  } else {
+    await fs.writeFile(backupPath, `${JSON.stringify(defaultProfiles(getPaths()), null, 2)}\n`, 'utf8')
+  }
+  return backupPath
 }
 
 async function profileSave(profile) {
@@ -5226,6 +5351,68 @@ async function minecraftLauncherOpen(payload = {}) {
   }
 }
 
+async function repairReservedMinecraftLauncherProfiles(profiles = []) {
+  const minecraftRoot = await detectMinecraftRoot({ createIfMissing: false })
+  if (!minecraftRoot) return { ok: true, updated: [], backupPath: undefined, warnings: ['Minecraft root was not found.'] }
+  const launcherProfilesPath = path.join(minecraftRoot, 'launcher_profiles.json')
+  if (!(await exists(launcherProfilesPath))) return { ok: true, updated: [], backupPath: undefined, warnings: ['Minecraft launcher_profiles.json was not found.'] }
+
+  const document = await readMinecraftLauncherProfiles(launcherProfilesPath)
+  const updated = []
+  const timestamp = isoNow()
+  for (const profile of profiles) {
+    const runtimeMode = normalizeMinecraftRuntimeMode(profile.runtimeMode, profile)
+    if (!MINECRAFT_RUNTIME_MODES.has(runtimeMode)) continue
+    const profileKey = minecraftLauncherProfileId(profile.id, runtimeMode)
+    const existing = document.profiles?.[profileKey]
+    if (!existing || !isReservedEchoMinecraftProfileId(profileKey)) continue
+
+    const installed = profile.installPath ? await readInstalledProfileManifest(profile.installPath, profile.id) : null
+    const versionId = installed?.manifest ? minecraftLauncherVersionId(installed.manifest, runtimeMode) : existing.lastVersionId
+    const gameDir = profile.installPath ?? existing.gameDir
+    if (!versionId || !gameDir) continue
+
+    const currentProfileId = existing.echoLauncher?.profileId
+    const needsMarker =
+      existing.echoManaged !== true ||
+      existing.echoLauncher?.managedBy !== 'ECHO Launcher' ||
+      currentProfileId !== profile.id ||
+      !sameLauncherGameDir(existing.gameDir, gameDir) ||
+      existing.lastVersionId !== versionId
+    if (!needsMarker) continue
+
+    document.profiles[profileKey] = {
+      ...existing,
+      name: minecraftLauncherProfileName(profile, runtimeMode),
+      type: 'custom',
+      created: existing.created ?? timestamp,
+      lastUsed: existing.lastUsed ?? timestamp,
+      lastVersionId: versionId,
+      gameDir,
+      javaArgs: existing.javaArgs ?? `-Xmx${Number(profile.ramGb ?? 8)}G`,
+      echoManaged: true,
+      echoLauncher: {
+        managedBy: 'ECHO Launcher',
+        profileId: profile.id,
+        pack: installed?.manifest?.pack ?? profile.id,
+        channel: profile.channel,
+        version: installed?.manifest?.version ?? profile.version,
+        runtimeMode,
+        runtimeLabel: minecraftRuntimeLabel(runtimeMode),
+        loader: minecraftRuntimeLoaderKey(runtimeMode),
+        updatedAt: timestamp,
+      },
+    }
+    updated.push(profileKey)
+  }
+
+  if (!updated.length) return { ok: true, updated, backupPath: undefined, warnings: [] }
+  const backupPath = await backupMinecraftLauncherProfiles(launcherProfilesPath)
+  await writeJson(launcherProfilesPath, document)
+  await appendLauncherLog('INFO', `Adopted ${updated.length} deterministic ECHO Minecraft Launcher profile${updated.length === 1 ? '' : 's'}: ${updated.join(', ')}.`)
+  return { ok: true, updated, backupPath, warnings: [] }
+}
+
 async function minecraftLauncherProfileStatus(payload = {}) {
   const { profile, manifest, installPath } = await resolveProfileAndManifest(payload)
   const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
@@ -7274,6 +7461,276 @@ function startupRecoveryHtml(reason) {
 </html>`
 }
 
+function versionParts(version) {
+  const normalized = String(version ?? '').trim().replace(/^v/iu, '')
+  const match = normalized.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/u)
+  if (!match) return null
+  return [Number(match[1] ?? 0), Number(match[2] ?? 0), Number(match[3] ?? 0)]
+}
+
+function isNewerPackVersion(candidate, current) {
+  const candidateParts = versionParts(candidate)
+  const currentParts = versionParts(current)
+  if (!candidateParts || !currentParts) return false
+  for (let index = 0; index < candidateParts.length; index += 1) {
+    if (candidateParts[index] > currentParts[index]) return true
+    if (candidateParts[index] < currentParts[index]) return false
+  }
+  return false
+}
+
+function packOsIdForPackState(packId) {
+  const aliases = {
+    'arcana-division-native-edition': 'arcana_division',
+    'arcana-division-neoforge-edition': 'arcana_division',
+    'arcana-division-standalone-edition': 'arcana_division',
+  }
+  return aliases[packId] ?? packId
+}
+
+function selectedPackOsState(packOs, profileId) {
+  const packOsId = packOsIdForPackState(profileId)
+  return (packOs?.packs ?? []).find((pack) => pack.packId === profileId || pack.packId === packOsId) ?? null
+}
+
+function packRouteForProfile(profile) {
+  const runtimeMode = profile?.runtimeMode ?? (String(profile?.id ?? '').endsWith('-standalone-edition') ? 'native-runtime' : defaultMinecraftRuntimeMode(profile))
+  if (runtimeMode === 'native-runtime') {
+    return {
+      mode: runtimeMode,
+      label: 'ECHO Standalone Engine',
+      shortLabel: 'Standalone',
+      detail: 'Runs through the standalone ECHO runtime.',
+    }
+  }
+  if (runtimeMode === 'native-loader-minecraft') {
+    return {
+      mode: runtimeMode,
+      label: 'Minecraft + Native Loader',
+      shortLabel: 'Native Loader',
+      detail: 'Uses the official Minecraft Launcher with ECHO Native Loader metadata.',
+    }
+  }
+  return {
+    mode: 'neoforge-minecraft',
+    label: 'Minecraft + NeoForge',
+    shortLabel: 'NeoForge',
+    detail: 'Uses the official Minecraft Launcher with the selected NeoForge profile.',
+  }
+}
+
+function latestCatalogReleaseForProfile(index, profile) {
+  if (!index?.releases?.length || !profile) return null
+  return selectReleaseEntry(index, profile.channel ?? defaultChannelForPack(profile.id), undefined, profile.id)
+}
+
+function packCatalogMetadata(index, profile) {
+  const pack = (index?.packs ?? []).find((item) => item.id === profile?.id)
+  const release = latestCatalogReleaseForProfile(index, profile)
+  const catalogStatus = String(pack?.catalogStatus ?? (release ? 'approved' : 'missing')).toLowerCase()
+  return {
+    pack,
+    release,
+    available: Boolean(release?.trust === 'verified-metadata' && release.manifestSha256),
+    status: catalogStatus,
+    diagnostic: pack?.diagnostic ?? null,
+  }
+}
+
+function packStateBlocker(id, title, detail, status = 'warning', action = 'diagnostics') {
+  return { id, title, detail, status, action }
+}
+
+function packStateAction(kind, label, options = {}) {
+  return {
+    kind,
+    label,
+    enabled: options.enabled ?? !['unavailable'].includes(kind),
+    variant: options.variant ?? (kind === 'play' ? 'primary' : kind === 'repair' || kind === 'diagnostics' ? 'warning' : kind === 'unavailable' ? 'ghost' : 'secondary'),
+    reason: options.reason ?? '',
+  }
+}
+
+async function appPackState(payload = {}) {
+  await seedDesktopData()
+  const settings = await readSettings()
+  const profiles = await profileList()
+  const profile = selectLauncherProfile(profiles, payload, true)
+  if (!profile) throw new Error('No launcher profile is available.')
+
+  const route = packRouteForProfile(profile)
+  const installPath = profile.installPath ? normalizePath(profile.installPath) : undefined
+  const installedState = installPath ? await readInstalledProfileManifestState(installPath, profile.id) : null
+  const localManifestStatus = installedState?.valid ? 'valid' : installedState?.code === 'missing' || !installedState ? 'missing' : 'invalid'
+  const localManifest = {
+    status: localManifestStatus,
+    valid: installedState?.valid === true,
+    code: installedState?.code ?? 'missing',
+    message: installedState?.message ?? 'No installed manifest was found for this pack.',
+    manifestPath: installedState?.valid ? installedState.manifestPath : undefined,
+    invalidManifestPath: installedState && !installedState.valid && installedState.code !== 'missing' ? installedState.manifestPath : undefined,
+    pack: installedState?.pack,
+    version: installedState?.manifest?.version,
+  }
+
+  let catalog = {
+    configured: true,
+    ok: false,
+    source: catalogReleaseSource(settings).channelUrl,
+    releases: 0,
+    latestVersion: undefined,
+    fetchedAt: undefined,
+    status: 'missing',
+    diagnostic: null,
+    release: null,
+    warnings: [],
+  }
+  let release = null
+  try {
+    const index = await releaseList({ refresh: false })
+    const metadata = packCatalogMetadata(index, profile)
+    release = metadata.release
+    catalog = {
+      configured: true,
+      ok: metadata.available,
+      source: index.source.channelUrl,
+      releases: index.acceptedCount ?? index.releases.length,
+      latestVersion: release?.version,
+      fetchedAt: index.fetchedAt,
+      status: metadata.status,
+      diagnostic: metadata.diagnostic,
+      release,
+      warnings: metadata.available ? [] : [metadata.diagnostic ?? `${profile.name} has no approved installable Catalog release.`],
+    }
+  } catch (error) {
+    catalog = {
+      ...catalog,
+      warnings: [error instanceof Error ? error.message : String(error)],
+    }
+  }
+
+  let verification = null
+  if (installedState?.valid) {
+    try {
+      verification = await verifyManifest({ manifest: installedState.manifest, installPath })
+    } catch (error) {
+      verification = {
+        installPath,
+        scanned: 0,
+        missing: [],
+        corrupt: [],
+        valid: [],
+        results: [],
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  const packOs = await readPackOsStateForSettings(settings).catch((error) =>
+    unknownPackOsState({
+      generatedAt: isoNow(),
+      selectedPackId: profile.id,
+      warnings: [error instanceof Error ? error.message : String(error)],
+    }),
+  )
+  const selectedPackOs = selectedPackOsState(packOs, profile.id)
+  const packOsReasons = [
+    ...(selectedPackOs?.blockingReasons ?? []),
+    ...(selectedPackOs?.warnings ?? []),
+    ...(packOs?.warnings ?? []),
+  ].filter(Boolean)
+  const packOsBlocked = Boolean(selectedPackOs && BLOCKING_UI_STATES.has(selectedPackOs.uiState))
+
+  let minecraftLauncher = { ok: route.mode === 'native-runtime', warnings: [] }
+  if (MINECRAFT_RUNTIME_MODES.has(route.mode)) {
+    if (installedState?.valid) {
+      try {
+        minecraftLauncher = await minecraftLauncherProfileStatus({
+          profileId: profile.id,
+          installPath,
+          manifest: installedState.manifest,
+          runtimeMode: route.mode,
+        })
+      } catch (error) {
+        minecraftLauncher = { ok: false, warnings: [error instanceof Error ? error.message : String(error)] }
+      }
+    } else {
+      minecraftLauncher = {
+        ok: false,
+        warnings: ['Install a valid pack manifest before Minecraft Launcher handoff can be checked.'],
+      }
+    }
+  }
+
+  const blockers = []
+  if (localManifest.status === 'invalid') {
+    blockers.push(packStateBlocker('invalidLocalManifest', 'Installed manifest is not usable', localManifest.message, 'critical', catalog.ok ? 'install' : 'diagnostics'))
+  }
+  if (localManifest.status === 'missing') {
+    blockers.push(packStateBlocker('missingInstall', `${profile.name} is not installed`, catalog.ok ? 'Install the approved Catalog release.' : 'No local install manifest exists for this pack.', 'missing', catalog.ok ? 'install' : 'diagnostics'))
+  }
+  if (!catalog.ok && localManifest.status !== 'valid') {
+    blockers.push(packStateBlocker('missingCatalogRelease', 'No approved install release', catalog.warnings[0] ?? `${profile.name} cannot be installed until the Catalog has a verified release.`, 'warning', 'diagnostics'))
+  }
+  if (verification?.error) {
+    blockers.push(packStateBlocker('verificationError', 'File verification failed', verification.error, 'critical', 'diagnostics'))
+  } else if ((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0) {
+    blockers.push(packStateBlocker('fileVerification', 'Installed files need repair', `${verification.missing.length} missing and ${verification.corrupt.length} corrupt file${verification.missing.length + verification.corrupt.length === 1 ? '' : 's'} found.`, 'warning', 'repair'))
+  }
+  if (packOsBlocked) {
+    blockers.push(packStateBlocker('packOsBlocked', 'PackOS blocks launch', packOsReasons[0] ?? `${profile.name} is blocked by PackOS policy.`, 'critical', 'diagnostics'))
+  }
+  if (localManifest.status === 'valid' && !minecraftLauncher.ok) {
+    blockers.push(packStateBlocker('launchRoute', 'Launch route needs attention', (minecraftLauncher.warnings ?? [])[0] ?? 'Minecraft Launcher handoff is not ready.', 'warning', 'diagnostics'))
+  }
+
+  const installed = localManifest.status === 'valid'
+  const needsFileRepair = Boolean((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0)
+  const needsUpdate = Boolean(installed && release?.version && isNewerPackVersion(release.version, localManifest.version ?? profile.version))
+  let primaryAction
+  if (localManifest.status === 'invalid') {
+    primaryAction = catalog.ok
+      ? packStateAction('install', `Reinstall ${profile.name}`, { variant: 'primary', reason: localManifest.message })
+      : packStateAction('diagnostics', 'Open Diagnostics', { reason: localManifest.message })
+  } else if (!installed) {
+    primaryAction = catalog.ok
+      ? packStateAction('install', `Install ${profile.name}`, { variant: 'primary' })
+      : packStateAction('unavailable', 'Unavailable', { enabled: false, reason: catalog.warnings[0] ?? 'No approved release is available.' })
+  } else if (needsFileRepair) {
+    primaryAction = packStateAction('repair', `Repair ${profile.name}`, { reason: 'Missing or corrupt files can be restored from this pack manifest.' })
+  } else if (needsUpdate) {
+    primaryAction = packStateAction('update', `Update ${profile.name}`, { variant: 'primary', reason: `Approved ${release.version} is available.` })
+  } else if (packOsBlocked || !minecraftLauncher.ok) {
+    primaryAction = packStateAction('diagnostics', 'Open Diagnostics', { reason: blockers[0]?.detail ?? 'Launch route needs attention.' })
+  } else {
+    primaryAction = packStateAction(route.mode === 'native-runtime' ? 'launch-standalone' : 'play', `Play ${profile.name}`, { variant: 'primary' })
+  }
+
+  const playReady = installed && !needsFileRepair && !packOsBlocked && minecraftLauncher.ok
+  return {
+    ok: playReady,
+    generatedAt: isoNow(),
+    profile,
+    route,
+    install: {
+      installed,
+      status: profile.status,
+      installPath,
+      manifestPath: localManifest.manifestPath,
+      version: localManifest.version ?? profile.version,
+      verification,
+    },
+    localManifest,
+    catalog,
+    minecraftLauncher,
+    packOs,
+    selectedPackOs,
+    primaryAction,
+    blockers,
+    warnings: blockers.map((blocker) => blocker.detail),
+  }
+}
+
 function resolveAppIconPath() {
   const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
   const appRoot = app.getAppPath()
@@ -7292,60 +7749,13 @@ function loadAppIcon() {
 }
 
 async function appReadiness(payload = {}) {
-  await seedDesktopData()
+  const packState = await appPackState(payload)
   const settings = await readSettings()
-  const profiles = await profileList()
-  const profile = selectLauncherProfile(profiles, payload, true)
-  const installPath = profile?.installPath ? normalizePath(profile.installPath) : undefined
-  const installedManifest = installPath ? await readInstalledProfileManifest(installPath, profile?.id) : null
-  const installed = Boolean(installedManifest)
+  const profile = packState.profile
+  const installPath = packState.install.installPath
   const logs = await logsRead({ installPath }).catch(() => ({ files: [], latest: '' }))
-  let catalog = {
-    configured: true,
-    ok: false,
-    source: catalogReleaseSource(settings).channelUrl,
-    releases: 0,
-    latestVersion: undefined,
-    fetchedAt: undefined,
-    warnings: [],
-  }
-  try {
-    const index = await releaseList({ refresh: false })
-    catalog = {
-      configured: true,
-      ok: (index.acceptedCount ?? index.releases.length) > 0,
-      source: index.source.channelUrl,
-      releases: index.acceptedCount ?? index.releases.length,
-      latestVersion: (index.latestPlayableRelease ?? index.releases[0])?.version,
-      fetchedAt: index.fetchedAt,
-      warnings: index.warnings ?? [],
-    }
-  } catch (error) {
-    catalog = {
-      ...catalog,
-      warnings: [error instanceof Error ? error.message : String(error)],
-    }
-  }
-
-  let minecraftLauncher = { ok: false, warnings: ['Minecraft Launcher profile has not been checked.'] }
-  try {
-    minecraftLauncher = await minecraftLauncherProfileStatus({ profileId: profile?.id ?? CANONICAL_PROFILE_ID, installPath })
-  } catch (error) {
-    minecraftLauncher = { ok: false, warnings: [error instanceof Error ? error.message : String(error)] }
-  }
-
-  const packOs = await readPackOsStateForSettings(settings).catch((error) =>
-    unknownPackOsState({
-      generatedAt: isoNow(),
-      selectedPackId: profile?.id ?? CANONICAL_PROFILE_ID,
-      warnings: [error instanceof Error ? error.message : String(error)],
-    }),
-  )
   const warnings = [
-    ...(installed ? [] : [`${profile?.name ?? 'Selected pack'} is not installed yet.`]),
-    ...(catalog.ok ? [] : catalog.warnings),
-    ...(minecraftLauncher.ok ? [] : minecraftLauncher.warnings ?? []),
-    ...(packOs.warnings ?? []),
+    ...packState.warnings,
     ...(logs.files.length ? [] : ['No launcher or install logs were found yet.']),
   ].filter(Boolean)
 
@@ -7354,15 +7764,16 @@ async function appReadiness(payload = {}) {
     generatedAt: isoNow(),
     profile,
     install: {
-      installed,
-      status: profile?.status ?? 'missing',
+      installed: packState.install.installed,
+      status: profile.status ?? 'missing',
       installPath,
-      manifestPath: installedManifest?.manifestPath ?? profile?.manifestPath,
-      version: installedManifest?.manifest?.version ?? profile?.version,
+      manifestPath: packState.install.manifestPath,
+      version: packState.install.version,
     },
-    catalog,
-    minecraftLauncher,
-    packOs,
+    catalog: packState.catalog,
+    minecraftLauncher: packState.minecraftLauncher,
+    packOs: packState.packOs,
+    packState,
     logs: {
       available: logs.files.length > 0,
       count: logs.files.length,
@@ -8137,6 +8548,7 @@ async function stopMobileBridgeServer() {
 
 const handlers = {
   'app:get-bootstrap-state': appBootstrapState,
+  'app:get-pack-state': appPackState,
   'app:get-readiness': appReadiness,
   'app:get-state': async () => {
     const bootstrap = await appBootstrapState()

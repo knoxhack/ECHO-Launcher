@@ -41,10 +41,11 @@ describe('player-facing copy audit', () => {
   it('keeps Home focused on a selected pack and one primary action', () => {
     const homeSource = readFileSync(join(sourceRoot, 'components', 'dashboard', 'HomePage.tsx'), 'utf8')
 
-    expect(homeSource).toContain('Can I play?')
-    expect(homeSource).toContain('Select modpack')
-    expect(homeSource).toContain('Primary action')
-    expect(homeSource.match(/Primary action/g) ?? []).toHaveLength(1)
+    expect(homeSource).toContain('Selected Pack')
+    expect(homeSource).toContain('Primary Action')
+    expect(homeSource).toContain('Why not playable?')
+    expect(homeSource.match(/Primary Action/g) ?? []).toHaveLength(1)
+    expect(homeSource).not.toContain('Can I play?')
     expect(homeSource).not.toContain('How should Ashfall launch?')
     expect(homeSource).not.toContain('RuntimeChoiceCard')
     expect(homeSource).not.toMatch(/choose\s+(a\s+)?runtime/i)

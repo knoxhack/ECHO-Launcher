@@ -5,6 +5,7 @@ import type { AccountState } from './auth'
 import type { LaunchPreflightReport, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from './launch'
 import type { AssetValidationReport, WorldCompatibilityReport } from './diagnostics'
 import type { PackOsLauncherState } from './packos'
+import type { HealthStatus } from './launcher'
 import type { MinecraftRuntimeModeId } from './standaloneRuntime'
 
 export interface NativePaths {
@@ -180,6 +181,73 @@ export interface NativeAppState extends NativeBootstrapState {
   java: NativeJavaDetection
 }
 
+export type NativePackPrimaryActionKind = 'play' | 'launch-standalone' | 'install' | 'update' | 'repair' | 'diagnostics' | 'unavailable'
+
+export interface NativePackStateBlocker {
+  id: string
+  title: string
+  detail: string
+  status: HealthStatus
+  action: NativePackPrimaryActionKind | 'diagnostics'
+}
+
+export interface NativePackState {
+  ok: boolean
+  generatedAt: string
+  profile: LauncherProfile
+  route: {
+    mode: string
+    label: string
+    shortLabel: string
+    detail: string
+  }
+  install: {
+    installed: boolean
+    status: string
+    installPath?: string
+    manifestPath?: string
+    version?: string
+    verification?: NativeVerifyResult | null
+  }
+  localManifest: {
+    status: 'valid' | 'missing' | 'invalid'
+    valid: boolean
+    code: string
+    message: string
+    manifestPath?: string
+    invalidManifestPath?: string
+    pack?: string
+    version?: string
+  }
+  catalog: {
+    configured: boolean
+    ok: boolean
+    source: string
+    releases: number
+    latestVersion?: string
+    fetchedAt?: string
+    status: string
+    diagnostic?: string | null
+    release?: ReleaseEntry | null
+    warnings: string[]
+  }
+  minecraftLauncher: Partial<MinecraftLauncherProfileStatus> & {
+    ok: boolean
+    warnings: string[]
+  }
+  packOs?: PackOsLauncherState
+  selectedPackOs?: PackOsLauncherState['selectedPack'] | null
+  primaryAction: {
+    kind: NativePackPrimaryActionKind
+    label: string
+    enabled: boolean
+    variant: 'primary' | 'secondary' | 'warning' | 'ghost'
+    reason: string
+  }
+  blockers: NativePackStateBlocker[]
+  warnings: string[]
+}
+
 export interface AppReadinessState {
   ok: boolean
   generatedAt: string
@@ -227,6 +295,7 @@ export interface AppReadinessState {
     cpus: number
     totalMemory: number
   }
+  packState?: NativePackState
   warnings: string[]
 }
 
