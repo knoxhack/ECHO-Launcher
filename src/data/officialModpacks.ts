@@ -34,15 +34,16 @@ const packFallbacks: OfficialModpack[] = [
     runtimeMode: 'native-loader-minecraft',
     betaGate: 'open',
     catalogId: 'ashfall-native-edition',
-    status: 'playable',
-    phase: 'Public Alpha',
-    version: 'Catalog latest',
+    status: 'preview',
+    phase: 'Readiness Blocked',
+    version: 'Catalog gated',
     minecraft: '26.1.2',
     channel: 'alpha',
-    summary: 'The main playable Ashfall experience through ECHO Native Loader.',
-    detail: 'Primary public alpha entrypoint. Uses the Release Index manifest, verifies SHA-256 hashes, and launches through ECHO Native Loader.',
+    summary: 'Ashfall Native assets are checksum-backed, but launcher installs are locked behind release-readiness evidence.',
+    detail: 'Release Index validation is warning until Phase 7-10 beta session proof, gameplay QA evidence, screenshots, and RC smoke results are green.',
     image: ashfallCardImage,
     moduleCount: 33,
+    catalogStatus: 'warning',
   },
   {
     id: 'ashfall-neoforge-edition',
@@ -51,14 +52,15 @@ const packFallbacks: OfficialModpack[] = [
     betaGate: 'metadata',
     catalogId: 'ashfall-neoforge-edition',
     status: 'preview',
-    phase: 'Release Prep',
-    version: 'Catalog latest',
+    phase: 'Manifest Blocked',
+    version: 'Catalog gated',
     minecraft: '26.1.2',
     channel: 'alpha',
-    summary: 'Minecraft/NeoForge Ashfall distribution built from approved Catalog install packages.',
-    detail: 'Uses Catalog-selected NeoForge package artifacts and NeoForge-specific pack configuration.',
+    summary: 'Minecraft/NeoForge Ashfall distribution is visible but locked.',
+    detail: 'The live NeoForge pack manifest is missing moduleRequirements and release-readiness evidence is not green.',
     image: ashfallCardImage,
     moduleCount: 33,
+    catalogStatus: 'warning',
   },
   {
     id: 'ashfall-standalone-edition',
@@ -66,15 +68,16 @@ const packFallbacks: OfficialModpack[] = [
     runtimeMode: 'native-runtime',
     betaGate: 'runtime',
     catalogId: 'ashfall-standalone-edition',
-    status: 'playable',
-    phase: 'Experimental Alpha',
-    version: 'Catalog latest',
+    status: 'preview',
+    phase: 'Manifest Blocked',
+    version: 'Catalog gated',
     minecraft: 'Standalone',
     channel: 'experimental',
-    summary: 'Standalone Ashfall runtime distribution built from approved runtime install packages.',
-    detail: 'Downloads Ashfall Standalone Edition packages and provides the non-Minecraft runtime path for Ashfall modules.',
+    summary: 'Standalone Ashfall runtime distribution is visible but locked.',
+    detail: 'The live Standalone pack manifest is missing moduleRequirements and release-readiness evidence is not green.',
     image: orbitalCardImage,
     moduleCount: 33,
+    catalogStatus: 'warning',
   },
   {
     id: 'sky-relay-native-edition',
@@ -253,6 +256,14 @@ function fallbackName(id: OfficialPackId) {
   return titleCase(id.replace(/-edition$/u, '').replace(/-/gu, ' ')) + ' Edition'
 }
 
+function phaseForCatalogStatus(status: string, fallback?: OfficialModpack) {
+  if (status === 'warning') return 'Warning Gated'
+  if (status === 'blocked') return 'Blocked'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'unpublished') return 'Unpublished'
+  return fallback?.phase ?? 'Awaiting Release'
+}
+
 function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseIndex): OfficialModpack {
   const fallback = fallbackById.get(pack.id)
   const release = latestReleaseForPack(index, pack.id)
@@ -268,8 +279,8 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
     betaGate: status === 'playable' ? 'open' : fallback?.betaGate ?? 'metadata',
     catalogId: pack.id,
     status,
-    phase: locked ? 'Unpublished' : release ? `Approved ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
-    version: release?.version ?? (locked ? 'No release yet' : fallback?.version ?? 'Catalog pending'),
+    phase: locked ? phaseForCatalogStatus(catalogStatus, fallback) : release ? `Approved ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
+    version: release?.version ?? (locked ? fallback?.version ?? 'Catalog gated' : fallback?.version ?? 'Catalog pending'),
     minecraft: fallback?.minecraft ?? (pack.id.endsWith('-standalone-edition') ? 'Standalone' : '26.1.2'),
     channel: release?.channel ?? pack.channel ?? fallback?.channel ?? 'alpha',
     summary: fallback?.summary ?? `${pack.name || fallbackName(pack.id)} from the official Release Index catalog.`,

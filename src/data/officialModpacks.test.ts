@@ -71,6 +71,52 @@ function releaseIndexFixture(): ReleaseIndex {
   }
 }
 
+function ashfallWarningIndexFixture(): ReleaseIndex {
+  return {
+    cacheVersion: 4,
+    source: { provider: 'release-index', channelUrl: 'https://example.test/channels/alpha/launcher-channel.json' },
+    fetchedAt: '2026-06-12T12:00:00Z',
+    releases: [],
+    packs: [
+      {
+        id: 'ashfall-native-edition',
+        name: 'Ashfall Native Edition',
+        channel: 'alpha',
+        loader: 'echo-native-loader',
+        moduleArtifactFamily: 'echo-addon',
+        catalogStatus: 'warning',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-native.json',
+        diagnostic: 'Ashfall Native assets are checksum-exact, but Phase 7-10 release-readiness evidence is not green; launcher installs stay locked.',
+      },
+      {
+        id: 'ashfall-neoforge-edition',
+        name: 'Ashfall NeoForge Edition',
+        channel: 'alpha',
+        loader: 'neoforge',
+        moduleArtifactFamily: 'neoforge',
+        catalogStatus: 'warning',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-neoforge.json',
+        diagnostic: 'Ashfall NeoForge live manifest is missing moduleRequirements and release-readiness evidence is not green; launcher installs stay locked.',
+      },
+      {
+        id: 'ashfall-standalone-edition',
+        name: 'Ashfall Standalone Edition',
+        channel: 'experimental',
+        loader: 'standalone',
+        moduleArtifactFamily: 'standalone',
+        catalogStatus: 'warning',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-standalone.json',
+        diagnostic: 'Ashfall Standalone live manifest is missing moduleRequirements and release-readiness evidence is not green; launcher installs stay locked.',
+      },
+    ],
+    acceptedCount: 0,
+    rejectedReleases: [],
+    diagnostics: [],
+    latestPlayableRelease: null,
+    warnings: ['Ashfall release-readiness gate is still red.'],
+  }
+}
+
 describe('official modpack catalog', () => {
   it('keeps visual fallback data for every official launcher pack family', () => {
     expect(officialModpacks.map((pack) => pack.id)).toEqual([...officialPackIds])
@@ -91,6 +137,14 @@ describe('official modpack catalog', () => {
     ])
     expect(JSON.stringify(officialModpacks)).toMatch(/openlands/i)
     expect(JSON.stringify(officialModpacks)).toMatch(/sky relay/i)
+  })
+
+  it('keeps fallback Ashfall packs view-only while readiness is blocked', () => {
+    const ashfall = officialModpacks.filter((pack) => pack.id.startsWith('ashfall-'))
+
+    expect(ashfall.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
+    expect(ashfall.map((pack) => pack.version)).toEqual(['Catalog gated', 'Catalog gated', 'Catalog gated'])
+    expect(ashfall.map((pack) => pack.catalogStatus)).toEqual(['warning', 'warning', 'warning'])
   })
 
   it('builds visible cards from Release Index channel pack metadata', () => {
@@ -122,5 +176,17 @@ describe('official modpack catalog', () => {
       sourceRepo: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition',
     })
     expect(openlands?.detail).toMatch(/no public GitHub release assets/i)
+  })
+
+  it('keeps warning-gated Ashfall channel packs locked with diagnostics', () => {
+    const cards = officialModpacksFromReleaseIndex(ashfallWarningIndexFixture())
+
+    expect(cards).toHaveLength(3)
+    expect(cards.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
+    expect(cards.map((pack) => pack.phase)).toEqual(['Warning Gated', 'Warning Gated', 'Warning Gated'])
+    expect(cards.map((pack) => pack.version)).toEqual(['Catalog gated', 'Catalog gated', 'Catalog gated'])
+    expect(cards[0]?.detail).toMatch(/Phase 7-10/)
+    expect(cards[1]?.detail).toMatch(/missing moduleRequirements/)
+    expect(cards[2]?.detail).toMatch(/missing moduleRequirements/)
   })
 })

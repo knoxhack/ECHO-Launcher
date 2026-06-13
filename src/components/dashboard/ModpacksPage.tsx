@@ -147,7 +147,7 @@ export function ModpacksPage() {
             <p className="text-xs font-semibold uppercase text-amber-echo">Official Packs</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">ECHO Modpacks</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-              Official ECHO packs are tracked here from the Release Index channel. Approved entries unlock installs; unpublished families stay visible with diagnostics.
+              Official ECHO packs are tracked here from the Release Index channel. Approved entries unlock installs; warning-gated and unpublished families stay visible with diagnostics.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -249,7 +249,7 @@ export function ModpacksPage() {
       ) : null}
 
       <WarningCard
-        text="Preview packs stay view-only until they have strict Release Index metadata and a supported player flow."
+        text="Preview packs stay view-only until they have approved Release Index metadata and a supported player flow. Warning-gated Ashfall builds do not create install profiles."
         title="Official Pack Safety"
       />
     </div>
