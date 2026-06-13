@@ -242,8 +242,11 @@ export function validatePackManifest(value: unknown): PackManifest {
     throw new Error('Manifest files must be an array.')
   }
   const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
-  if (moduleRequirements !== undefined && !Array.isArray(moduleRequirements)) {
-    throw new Error('Manifest moduleRequirements must be an array.')
+  if (!Array.isArray(moduleRequirements)) {
+    throw new Error(`${manifest.name ?? normalizedPack} manifests must include moduleRequirements.`)
+  }
+  if (moduleRequirements.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} manifests must include at least one module requirement.`)
   }
   for (const requirement of moduleRequirements ?? []) {
     const moduleId = String(requirement.id ?? requirement.moduleId ?? '').trim()

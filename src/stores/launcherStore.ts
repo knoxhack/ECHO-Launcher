@@ -30,6 +30,9 @@ const selectableProfileIds = new Set([
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
+  'openlands-native-edition',
+  'openlands-neoforge-edition',
+  'openlands-standalone-edition',
   'arcana-division-native-edition',
   'arcana-division-neoforge-edition',
   'arcana-division-standalone-edition',
@@ -43,6 +46,9 @@ function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'sky-relay' || profileId === 'sky-relay-native-loader') return 'sky-relay-native-edition'
   if (profileId === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
   if (profileId === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'
+  if (profileId === 'openlands' || profileId === 'openlands-native-loader' || profileId === 'openlans' || profileId === 'openlans-native-loader') return 'openlands-native-edition'
+  if (profileId === 'openlands-neoforge' || profileId === 'openlans-neoforge') return 'openlands-neoforge-edition'
+  if (profileId === 'openlands-standalone-runtime' || profileId === 'openlans-standalone-runtime') return 'openlands-standalone-edition'
   if (profileId === 'arcana-division' || profileId === 'arcana-division-native-loader' || profileId === 'arcane-division') return 'arcana-division-native-edition'
   if (profileId === 'arcana-division-neoforge') return 'arcana-division-neoforge-edition'
   if (profileId === 'arcana-division-standalone-runtime') return 'arcana-division-standalone-edition'

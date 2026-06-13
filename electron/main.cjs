@@ -1736,8 +1736,11 @@ function validatePackManifest(manifest, options = {}) {
     }
   }
   const moduleRequirements = manifest.moduleRequirements ?? manifest.requiredModules
-  if (moduleRequirements !== undefined && !Array.isArray(moduleRequirements)) {
-    throw new Error('Manifest moduleRequirements must be an array.')
+  if (!Array.isArray(moduleRequirements)) {
+    throw new Error(`${manifest.name ?? normalizedPack} manifests must include moduleRequirements.`)
+  }
+  if (moduleRequirements.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} manifests must include at least one module requirement.`)
   }
   for (const requirement of moduleRequirements ?? []) {
     const moduleId = String(requirement?.id ?? requirement?.moduleId ?? '').trim()
@@ -2527,6 +2530,8 @@ function normalizeCanonicalIndexEntry(value) {
     compatibility: Array.isArray(value.compatibility) ? value.compatibility.map((item) => String(item)) : [],
     trust: String(value.trust),
     validation: String(value.validation),
+    notes: value.notes === undefined ? undefined : String(value.notes),
+    publishedAt: value.publishedAt === undefined ? undefined : String(value.publishedAt),
   }
 }
 
@@ -2542,6 +2547,29 @@ function catalogUrlsFromLauncherChannel(channel) {
     if (/^https:\/\/raw\.githubusercontent\.com\//.test(url)) return true
     return allowLocalUrls && /^http:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url)
   }))]
+}
+
+function normalizeLauncherChannelPack(value, fallbackChannel) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const id = normalizeOfficialPackId(value.id)
+  if (!id) return null
+  const pack = {
+    id,
+    name: String(value.name ?? id),
+    channel: String(value.channel ?? fallbackChannel ?? CANONICAL_CHANNEL),
+  }
+  for (const field of ['loader', 'moduleArtifactFamily', 'manifestUrl', 'catalogEntryUrl', 'repoUrl', 'catalogStatus', 'diagnostic']) {
+    if (value[field] !== undefined && value[field] !== null && value[field] !== '') {
+      pack[field] = String(value[field])
+    }
+  }
+  return pack
+}
+
+function launcherChannelPacks(channel) {
+  return (Array.isArray(channel?.packs) ? channel.packs : [])
+    .map((pack) => normalizeLauncherChannelPack(pack, channel?.channel))
+    .filter(Boolean)
 }
 
 async function fetchCanonicalReleaseIndexCatalog(config, cachePath) {
@@ -2567,6 +2595,7 @@ async function fetchCanonicalReleaseIndexCatalog(config, cachePath) {
     fetchedAt: isoNow(),
     channel: channel?.channel,
     entries,
+    packs: launcherChannelPacks(channel),
     warnings,
   }
   await writeJson(cachePath, catalog)
@@ -2579,6 +2608,7 @@ function isReleaseIndexCatalogCacheValid(cached, config) {
     cached &&
     cached.sourceUrl === config.channelUrl &&
     Array.isArray(cached.entries) &&
+    Array.isArray(cached.packs) &&
     Number.isFinite(fetchedAt) &&
     Date.now() - fetchedAt < 15 * 60 * 1000
   )
@@ -2590,7 +2620,7 @@ async function releaseIndexCatalog(payload = {}) {
   const paths = getPaths()
   const cachePath = path.join(paths.releaseCache, 'canonical-release-index.json')
   if (!config.enabled) {
-    return { sourceUrl: config.channelUrl, fetchedAt: isoNow(), channel: undefined, entries: [], warnings: ['Canonical Release Index is disabled in settings.'] }
+    return { sourceUrl: config.channelUrl, fetchedAt: isoNow(), channel: undefined, entries: [], packs: [], warnings: ['Canonical Release Index is disabled in settings.'] }
   }
   if (!payload.refresh && await exists(cachePath)) {
     const cached = await readJson(cachePath, null)
@@ -2632,6 +2662,7 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
     const canonicalEntries = catalog.entries
       .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
       .filter(Boolean)
+    const nonApprovedModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && entry.validation !== 'approved')
     const byKey = new Map()
     for (const entry of [...canonicalEntries, ...index.releases]) {
       byKey.set(`${normalizeOfficialPackId(entry.pack) ?? entry.pack}:${entry.channel}:${entry.version}`, entry)
@@ -2645,6 +2676,7 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
       ...index,
       fetchedAt: isoNow(),
       releases,
+      packs: catalog.packs ?? [],
       acceptedCount: releases.length,
       latestPlayableRelease: releases[0] ?? null,
       warnings,
@@ -2656,6 +2688,13 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
           severity: 'info',
           reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
           assets: entry.assets.map((asset) => asset.name),
+        })),
+        ...nonApprovedModpacks.map((entry) => ({
+          tagName: entry.releaseTag,
+          releaseName: entry.id,
+          severity: entry.validation === 'blocked' || entry.validation === 'rejected' ? 'critical' : 'warning',
+          reason: entry.notes ?? `Release Index ${entry.id} is ${entry.validation}.`,
+          assets: [],
         })),
       ],
     }
@@ -2676,20 +2715,31 @@ async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWa
     .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
     .filter(Boolean)
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+  const nonApprovedModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && entry.validation !== 'approved')
   return {
     cacheVersion: RELEASE_CACHE_VERSION,
     source: config,
     fetchedAt: isoNow(),
     releases,
+    packs: catalog.packs ?? [],
     acceptedCount: releases.length,
     rejectedReleases: [],
-    diagnostics: releases.map((entry) => ({
-      tagName: entry.tagName,
-      releaseName: entry.name,
-      severity: 'info',
-      reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
-      assets: entry.assets.map((asset) => asset.name),
-    })),
+    diagnostics: [
+      ...releases.map((entry) => ({
+        tagName: entry.tagName,
+        releaseName: entry.name,
+        severity: 'info',
+        reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
+        assets: entry.assets.map((asset) => asset.name),
+      })),
+      ...nonApprovedModpacks.map((entry) => ({
+        tagName: entry.releaseTag,
+        releaseName: entry.id,
+        severity: entry.validation === 'blocked' || entry.validation === 'rejected' ? 'critical' : 'warning',
+        reason: entry.notes ?? `Release Index ${entry.id} is ${entry.validation}.`,
+        assets: [],
+      })),
+    ],
     latestPlayableRelease: releases[0] ?? null,
     warnings: [...extraWarnings, ...catalog.warnings],
   }
@@ -2956,6 +3006,7 @@ function blankReleaseIndex(config, warnings = [], diagnostics = [], rejectedRele
     source: config,
     fetchedAt: new Date().toISOString(),
     releases: [],
+    packs: [],
     acceptedCount: 0,
     rejectedReleases,
     diagnostics,
@@ -3138,6 +3189,7 @@ function isReleaseIndexCacheValid(cached, config) {
     cached?.cacheVersion === RELEASE_CACHE_VERSION &&
     Array.isArray(cached.releases) &&
     cached.releases.length > 0 &&
+    Array.isArray(cached.packs) &&
     Array.isArray(cached.diagnostics) &&
     Array.isArray(cached.rejectedReleases) &&
     cached.source?.provider === config.provider &&
@@ -3259,6 +3311,7 @@ async function fetchFreshReleaseIndex(config, cachePath) {
     source: config,
     fetchedAt: new Date().toISOString(),
     releases: entries,
+    packs: [],
     acceptedCount: entries.length,
     rejectedReleases,
     diagnostics,

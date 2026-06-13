@@ -1,7 +1,7 @@
 import { Archive, Boxes, DownloadCloud, Eye, FileInput, FolderSearch, LockKeyhole, Play, RadioTower, RotateCcw, ShieldAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { officialModpacks, type OfficialModpack } from '../../data/officialModpacks'
+import { officialModpacksFromReleaseIndex, type OfficialModpack } from '../../data/officialModpacks'
 import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
 import { useLauncherStore } from '../../stores/launcherStore'
 import { usePackOsStore } from '../../stores/packOsStore'
@@ -47,18 +47,19 @@ export function ModpacksPage() {
   const refreshPackOs = usePackOsStore((state) => state.refreshPackOs)
   const [importCandidates, setImportCandidates] = useState<NativeImportCandidate[]>([])
   const [scanningImports, setScanningImports] = useState(false)
+  const visibleModpacks = useMemo(() => officialModpacksFromReleaseIndex(releaseIndex), [releaseIndex])
 
   const playableRelease = useMemo<ReleaseEntry | null>(
-    () => latestPlayableReleaseForPack(releaseIndex, 'ashfall-native-edition'),
+    () => releaseIndex?.latestPlayableRelease ?? releaseIndex?.releases[0] ?? null,
     [releaseIndex],
   )
-  const acceptedCount = releaseAcceptedCount(releaseIndex)
   const rejectedCount = releaseRejectedCount(releaseIndex)
+  const playablePackCount = visibleModpacks.filter((pack) => pack.status === 'playable').length
 
   const refreshReleases = useCallback(async (refresh = false, announce = refresh) => {
     try {
       const index = await loadReleases(refresh)
-      const hasPlayableRelease = Boolean(latestPlayableReleaseForPack(index, 'ashfall-native-edition'))
+      const hasPlayableRelease = index.releases.length > 0
       const accepted = releaseAcceptedCount(index)
       const rejected = releaseRejectedCount(index)
       if (announce) {
@@ -90,8 +91,8 @@ export function ModpacksPage() {
       return
     }
     const file = await invokeNative('dialog:select-file', {
-      title: 'Import Ashfall pack manifest',
-      filters: [{ name: 'Ashfall Manifest', extensions: ['json'] }],
+      title: 'Import ECHO pack manifest',
+      filters: [{ name: 'ECHO Pack Manifest', extensions: ['json'] }],
     })
     if (file.canceled || !file.path) return
     try {
@@ -112,7 +113,7 @@ export function ModpacksPage() {
       let rootPath: string | undefined
       if (manual) {
         const folder = await invokeNative('dialog:select-directory', {
-          title: 'Select an existing Ashfall install',
+          title: 'Select an existing ECHO install',
         })
         if (folder.canceled || !folder.path) return
         rootPath = folder.path
@@ -121,7 +122,7 @@ export function ModpacksPage() {
       setImportCandidates(candidates)
       addToast('Import scan complete', `${candidates.length} candidate install${candidates.length === 1 ? '' : 's'} detected.`, candidates.length ? 'success' : 'warning')
     } catch (error) {
-      addToast('Import scan failed', error instanceof Error ? error.message : 'Unable to scan for Ashfall installs.', 'danger')
+      addToast('Import scan failed', error instanceof Error ? error.message : 'Unable to scan for existing installs.', 'danger')
     } finally {
       setScanningImports(false)
     }
@@ -129,10 +130,10 @@ export function ModpacksPage() {
 
   const importCandidate = async (candidate: NativeImportCandidate) => {
     try {
-      const result = await invokeNative('instance:import', { path: candidate.path, name: 'Ashfall' })
+      const result = await invokeNative('instance:import', { path: candidate.path, name: candidate.name || 'ECHO Pack' })
       const profiles = await invokeNative('profile:list')
       setProfiles(profiles)
-      addToast(result.ok ? 'Ashfall install linked' : 'Import failed', `${result.profile.name} now points to ${result.profile.installPath}.`, result.ok ? 'success' : 'danger')
+      addToast(result.ok ? 'Install linked' : 'Import failed', `${result.profile.name} now points to ${result.profile.installPath}.`, result.ok ? 'success' : 'danger')
     } catch (error) {
       addToast('Import failed', error instanceof Error ? error.message : 'Unable to import selected install.', 'danger')
     }
@@ -146,7 +147,7 @@ export function ModpacksPage() {
             <p className="text-xs font-semibold uppercase text-amber-echo">Official Packs</p>
             <h2 className="mt-1 text-2xl font-semibold text-white">ECHO Modpacks</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-              Official ECHO packs are tracked here. Ashfall now exposes loader-specific beta choices so testers can verify each runtime path separately.
+              Official ECHO packs are tracked here from the Release Index channel. Approved entries unlock installs; unpublished families stay visible with diagnostics.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -173,12 +174,12 @@ export function ModpacksPage() {
             <p className="mt-2 text-sm leading-6 text-slate-300">
               {playableRelease
                 ? `${playableRelease.name} is ready for strict install.`
-                : 'No playable Ashfall release is available until echo-release.json, the pack manifest, and the pack zip are uploaded together.'}
+                : 'No playable pack release is available until echo-release.json, the pack manifest, and the pack archive are uploaded together.'}
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <MetricCard icon={Boxes} label="Official Packs" value={`${officialModpacks.length}`} />
-            <MetricCard icon={RadioTower} label="Playable" value={`${acceptedCount}`} />
+            <MetricCard icon={Boxes} label="Official Packs" value={`${visibleModpacks.length}`} />
+            <MetricCard icon={RadioTower} label="Playable" value={`${playablePackCount}`} />
             <MetricCard icon={Archive} label="Trust" value={playableRelease ? 'Verified' : 'Missing'} tone={playableRelease ? 'success' : 'amber'} />
           </div>
         </div>
@@ -191,7 +192,7 @@ export function ModpacksPage() {
 
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid gap-4 lg:grid-cols-2">
-          {officialModpacks.map((pack) => (
+          {visibleModpacks.map((pack) => (
             <OfficialPackCard
               key={pack.id}
               pack={pack}
@@ -221,7 +222,7 @@ export function ModpacksPage() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase text-cyan-soft">Guided Import</p>
-              <h3 className="mt-1 text-lg font-semibold text-white">Detected Ashfall Installs</h3>
+              <h3 className="mt-1 text-lg font-semibold text-white">Detected ECHO Installs</h3>
             </div>
             <StatusChip label={`${importCandidates.length} found`} status="update_available" />
           </div>
@@ -239,7 +240,7 @@ export function ModpacksPage() {
                   </p>
                 </div>
                 <CyberButton disabled={candidate.alreadyManaged} icon={FileInput} onClick={() => void importCandidate(candidate)} variant="primary">
-                  Link Ashfall
+                  Link Install
                 </CyberButton>
               </div>
             ))}
@@ -248,7 +249,7 @@ export function ModpacksPage() {
       ) : null}
 
       <WarningCard
-        text="Preview packs stay view-only until they have strict release metadata and a supported player flow."
+        text="Preview packs stay view-only until they have strict Release Index metadata and a supported player flow."
         title="Official Pack Safety"
       />
     </div>
@@ -339,7 +340,7 @@ function OfficialPackCard({
               size="sm"
               variant="primary"
             >
-              {pack.runtimeMode ? 'Select Runtime' : 'Play Ashfall'}
+              {pack.runtimeMode ? 'Select Runtime' : 'Play Pack'}
             </CyberButton>
             <CyberButton
               icon={RotateCcw}

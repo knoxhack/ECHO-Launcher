@@ -110,6 +110,21 @@ export interface CanonicalReleaseIndexEntry {
   compatibility: string[]
   trust: ReleaseIndexTrust
   validation: ReleaseIndexValidationState
+  notes?: string
+  publishedAt?: string
+}
+
+export interface ReleaseIndexChannelPack {
+  id: OfficialPackId
+  name: string
+  channel: string
+  loader?: string
+  moduleArtifactFamily?: string
+  manifestUrl?: string
+  catalogEntryUrl?: string
+  repoUrl?: string
+  catalogStatus?: ReleaseIndexValidationState | 'unpublished'
+  diagnostic?: string
 }
 
 export interface CanonicalReleaseIndexCatalog {
@@ -117,6 +132,7 @@ export interface CanonicalReleaseIndexCatalog {
   fetchedAt: string
   channel?: string
   entries: CanonicalReleaseIndexEntry[]
+  packs: ReleaseIndexChannelPack[]
   warnings: string[]
 }
 
@@ -181,6 +197,7 @@ export interface ReleaseIndex {
   source: ReleaseIndexSource
   fetchedAt: string
   releases: ReleaseEntry[]
+  packs?: ReleaseIndexChannelPack[]
   acceptedCount?: number
   rejectedReleases?: RejectedRelease[]
   diagnostics?: ReleaseDiagnostic[]

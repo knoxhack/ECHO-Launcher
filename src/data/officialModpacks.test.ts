@@ -1,30 +1,80 @@
 import { describe, expect, it } from 'vitest'
-import { officialModpacks } from './officialModpacks'
+import type { ReleaseIndex } from '../types/releases'
+import { officialModpacks, officialModpacksFromReleaseIndex } from './officialModpacks'
+
+const officialPackIds = [
+  'ashfall-native-edition',
+  'ashfall-neoforge-edition',
+  'ashfall-standalone-edition',
+  'sky-relay-native-edition',
+  'sky-relay-neoforge-edition',
+  'sky-relay-standalone-edition',
+  'openlands-native-edition',
+  'openlands-neoforge-edition',
+  'openlands-standalone-edition',
+  'arcana-division-native-edition',
+  'arcana-division-neoforge-edition',
+  'arcana-division-standalone-edition',
+] as const
+
+function releaseIndexFixture(): ReleaseIndex {
+  return {
+    cacheVersion: 4,
+    source: { provider: 'release-index', channelUrl: 'https://example.test/channels/alpha/launcher-channel.json' },
+    fetchedAt: '2026-06-12T12:00:00Z',
+    releases: [
+      {
+        id: 'release-index:sky-relay-native-edition:0.1.0',
+        pack: 'sky-relay-native-edition',
+        version: '0.1.0',
+        channel: 'alpha',
+        tagName: 'sky-relay-native-0.1.0-alpha',
+        name: 'Sky Relay Native Edition 0.1.0',
+        draft: false,
+        prerelease: true,
+        publishedAt: '2026-06-11T13:32:21Z',
+        releasePageUrl: 'https://github.com/knoxhack/ECHO-Sky-Relay-Native-Edition/releases/tag/sky-relay-native-0.1.0-alpha',
+        releaseNotes: ['Resolved through the approved Catalog entry sky-relay-native-edition.'],
+        manifestAssetName: 'sky-relay-native-edition-alpha-0.1.0.pack.json',
+        manifestUrl: 'https://example.test/sky-relay-native-edition-alpha-0.1.0.pack.json',
+        manifestSha256: '3'.repeat(64),
+        trust: 'verified-metadata',
+        assets: [],
+      },
+    ],
+    packs: [
+      {
+        id: 'sky-relay-native-edition',
+        name: 'Sky Relay Native Edition',
+        channel: 'alpha',
+        loader: 'echo-native-loader',
+        moduleArtifactFamily: 'echo-addon',
+        catalogStatus: 'approved',
+        catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/sky-relay-native.json',
+      },
+      {
+        id: 'openlands-native-edition',
+        name: 'Openlands Native Edition',
+        channel: 'alpha',
+        loader: 'echo-native-loader',
+        moduleArtifactFamily: 'echo-addon',
+        catalogStatus: 'unpublished',
+        repoUrl: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition',
+        diagnostic: 'Openlands Native Edition is official but has no public GitHub release assets yet.',
+      },
+    ],
+    acceptedCount: 1,
+    rejectedReleases: [],
+    diagnostics: [],
+    latestPlayableRelease: null,
+    warnings: [],
+  }
+}
 
 describe('official modpack catalog', () => {
-  it('lists the official launcher products surfaced for public alpha readiness', () => {
-    expect(officialModpacks.map((pack) => pack.id)).toEqual([
-      'ashfall-native-edition',
-      'ashfall-neoforge-edition',
-      'ashfall-standalone-edition',
-      'sky-relay-native-edition',
-      'sky-relay-neoforge-edition',
-      'sky-relay-standalone-edition',
-      'arcana-division-native-edition',
-      'arcana-division-neoforge-edition',
-      'arcana-division-standalone-edition',
-    ])
-    expect(officialModpacks.map((pack) => pack.catalogId)).toEqual([
-      'ashfall-native-edition',
-      'ashfall-neoforge-edition',
-      'ashfall-standalone-edition',
-      'sky-relay-native-edition',
-      'sky-relay-neoforge-edition',
-      'sky-relay-standalone-edition',
-      'arcana-division-native-edition',
-      'arcana-division-neoforge-edition',
-      'arcana-division-standalone-edition',
-    ])
+  it('keeps visual fallback data for every official launcher pack family', () => {
+    expect(officialModpacks.map((pack) => pack.id)).toEqual([...officialPackIds])
+    expect(officialModpacks.map((pack) => pack.catalogId)).toEqual([...officialPackIds])
     expect(officialModpacks.map((pack) => pack.runtimeMode)).toEqual([
       'native-loader-minecraft',
       'neoforge-minecraft',
@@ -35,33 +85,42 @@ describe('official modpack catalog', () => {
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
+      'native-loader-minecraft',
+      'neoforge-minecraft',
+      'native-runtime',
     ])
-    expect(JSON.stringify(officialModpacks)).toMatch(/neoforge/i)
+    expect(JSON.stringify(officialModpacks)).toMatch(/openlands/i)
+    expect(JSON.stringify(officialModpacks)).toMatch(/sky relay/i)
   })
 
-  it('keeps Sky Relay gated as a visible preview until release evidence is promoted', () => {
-    const skyRelayPacks = officialModpacks.filter((pack) => pack.id.startsWith('sky-relay-'))
+  it('builds visible cards from Release Index channel pack metadata', () => {
+    const cards = officialModpacksFromReleaseIndex(releaseIndexFixture())
 
-    expect(skyRelayPacks).toHaveLength(3)
-    expect(skyRelayPacks.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
-    expect(skyRelayPacks.map((pack) => pack.phase)).toEqual(['Blocked Preview', 'Blocked Preview', 'Blocked Preview'])
-    expect(skyRelayPacks.map((pack) => pack.version)).toEqual(['Catalog gated', 'Catalog gated', 'Catalog gated'])
-    expect(skyRelayPacks.map((pack) => pack.moduleCount)).toEqual([5, 5, 5])
-    expect(skyRelayPacks.map((pack) => pack.name)).toEqual([
-      'Sky Relay Native Edition',
-      'Sky Relay NeoForge Edition',
-      'Sky Relay Standalone Edition',
-    ])
+    expect(cards.map((pack) => pack.id)).toEqual(['sky-relay-native-edition', 'openlands-native-edition'])
   })
 
-  it('surfaces Arcana Division as approved beta launcher packs', () => {
-    const arcanaPacks = officialModpacks.filter((pack) => pack.id.startsWith('arcana-division-'))
+  it('makes approved Sky Relay releases playable from the Release Index', () => {
+    const skyRelay = officialModpacksFromReleaseIndex(releaseIndexFixture()).find((pack) => pack.id === 'sky-relay-native-edition')
 
-    expect(arcanaPacks).toHaveLength(3)
-    expect(arcanaPacks.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable'])
-    expect(arcanaPacks.map((pack) => pack.channel)).toEqual(['beta', 'beta', 'beta'])
-    expect(arcanaPacks.map((pack) => pack.moduleCount)).toEqual([25, 25, 25])
+    expect(skyRelay).toMatchObject({
+      status: 'playable',
+      phase: 'Approved Alpha',
+      version: '0.1.0',
+      moduleCount: 12,
+      catalogStatus: 'approved',
+    })
+  })
+
+  it('shows Openlands as official but unpublished until real release assets exist', () => {
+    const openlands = officialModpacksFromReleaseIndex(releaseIndexFixture()).find((pack) => pack.id === 'openlands-native-edition')
+
+    expect(openlands).toMatchObject({
+      status: 'preview',
+      phase: 'Unpublished',
+      version: 'No release yet',
+      catalogStatus: 'unpublished',
+      sourceRepo: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition',
+    })
+    expect(openlands?.detail).toMatch(/no public GitHub release assets/i)
   })
 })
-
-

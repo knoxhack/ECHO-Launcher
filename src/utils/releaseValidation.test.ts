@@ -11,9 +11,11 @@ import {
   isUsableReleaseCache,
   latestPlayableRelease,
   latestPlayableReleaseForPack,
+  moduleArtifactFamilyForPack,
   moduleArtifactName,
   nativeLoaderMetadataStatus,
   normalizeOfficialPackId,
+  officialPackIds,
   packManifestAssetName,
   productUpdateArtifact,
   productUpdateEntry,
@@ -124,6 +126,44 @@ const canonicalStandalonePack: CanonicalReleaseIndexEntry = {
   },
   dependencies: [],
   compatibility: ['ashfall-standalone-edition'],
+}
+
+const canonicalSkyRelayPack: CanonicalReleaseIndexEntry = {
+  ...canonicalPack,
+  id: 'sky-relay-native-edition',
+  version: '0.1.0',
+  sourceRepo: 'knoxhack/ECHO-Sky-Relay-Native-Edition',
+  releaseTag: 'sky-relay-native-0.1.0-alpha',
+  artifacts: {
+    pack: {
+      file: 'sky-relay-native-edition-0.1.0.zip',
+      sha256: '1'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Sky-Relay-Native-Edition/releases/download/sky-relay-native-0.1.0-alpha/sky-relay-native-edition-0.1.0.zip',
+      size: 100,
+    },
+    manifest: {
+      file: 'sky-relay-native-edition-alpha-0.1.0.pack.json',
+      sha256: '2'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Sky-Relay-Native-Edition/releases/download/sky-relay-native-0.1.0-alpha/sky-relay-native-edition-alpha-0.1.0.pack.json',
+      size: 10,
+    },
+  },
+  dependencies: [{ id: 'echoskyrelayprotocol', kind: 'addon', version: '0.1.0' }],
+  compatibility: ['native', 'sky-relay'],
+  trust: 'echo-workflow-built',
+  validation: 'approved',
+}
+
+const canonicalOpenlandsWarningPack: CanonicalReleaseIndexEntry = {
+  ...canonicalSkyRelayPack,
+  id: 'openlands-native-edition',
+  sourceRepo: 'knoxhack/ECHO-Openlands-Native-Edition',
+  releaseTag: 'planned-openlands-native-0.1.0',
+  artifacts: {},
+  dependencies: [{ id: 'echoopenlandsprotocol', kind: 'addon', version: '0.1.0' }],
+  compatibility: ['native', 'openlands'],
+  trust: 'source-linked',
+  validation: 'warning',
 }
 
 const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
@@ -259,13 +299,43 @@ describe('releaseValidation', () => {
     expect(latestPlayableReleaseForPack(releaseIndex({ releases: [baseRelease, arcanaRelease] }), 'arcana-division')?.version).toBe('1.0.0')
   })
 
+  it('normalizes Sky Relay and Openlands official pack aliases', () => {
+    expect(officialPackIds).toEqual([
+      'ashfall-native-edition',
+      'ashfall-neoforge-edition',
+      'ashfall-standalone-edition',
+      'sky-relay-native-edition',
+      'sky-relay-neoforge-edition',
+      'sky-relay-standalone-edition',
+      'openlands-native-edition',
+      'openlands-neoforge-edition',
+      'openlands-standalone-edition',
+      'arcana-division-native-edition',
+      'arcana-division-neoforge-edition',
+      'arcana-division-standalone-edition',
+    ])
+    expect(normalizeOfficialPackId('sky-relay')).toBe('sky-relay-native-edition')
+    expect(normalizeOfficialPackId('sky-relay-neoforge')).toBe('sky-relay-neoforge-edition')
+    expect(normalizeOfficialPackId('sky-relay-standalone-runtime')).toBe('sky-relay-standalone-edition')
+    expect(normalizeOfficialPackId('openlands')).toBe('openlands-native-edition')
+    expect(normalizeOfficialPackId('openlans')).toBe('openlands-native-edition')
+    expect(normalizeOfficialPackId('openlans-neoforge')).toBe('openlands-neoforge-edition')
+    expect(normalizeOfficialPackId('openlands-standalone-runtime')).toBe('openlands-standalone-edition')
+    expect(isPlayablePackRelease({ ...baseRelease, pack: 'sky-relay-native-edition' }, 'sky-relay')).toBe(true)
+  })
+
   it('builds expected pack manifest asset names', () => {
     expect(packManifestAssetName('alpha', '0.1.0', 'ashfall-native-edition')).toBe('ashfall-native-edition-alpha-0.1.0.pack.json')
+    expect(packManifestAssetName('alpha', '0.1.0', 'sky-relay-native-edition')).toBe('sky-relay-native-edition-alpha-0.1.0.pack.json')
+    expect(packManifestAssetName('alpha', '0.1.0', 'openlands-neoforge-edition')).toBe('openlands-neoforge-edition-alpha-0.1.0.pack.json')
     expect(packManifestAssetName('beta', '1.0.0', 'arcana-division-native-edition')).toBe('arcana-division-native-edition-beta-1.0.0.pack.json')
     expect(packManifestAssetName('experimental', '0.1.0', 'ashfall-standalone-edition')).toBe('ashfall-standalone-edition-experimental-0.1.0.pack.json')
   })
 
   it('builds expected module artifact names', () => {
+    expect(moduleArtifactFamilyForPack('sky-relay-native-edition')).toBe('echo-addon')
+    expect(moduleArtifactFamilyForPack('openlands-neoforge-edition')).toBe('neoforge')
+    expect(moduleArtifactFamilyForPack('sky-relay-standalone-edition')).toBe('standalone')
     expect(moduleArtifactName('echocore', '1.0.0', 'neoforge')).toBe('echocore-1.0.0-neoforge.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'standalone')).toBe('echocore-1.0.0-standalone.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'echo-addon')).toBe('echocore-1.0.0.echo-addon')
@@ -290,6 +360,22 @@ describe('releaseValidation', () => {
       manifestAssetName: 'ashfall-standalone-edition-experimental-0.1.0.pack.json',
       trust: 'verified-metadata',
     })
+  })
+
+  it('maps approved Sky Relay entries and keeps warning Openlands entries non-playable', () => {
+    const skyRelayEntry = releaseEntryFromCanonicalModpack(canonicalSkyRelayPack, '2026-06-12T00:00:00Z')
+    const openlandsEntry = releaseEntryFromCanonicalModpack(canonicalOpenlandsWarningPack, '2026-06-12T00:00:00Z')
+
+    expect(skyRelayEntry).toMatchObject({
+      pack: 'sky-relay-native-edition',
+      channel: 'alpha',
+      version: '0.1.0',
+      tagName: 'sky-relay-native-0.1.0-alpha',
+      manifestAssetName: 'sky-relay-native-edition-alpha-0.1.0.pack.json',
+      trust: 'verified-metadata',
+    })
+    expect(skyRelayEntry?.assets.map((asset) => asset.name)).toContain('sky-relay-native-edition-0.1.0.zip')
+    expect(openlandsEntry).toBeNull()
   })
 
   it('parses and resolves echo protocol links only through approved index entries', () => {
@@ -321,6 +407,19 @@ describe('releaseValidation', () => {
     expect(addonInstall.artifact.name).toBe('echoarmory-1.0.0.echo-addon')
     expect(addonInstall.dependencies?.map((entry) => entry.id)).toEqual(['echocore'])
     expect(resolveEchoProtocolEntry('echo://update/pack/ashfall-neoforge-edition', [canonicalPack])?.entry.id).toBe('ashfall-neoforge-edition')
+    expect(parseEchoProtocolUrl('echo://update/pack/sky-relay-native-edition')).toMatchObject({
+      action: 'update-pack',
+      id: 'sky-relay-native-edition',
+    })
+    expect(parseEchoProtocolUrl('echo://install/addon/echoskyrelayprotocol?pack=sky-relay-neoforge')).toMatchObject({
+      action: 'install-addon',
+      id: 'echoskyrelayprotocol',
+      pack: 'sky-relay-neoforge-edition',
+    })
+    expect(parseEchoProtocolUrl('echo://update/pack/openlans')).toMatchObject({
+      action: 'update-pack',
+      id: 'openlands-native-edition',
+    })
   })
 
   it('rejects addon install links when the requested pack has no indexed artifact', () => {
@@ -458,6 +557,7 @@ describe('releaseValidation', () => {
           libraries: [{ name: 'com.echo:native-loader:1.0.0' }],
         },
       },
+      moduleRequirements: [{ id: 'echocore', version: '1.4.0' }],
       modules: ['echocore'],
       files: [
         {
@@ -489,6 +589,7 @@ describe('releaseValidation', () => {
       artifactSha256: 'd'.repeat(64),
       nativeLoader: baseNativeLoader(),
       launch: { mainClass: 'net.neoforged.fml.startup.Client', gameArgs: [], jvmArgs: [] },
+      moduleRequirements: [{ id: 'echocore', version: '1.2.0' }],
       modules: ['echocore'],
       files: [
         {
@@ -547,6 +648,35 @@ describe('releaseValidation', () => {
     expect(manifest.pack).toBe('ashfall-neoforge-edition')
     expect(manifest.loader?.type).toBe('neoforge')
     expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
+  })
+
+  it('rejects official pack manifests without module requirements', () => {
+    expect(() =>
+      validatePackManifest({
+        pack: 'ashfall-neoforge-edition',
+        version: '1.0.0',
+        channel: 'alpha',
+        minecraft: '26.1.2',
+        loader: {
+          type: 'neoforge',
+          version: '26.1.2',
+        },
+        modules: ['echocore'],
+        files: [
+          {
+            path: 'mods/echocore-1.0.0-neoforge.jar',
+            assetName: 'echocore-1.0.0-neoforge.jar',
+            sha256: 'c'.repeat(64),
+            size: 100,
+            required: true,
+            moduleId: 'echocore',
+            side: 'both',
+          },
+        ],
+        changelog: ['NeoForge release'],
+        worldgenWarning: true,
+      }),
+    ).toThrow(/must include moduleRequirements/)
   })
 
   it('accepts all three Arcana Division beta pack manifests', () => {
@@ -618,6 +748,71 @@ describe('releaseValidation', () => {
     expect(nativeManifest.moduleRequirements).toHaveLength(24)
     expect(neoforgeManifest.pack).toBe('arcana-division-neoforge-edition')
     expect(standaloneManifest.pack).toBe('arcana-division-standalone-edition')
+  })
+
+  it('accepts Sky Relay and Openlands official pack manifests', () => {
+    const skyRelayNative = validatePackManifest({
+      ...baseManifest(),
+      pack: 'sky-relay-native-edition',
+      moduleRequirements: [{ id: 'echoskyrelayprotocol', version: '0.1.0' }],
+    })
+    const skyRelayStandalone = validatePackManifest({
+      pack: 'sky-relay-standalone-edition',
+      version: '0.1.0',
+      channel: 'alpha',
+      minecraft: 'standalone',
+      runtime: { requiredJava: 'none' },
+      launch: { mainClass: 'com.echo.runtime.SkyRelayStandaloneMain', gameArgs: [], jvmArgs: [] },
+      moduleRequirements: [{ id: 'echoskyrelayprotocol', version: '0.1.0' }],
+      modules: ['echoskyrelayprotocol'],
+      files: [
+        {
+          path: 'mods/echoskyrelayprotocol-0.1.0-standalone.jar',
+          assetName: 'echoskyrelayprotocol-0.1.0-standalone.jar',
+          sha256: 'd'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echoskyrelayprotocol',
+          side: 'both',
+        },
+      ],
+      changelog: ['Sky Relay alpha'],
+      worldgenWarning: false,
+    })
+    const openlandsNeoForge = validatePackManifest({
+      pack: 'openlans-neoforge',
+      version: '0.1.0',
+      channel: 'alpha',
+      minecraft: '26.1.2',
+      loader: {
+        type: 'neoforge',
+        version: '26.1.2',
+        installer: {
+          assetName: 'neoforge-26.1.2-installer.jar',
+          sha256: 'f'.repeat(64),
+          installMode: 'client',
+        },
+      },
+      moduleRequirements: [{ id: 'echoopenlandsprotocol', version: '0.1.0' }],
+      modules: ['echoopenlandsprotocol'],
+      files: [
+        {
+          path: 'mods/echoopenlandsprotocol-0.1.0-neoforge.jar',
+          assetName: 'echoopenlandsprotocol-0.1.0-neoforge.jar',
+          sha256: 'c'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echoopenlandsprotocol',
+          side: 'both',
+        },
+      ],
+      changelog: ['Openlands planned manifest'],
+      worldgenWarning: true,
+    })
+
+    expect(skyRelayNative.pack).toBe('sky-relay-native-edition')
+    expect(skyRelayStandalone.pack).toBe('sky-relay-standalone-edition')
+    expect(openlandsNeoForge.pack).toBe('openlands-neoforge-edition')
   })
 
   it('rejects unsafe module requirement paths', () => {
@@ -693,6 +888,7 @@ describe('releaseValidation', () => {
       runtime: { requiredJava: 'none' },
       launch: { mainClass: 'com.echo.runtime.AshfallStandaloneMain', gameArgs: [], jvmArgs: [] },
       modules: ['echocore'],
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
       files: [
         {
           path: 'runtime/ashfall-runtime.bin',
@@ -719,6 +915,7 @@ describe('releaseValidation', () => {
         minecraft: '26.1.2',
         nativeLoader: baseNativeLoader(),
         modules: [],
+        moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
         files: [
           {
             path: 'mods/echocore.jar',
@@ -745,6 +942,7 @@ describe('releaseValidation', () => {
         minecraft: '26.1.2',
         nativeLoader: baseNativeLoader(),
         modules: ['echocore'],
+        moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
         files: [
           {
             path: 'mods/echocore.jar',
@@ -780,6 +978,7 @@ function baseManifest() {
     minecraft: '26.1.2',
     nativeLoader: baseNativeLoader(),
     modules: ['echocore'],
+    moduleRequirements: [{ id: 'echocore', version: '1.4.0' }],
     files: [
       {
         path: 'mods/echocore-1.4.0.jar',
