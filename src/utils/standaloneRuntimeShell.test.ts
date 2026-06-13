@@ -46,7 +46,7 @@ describe('standalone runtime shell', () => {
     })
 
     expect(state.disabled).toBe(false)
-    expect(state.label).toBe('Play Ashfall')
+    expect(state.label).toBe('Play Pack')
   })
 
   it('allows NeoForge handoff without Native Loader metadata', () => {
@@ -94,7 +94,7 @@ describe('standalone runtime shell', () => {
     })
 
     expect(state.disabled).toBe(false)
-    expect(state.label).toBe('Play Ashfall')
+    expect(state.label).toBe('Play Pack')
   })
 
   it('allows the desktop standalone launch when verification passes', () => {

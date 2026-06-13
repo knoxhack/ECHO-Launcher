@@ -14,10 +14,10 @@ export interface RuntimeModeCardOptions {
 
 const modeCopy: Record<LauncherRuntimeModeId, Omit<StandaloneRuntimeModeCard, 'id' | 'status' | 'disabledReason'>> = {
   'native-loader-minecraft': {
-    label: 'Ashfall Native Edition',
+    label: 'Native Loader Pack',
     eyebrow: 'Native Loader alpha',
-    detail: 'Uses the Ashfall Native Edition profile only when verified Native Loader release metadata is present.',
-    actionLabel: 'Play Ashfall',
+    detail: 'Uses the selected pack profile only when verified Native Loader release metadata is present.',
+    actionLabel: 'Play Pack',
   },
   'native-runtime': {
     label: 'Standalone Runtime Showcase',

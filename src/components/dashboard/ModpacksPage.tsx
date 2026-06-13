@@ -1,4 +1,4 @@
-import { Archive, Boxes, DownloadCloud, Eye, FileInput, FolderSearch, LockKeyhole, Play, RadioTower, RotateCcw, ShieldAlert } from 'lucide-react'
+import { Archive, Boxes, Eye, FileInput, FolderSearch, LockKeyhole, Play, RadioTower, ShieldAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { officialModpacksFromReleaseIndex, type OfficialModpack } from '../../data/officialModpacks'
@@ -14,6 +14,7 @@ import type { PackOsLauncherPackState } from '../../types/packos'
 import type { ReleaseEntry, ReleaseIndex } from '../../types/releases'
 import { packOsHealthStatus, packOsUiStateLabel } from '../../utils/packosStatus'
 import { latestPlayableReleaseForPack, releaseAcceptedCount, releaseRejectedCount } from '../../utils/releaseValidation'
+import { cn } from '../../utils/cn'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
 import { MetricCard } from '../cyber/MetricCard'
@@ -38,6 +39,7 @@ export function ModpacksPage() {
   const addToast = useLauncherStore((state) => state.addToast)
   const setActivePage = useLauncherStore((state) => state.setActivePage)
   const setActiveToolsTab = useLauncherStore((state) => state.setActiveToolsTab)
+  const selectedProfileId = useLauncherStore((state) => state.selectedProfileId)
   const setSelectedProfileId = useLauncherStore((state) => state.setSelectedProfileId)
   const setProfiles = useProfileStore((state) => state.setProfiles)
   const releaseIndex = useReleaseStore((state) => state.releaseIndex)
@@ -55,6 +57,7 @@ export function ModpacksPage() {
   )
   const rejectedCount = releaseRejectedCount(releaseIndex)
   const playablePackCount = visibleModpacks.filter((pack) => pack.status === 'playable').length
+  const selectedPack = visibleModpacks.find((pack) => pack.id === selectedProfileId) ?? visibleModpacks[0]
 
   const refreshReleases = useCallback(async (refresh = false, announce = refresh) => {
     try {
@@ -151,8 +154,15 @@ export function ModpacksPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <CyberButton icon={DownloadCloud} onClick={() => setActivePage('library')} variant="primary">
-              Install / Update
+            <CyberButton
+              icon={Play}
+              onClick={() => {
+                if (selectedPack) setSelectedProfileId(selectedPack.id)
+                setActivePage('home')
+              }}
+              variant="primary"
+            >
+              Open Selected Pack
             </CyberButton>
             <CyberButton disabled={loadingReleases} icon={RadioTower} onClick={() => void refreshReleases(true, true)} variant="secondary">
               {loadingReleases ? 'Refreshing...' : 'Refresh Catalog'}
@@ -198,6 +208,8 @@ export function ModpacksPage() {
               pack={pack}
               packOsState={packOs?.packs.find((state) => state.packId === packOsIdFor(pack.id))}
               releaseIndex={releaseIndex}
+              selected={pack.id === selectedProfileId}
+              addToast={addToast}
               setActivePage={setActivePage}
               setSelectedProfileId={setSelectedProfileId}
               setActiveToolsTab={setActiveToolsTab}
@@ -260,6 +272,8 @@ function OfficialPackCard({
   pack,
   packOsState,
   releaseIndex,
+  selected,
+  addToast,
   setActivePage,
   setSelectedProfileId,
   setActiveToolsTab,
@@ -267,6 +281,8 @@ function OfficialPackCard({
   pack: OfficialModpack
   packOsState?: PackOsLauncherPackState
   releaseIndex: ReleaseIndex | null
+  selected: boolean
+  addToast: (title: string, detail?: string, tone?: 'success' | 'warning' | 'danger' | 'info') => void
   setActivePage: (page: PageId) => void
   setSelectedProfileId: (profileId: string) => void
   setActiveToolsTab: (tab: ToolsTabId) => void
@@ -289,14 +305,38 @@ function OfficialPackCard({
           ? 'Missing release'
           : 'Gated'
     : 'Locked'
+  const routeLabel = pack.runtimeMode === 'native-runtime' ? 'Standalone' : pack.runtimeMode === 'native-loader-minecraft' ? 'Native Loader' : 'NeoForge'
+  const openSelectedPack = () => {
+    setSelectedProfileId(pack.id)
+    setActivePage('home')
+    addToast(
+      `${pack.name} selected`,
+      ready
+        ? 'Home is ready with the install, repair, or play action for this pack.'
+        : isPlayable
+          ? 'Home will show what setup is still missing for this pack.'
+          : pack.diagnostic ?? pack.detail,
+      ready ? 'success' : 'info',
+    )
+  }
+  const openDiagnostics = () => {
+    setSelectedProfileId(pack.id)
+    setActiveToolsTab('diagnostics')
+    setActivePage('tools')
+  }
+  const primaryActionLabel = ready ? 'Open Pack' : isPlayable ? 'Resolve Setup' : 'Inspect Gate'
 
   return (
-    <GlassCard className="overflow-hidden p-0" tone={isPlayable ? (ready ? 'default' : 'amber') : 'default'}>
-      <div className="relative aspect-[16/9] min-h-64 overflow-hidden">
+    <GlassCard
+      className={cn('overflow-hidden p-0 transition duration-150', selected && 'ring-2 ring-cyan-echo/70')}
+      tone={isPlayable ? (ready ? 'default' : 'amber') : 'default'}
+    >
+      <div className="relative aspect-[16/9] min-h-72 overflow-hidden">
         <img alt="" className="absolute inset-0 h-full w-full object-cover transition duration-200 hover:opacity-95" src={pack.image} />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/15" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-transparent" />
         <div className="absolute left-5 top-5 flex flex-wrap gap-2">
+          {selected ? <StatusChip compact label="Selected" status="update_available" /> : null}
           <StatusChip compact label={isPlayable ? 'Playable' : 'Preview'} status={ready ? 'healthy' : isPlayable ? 'warning' : 'queued'} />
           <StatusChip compact label={packOsLabel} status={packOsStatus} />
           <span className="rounded-full border border-white/20 bg-black/45 px-3 py-1 text-xs font-semibold uppercase text-slate-200 backdrop-blur">
@@ -304,9 +344,21 @@ function OfficialPackCard({
           </span>
         </div>
         <div className="absolute bottom-5 left-5 right-5">
-          <p className="text-xs font-semibold uppercase text-amber-echo">{releaseLine}</p>
-          <h3 className="mt-1 text-3xl font-black leading-tight text-white">{pack.name}</h3>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-200">{pack.summary}</p>
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-end 2xl:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase text-amber-echo">{releaseLine}</p>
+              <h3 className="mt-1 text-2xl font-black leading-tight text-white 2xl:text-3xl">{pack.name}</h3>
+              <p className="mt-2 max-w-xl break-words pr-4 text-sm leading-5 text-slate-200">{pack.summary}</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <CyberButton icon={Play} onClick={openSelectedPack} size="sm" variant="primary">
+                {primaryActionLabel}
+              </CyberButton>
+              <CyberButton icon={ShieldAlert} onClick={openDiagnostics} size="sm" variant="ghost">
+                Verify
+              </CyberButton>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -319,57 +371,14 @@ function OfficialPackCard({
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
             <PackStat icon={Boxes} label="Version" value={version} />
-            <PackStat icon={Archive} label="Catalog ID" value={pack.catalogId} />
-            <PackStat icon={isPlayable ? Archive : Eye} label={isPlayable ? 'Manifest' : 'Mode'} value={isPlayable ? (ready ? 'Verified' : 'Missing') : 'View-only'} />
+            <PackStat icon={Archive} label="Route" value={routeLabel} />
+            <PackStat icon={isPlayable ? Archive : Eye} label={isPlayable ? 'Manifest' : 'Access'} value={isPlayable ? (ready ? 'Verified' : 'Missing') : 'Preview only'} />
             <PackStat icon={RadioTower} label="Channel" value={packOsState?.channel ?? pack.channel} />
             <PackStat icon={ShieldAlert} label="PackOS" value={packOsLabel} />
             <PackStat icon={LockKeyhole} label="Play" value={playState} />
-            <PackStat icon={RotateCcw} label="Variant" value={packOsState?.variant ?? 'preview'} />
           </div>
         </div>
 
-        {isPlayable ? (
-          <div className="flex flex-wrap gap-2">
-            <CyberButton
-              disabled={playBlocked}
-              icon={Play}
-              onClick={() => {
-                if (pack.runtimeMode) setSelectedProfileId(pack.id)
-                setActivePage('home')
-              }}
-              size="sm"
-              variant="primary"
-            >
-              {pack.runtimeMode ? 'Select Runtime' : 'Play Pack'}
-            </CyberButton>
-            <CyberButton
-              icon={RotateCcw}
-              onClick={() => {
-                if (pack.runtimeMode) setSelectedProfileId(pack.id)
-                setActivePage('library')
-              }}
-              size="sm"
-              variant="secondary"
-            >
-              Install / Update
-            </CyberButton>
-            <CyberButton
-              icon={ShieldAlert}
-              onClick={() => {
-                setActiveToolsTab('diagnostics')
-                setActivePage('tools')
-              }}
-              size="sm"
-            >
-              Verify
-            </CyberButton>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 rounded-lg border border-cyan-soft/20 bg-white/[0.03] p-3 text-sm leading-6 text-slate-300">
-            <Eye className="h-4 w-4 shrink-0 text-cyan-soft" aria-hidden="true" />
-            View-only preview. No install profile is created.
-          </div>
-        )}
       </div>
     </GlassCard>
   )

@@ -15,6 +15,7 @@ import { backupService } from '../../services/BackupService'
 import { installService } from '../../services/InstallService'
 import { launchService } from '../../services/LaunchService'
 import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
+import { repairService } from '../../services/RepairService'
 import { useCommunityChatStore } from '../../stores/communityChatStore'
 import { useDiagnosticsStore } from '../../stores/diagnosticsStore'
 import { useLaunchStore } from '../../stores/launchStore'
@@ -30,7 +31,7 @@ import type { HealthStatus } from '../../types/launcher'
 import type { LauncherRuntimeModeId, MinecraftRuntimeModeId } from '../../types/standaloneRuntime'
 import type { NativeHandoffPreparationResult, NativeInstallResult } from '../../types/native'
 import { formatOfficialServerUpdatedAt, getOfficialServerRuntimeState } from '../../types/serverStatus'
-import { defaultAshfallRuntimeMode, getAshfallHomeActions, getAshfallHomeRoute } from '../../utils/ashfallHomeActions'
+import { defaultAshfallRuntimeMode, getAshfallHomeRoute, getSelectedPackHomeActions } from '../../utils/ashfallHomeActions'
 import { OFFICIAL_ASHFALL_CHAT_CHANNEL_ID } from '../../utils/communityChat'
 import { officialServerSettingsDefaults } from '../../utils/officialServerSettings'
 import {
@@ -126,8 +127,6 @@ export function HomePage() {
   const latestRelease = useMemo(() => latestPlayableReleaseForPack(releaseIndex, selectedProfile.id), [releaseIndex, selectedProfile.id])
   const nativeLoaderRelease = useMemo(() => latestPlayableReleaseForPack(releaseIndex, 'ashfall-native-edition'), [releaseIndex])
   const nativeLoaderProfile = profileForRuntimeMode['native-loader-minecraft']
-  const homeActions = getAshfallHomeActions(selectedProfile, latestRelease)
-  const installIntent = homeActions.primaryUsesInstallFlow
   const selectedPackOs = selectedPackOsPack(packOs, selectedProfileId)
   const packOsBlocked = isPackOsLaunchBlocked(packOs, selectedProfileId)
   const packOsStatus = packOsHealthStatus(selectedPackOs)
@@ -180,7 +179,7 @@ export function HomePage() {
             ready: localFallbackAllowed,
             reason: localFallbackAllowed
               ? `${localNativeStatus?.message ?? 'Local Native Loader fallback is ready.'} Developer fallback is enabled.`
-              : localNativeStatus?.message ?? 'Install or refresh Ashfall before Native Loader metadata can be verified.',
+              : localNativeStatus?.message ?? `Install or refresh ${selectedProfile.name} before Native Loader metadata can be verified.`,
             versionId: localFallbackAllowed ? 'local-ashfall-native-loader' : '',
           })
           return
@@ -213,7 +212,7 @@ export function HomePage() {
     return () => {
       disposed = true
     }
-  }, [advancedMode, creatorMode, nativeLoaderProfile?.manifestPath, nativeLoaderRelease?.version])
+  }, [advancedMode, creatorMode, nativeLoaderProfile?.manifestPath, nativeLoaderRelease?.version, selectedProfile.name])
 
   useEffect(() => {
     if (!isNativeAvailable()) return
@@ -252,9 +251,9 @@ export function HomePage() {
 
   useEffect(() => {
     if (repairProgress === 100) {
-      addToast('Repair install complete', 'Ashfall files are ready for Minecraft Launcher handoff.', 'success')
+      addToast('Repair install complete', `${selectedProfile.name} files are ready for handoff.`, 'success')
     }
-  }, [addToast, repairProgress])
+  }, [addToast, repairProgress, selectedProfile.name])
 
   const officialStatusFallback = useMemo(
     () => ({ serverName: officialServerName, discordInviteUrl: officialDiscordInviteUrl }),
@@ -301,17 +300,17 @@ export function HomePage() {
     }
 
     setHandoffProgress(4)
-    setHandoffStage(installIntent ? `Preparing Ashfall for ${runtimeLabel}` : `Preparing ${runtimeLabel}`)
+    setHandoffStage(installIntent ? `Preparing ${selectedProfile.name} for ${runtimeLabel}` : `Preparing ${runtimeLabel}`)
     setHandoffDetail('')
     setLastUpdate(null)
     addToast(
-      'Preparing Ashfall',
-      installIntent ? `Installing the latest approved Ashfall release and preparing ${runtimeLabel}.` : `Checking Ashfall and preparing ${runtimeLabel}.`,
+      `Preparing ${selectedProfile.name}`,
+      installIntent ? `Installing the latest approved ${selectedProfile.name} release and preparing ${runtimeLabel}.` : `Checking ${selectedProfile.name} and preparing ${runtimeLabel}.`,
       'info',
     )
     try {
       if (!isNativeAvailable()) {
-        addToast('Desktop app required', 'Ashfall install and handoff require the Electron desktop app.', 'warning')
+        addToast('Desktop app required', 'Pack install and handoff require the Electron desktop app.', 'warning')
         return
       }
       pollTimer = window.setInterval(() => void pollStatus(), 500)
@@ -345,28 +344,33 @@ export function HomePage() {
         addToast('Minecraft Launcher ready', result.message, result.handoff?.openedLauncher ? 'success' : 'warning')
       } else {
         setHandoffProgress(96)
-        setHandoffStage(result.handoff ? 'Minecraft Launcher needs attention' : 'Ashfall needs attention')
+        setHandoffStage(result.handoff ? 'Minecraft Launcher needs attention' : `${selectedProfile.name} needs attention`)
         setHandoffDetail(result.message)
-        addToast(result.handoff ? 'Minecraft Launcher needs attention' : 'Ashfall needs attention', result.message, 'danger')
+        addToast(result.handoff ? 'Minecraft Launcher needs attention' : `${selectedProfile.name} needs attention`, result.message, 'danger')
       }
     } catch (error) {
       setHandoffProgress(96)
-      setHandoffStage('Ashfall handoff failed')
+      setHandoffStage(`${selectedProfile.name} handoff failed`)
       setHandoffDetail(error instanceof Error ? error.message : 'Unable to prepare Minecraft Launcher handoff.')
-      addToast('Ashfall handoff failed', error instanceof Error ? error.message : 'Unable to prepare Minecraft Launcher handoff.', 'danger')
+      addToast(`${selectedProfile.name} handoff failed`, error instanceof Error ? error.message : 'Unable to prepare Minecraft Launcher handoff.', 'danger')
     } finally {
       if (pollTimer) window.clearInterval(pollTimer)
       setLaunching(false)
     }
   }
 
-  const installOrUpdateAshfall = async (operation: 'install' | 'update') => {
-    if (!latestRelease?.version) {
-      addToast(`${operation === 'install' ? 'Install' : 'Update'} unavailable`, 'Refresh the Catalog before continuing.', 'warning')
+  const installOrUpdateSelectedPack = async (operation: 'install' | 'update') => {
+    const manifestPath = latestRelease?.version ? undefined : selectedProfile.manifestPath ?? readiness?.install.manifestPath
+    if (!latestRelease?.version && !manifestPath) {
+      addToast(
+        `${operation === 'install' ? 'Install' : 'Update'} unavailable`,
+        'Refresh the Catalog or import a pack manifest before continuing.',
+        'warning',
+      )
       return
     }
     if (!isNativeAvailable()) {
-      addToast('Desktop app required', 'Ashfall install and update actions require the Electron desktop app.', 'warning')
+      addToast('Desktop app required', 'Pack install and update actions require the Electron desktop app.', 'warning')
       return
     }
 
@@ -374,9 +378,13 @@ export function HomePage() {
     setLastPreparation(null)
     setLastUpdate(null)
     setHandoffProgress(4)
-    setHandoffStage(operation === 'install' ? 'Preparing Ashfall install' : 'Preparing Ashfall update')
+    setHandoffStage(operation === 'install' ? `Preparing ${selectedProfile.name} install` : `Preparing ${selectedProfile.name} update`)
     setHandoffDetail('')
-    addToast(operation === 'install' ? 'Installing Ashfall' : 'Updating Ashfall', `Installing Ashfall ${latestRelease.version}.`, 'info')
+    addToast(
+      operation === 'install' ? `Installing ${selectedProfile.name}` : `Updating ${selectedProfile.name}`,
+      latestRelease?.version ? `Installing ${selectedProfile.name} ${latestRelease.version}.` : `Using imported manifest ${manifestPath}.`,
+      'info',
+    )
 
     const operationId = launchService.createOperationId(operation)
     let pollTimer: number | undefined
@@ -398,8 +406,9 @@ export function HomePage() {
       const result = await installService.runInstall({
         profileId: selectedProfile.id,
         installPath: selectedProfile.installPath,
+        manifestPath,
         channel: selectedProfile.channel,
-        version: latestRelease.version,
+        version: latestRelease?.version,
         operationId,
         refresh: true,
       })
@@ -415,18 +424,74 @@ export function HomePage() {
         .then(setProfiles)
         .catch(() => undefined)
       void refreshReadiness()
+      void refreshPackOs()
       addToast(
-        result.ok ? (operation === 'install' ? 'Ashfall installed' : 'Ashfall updated') : `Ashfall ${operation} needs attention`,
+        result.ok ? (operation === 'install' ? `${selectedProfile.name} installed` : `${selectedProfile.name} updated`) : `${selectedProfile.name} ${operation} needs attention`,
         result.ok ? `Updated ${result.updated?.length ?? 0} and verified ${result.verified.length} files.` : 'Open Downloads for the full install report.',
         result.ok ? 'success' : 'danger',
       )
     } catch (error) {
       setHandoffProgress(96)
       setHandoffStage(operation === 'install' ? 'Install failed' : 'Update failed')
-      setHandoffDetail(error instanceof Error ? error.message : `Unable to ${operation} Ashfall.`)
-      addToast(operation === 'install' ? 'Install failed' : 'Update failed', error instanceof Error ? error.message : `Unable to ${operation} Ashfall.`, 'danger')
+      setHandoffDetail(error instanceof Error ? error.message : `Unable to ${operation} ${selectedProfile.name}.`)
+      addToast(operation === 'install' ? 'Install failed' : 'Update failed', error instanceof Error ? error.message : `Unable to ${operation} ${selectedProfile.name}.`, 'danger')
     } finally {
       if (pollTimer) window.clearInterval(pollTimer)
+      setUpdating(false)
+    }
+  }
+
+  const repairSelectedPack = async () => {
+    const installPath = selectedProfile.installPath ?? readiness?.install.installPath
+    const manifestPath = selectedProfile.manifestPath ?? readiness?.install.manifestPath
+    if (!installPath || !manifestPath) {
+      addToast('Repair unavailable', 'Select a pack with an install folder and imported manifest first.', 'warning')
+      return
+    }
+    if (!isNativeAvailable()) {
+      addToast('Desktop app required', 'Pack repair requires the Electron desktop app.', 'warning')
+      return
+    }
+
+    setUpdating(true)
+    setLastPreparation(null)
+    setLastUpdate(null)
+    setHandoffProgress(8)
+    setHandoffStage(`Repairing ${selectedProfile.name}`)
+    setHandoffDetail('Verifying installed files against the selected pack manifest.')
+    addToast(`Repairing ${selectedProfile.name}`, 'Missing or corrupt files will be restored from the manifest artifacts.', 'info')
+
+    try {
+      const result = await repairService.runRepair({
+        profileId: selectedProfile.id,
+        installPath,
+        manifestPath,
+        channel: selectedProfile.channel,
+        version: latestRelease?.version,
+      })
+      setHandoffProgress(result.ok ? 100 : 96)
+      setHandoffStage(result.ok ? 'Repair complete' : 'Repair needs attention')
+      setHandoffDetail(
+        result.ok
+          ? `Repaired ${result.repaired.length} and verified ${result.after.valid.length} files.`
+          : `${result.skipped.length + result.after.missing.length + result.after.corrupt.length} files still need attention.`,
+      )
+      invokeNative('profile:list')
+        .then(setProfiles)
+        .catch(() => undefined)
+      void refreshReadiness()
+      void refreshPackOs()
+      addToast(
+        result.ok ? `${selectedProfile.name} repaired` : `${selectedProfile.name} repair needs attention`,
+        result.ok ? `Report: ${result.reportPath}` : 'Open Tools > Repair for the full repair report.',
+        result.ok ? 'success' : 'danger',
+      )
+    } catch (error) {
+      setHandoffProgress(96)
+      setHandoffStage('Repair failed')
+      setHandoffDetail(error instanceof Error ? error.message : `Unable to repair ${selectedProfile.name}.`)
+      addToast('Repair failed', error instanceof Error ? error.message : `Unable to repair ${selectedProfile.name}.`, 'danger')
+    } finally {
       setUpdating(false)
     }
   }
@@ -516,7 +581,7 @@ export function HomePage() {
     handoffDetail ||
     (selectedRuntimeMode === 'native-runtime'
       ? 'Standalone runtime verification controls launch readiness.'
-      : 'Minecraft Launcher profile and Ashfall files are verified before handoff.')
+      : `Minecraft Launcher profile and ${selectedProfile.name} files are verified before handoff.`)
   const minecraftReady = readiness?.minecraftLauncher?.ok ?? true
   const selectedRoute = getAshfallHomeRoute(selectedProfile)
   const selectedLaunchButton = buildRuntimeLaunchButtonState({
@@ -530,16 +595,30 @@ export function HomePage() {
   })
   const selectedRuntimeIsMinecraft = minecraftRuntimeModes.has(selectedRuntimeMode)
   const selectedRuntimeBlocked = selectedLaunchButton.disabled || (selectedRuntimeIsMinecraft && packOsBlocked)
+  const selectedPackCanRepair = Boolean((selectedProfile.installPath ?? readiness?.install.installPath) && (selectedProfile.manifestPath ?? readiness?.install.manifestPath))
+  const selectedPackCanInstallFrom = Boolean(latestRelease?.version || selectedProfile.manifestPath || readiness?.install.manifestPath)
+  const homeActions = getSelectedPackHomeActions(selectedProfile, latestRelease, {
+    canRepair: selectedPackCanRepair,
+    launchBlocked: selectedRuntimeBlocked,
+    packName: selectedProfile.name,
+  })
+  const installIntent = homeActions.primaryUsesInstallFlow
+  const primaryUsesInstallFlow = homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
+  const primaryUsesRepairFlow = homeActions.primaryActionKind === 'repair'
   const primaryBusy = launching || updating || standaloneLaunching
   const primaryDisabled =
     primaryBusy ||
-    (homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
-      ? !isNativeAvailable() || !latestRelease?.version
-      : selectedRuntimeBlocked)
+    (primaryUsesInstallFlow
+      ? !isNativeAvailable() || !selectedPackCanInstallFrom
+      : primaryUsesRepairFlow
+        ? !isNativeAvailable() || !selectedPackCanRepair
+        : selectedRuntimeBlocked)
   const cockpitStatus = homeActions.needsInstall
     ? 'Not installed'
     : homeActions.needsUpdate
       ? 'Update available'
+      : homeActions.primaryActionKind === 'repair'
+        ? 'Repair available'
       : selectedRuntimeBlocked
         ? 'Blocked'
         : 'Ready to play'
@@ -547,6 +626,8 @@ export function HomePage() {
     ? 'missing'
     : homeActions.needsUpdate
       ? 'update_available'
+      : homeActions.primaryActionKind === 'repair'
+        ? 'warning'
       : selectedRuntimeBlocked
         ? 'critical'
         : 'healthy'
@@ -582,28 +663,42 @@ export function HomePage() {
   }
   const handlePrimaryAction = async () => {
     if (homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update') {
-      await installOrUpdateAshfall(homeActions.primaryActionKind)
+      await installOrUpdateSelectedPack(homeActions.primaryActionKind)
+      return
+    }
+    if (primaryUsesRepairFlow) {
+      await repairSelectedPack()
       return
     }
     await launchSelectedRuntime()
   }
   const primaryActionDetail = primaryDisabled
-    ? homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
+    ? primaryUsesInstallFlow
       ? !isNativeAvailable()
         ? 'Desktop app required to install approved packages.'
-        : 'Catalog must load an approved release before this action is available.'
+        : 'No approved Catalog release or imported manifest is available for this pack.'
+      : primaryUsesRepairFlow
+        ? !isNativeAvailable()
+          ? 'Desktop app required to repair installed packs.'
+          : 'Repair needs an installed pack folder and local manifest.'
       : packOsBlocked
         ? packOsReason
         : selectedLaunchButton.detail ?? 'This pack needs attention before launch.'
     : homeActions.primaryActionKind === 'install'
-      ? 'Installs the approved package for the selected pack.'
+      ? latestRelease?.version
+        ? 'Installs the approved Catalog package for the selected pack.'
+        : 'Installs from the imported local pack manifest.'
       : homeActions.primaryActionKind === 'update'
-        ? 'Updates installed files from the approved package.'
-        : `Starts ${selectedRoute.label} for the selected pack.`
+        ? latestRelease?.version
+          ? 'Updates installed files from the approved Catalog package.'
+          : 'Refreshes installed files from the imported local manifest.'
+        : homeActions.primaryActionKind === 'repair'
+          ? 'Repairs missing or corrupt files from the selected pack manifest.'
+          : `Starts ${selectedRoute.label} for the selected pack.`
   const primaryButtonVariant =
     primaryDisabled
       ? 'ghost'
-      : homeActions.primaryActionKind === 'update'
+      : homeActions.primaryActionKind === 'update' || homeActions.primaryActionKind === 'repair'
         ? 'warning'
         : homeActions.primaryActionKind === 'launch-standalone'
           ? 'success'
@@ -611,6 +706,8 @@ export function HomePage() {
   const primaryButtonIcon =
     homeActions.primaryActionKind === 'install' || homeActions.primaryActionKind === 'update'
       ? DownloadCloud
+      : homeActions.primaryActionKind === 'repair'
+        ? ShieldAlert
       : runtimeModeIcons[selectedRuntimeMode]
   const RouteIcon = runtimeModeIcons[selectedRuntimeMode]
   const blockerItems: HomeBlockerItem[] = [
@@ -627,8 +724,12 @@ export function HomePage() {
       id: 'catalog',
       label: 'Catalog',
       title: latestRelease?.version ? `Approved ${latestRelease.version}` : 'No approved release loaded',
-      detail: latestRelease?.manifestSha256 ? 'Install package includes verified checksum metadata.' : 'Refresh the Catalog or open Library for release diagnostics.',
-      status: latestRelease?.version ? 'healthy' : 'warning',
+      detail: latestRelease?.manifestSha256
+        ? 'Install package includes verified checksum metadata.'
+        : selectedProfile.manifestPath || readiness?.install.manifestPath
+          ? 'Local manifest is available for repair or reinstall while the Catalog gate is unresolved.'
+          : 'Refresh the Catalog or open Library for release diagnostics.',
+      status: latestRelease?.version ? 'healthy' : selectedProfile.manifestPath || readiness?.install.manifestPath ? 'operational' : 'warning',
       actionLabel: 'Library',
       action: openLibrary,
     },
@@ -636,10 +737,12 @@ export function HomePage() {
       id: 'install',
       label: 'Install',
       title: readiness?.install.installed ? 'Installed' : 'Not installed yet',
-      detail: readiness?.install.installed ? readiness.install.installPath ?? selectedProfile.installPath ?? 'Install path ready.' : 'Use the primary action to install this pack.',
+      detail: readiness?.install.installed
+        ? readiness.install.installPath ?? selectedProfile.installPath ?? 'Install path ready.'
+        : 'Use the primary action to install this pack.',
       status: readiness?.install.installed ? 'healthy' : 'missing',
-      actionLabel: readiness?.install.installed ? undefined : 'Library',
-      action: readiness?.install.installed ? undefined : openLibrary,
+      actionLabel: readiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? 'Repair' : undefined) : 'Library',
+      action: readiness?.install.installed ? (homeActions.primaryActionKind === 'repair' ? repairSelectedPack : undefined) : openLibrary,
     },
     {
       id: 'route',

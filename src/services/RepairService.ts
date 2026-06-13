@@ -5,6 +5,7 @@ import { invokeNative, requireNative } from './nativeBridge'
 export interface RepairRunOptions {
   profileId: string
   installPath?: string
+  manifestPath?: string
   backupConfigs?: boolean
   channel?: Channel
   version?: string

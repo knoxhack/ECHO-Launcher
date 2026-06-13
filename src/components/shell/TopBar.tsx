@@ -1,4 +1,4 @@
-import { Bell, ChevronDown, Cloud, DownloadCloud, Minus, Settings, ShieldCheck, Square, X } from 'lucide-react'
+import { Bell, ChevronDown, Cloud, DownloadCloud, Settings, ShieldCheck } from 'lucide-react'
 import echoLogo from '../../assets/brand/echo-logo.webp'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useLauncherStore } from '../../stores/launcherStore'
@@ -6,7 +6,6 @@ import { useLauncherUpdateStore } from '../../stores/launcherUpdateStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReadinessStore } from '../../stores/readinessStore'
 import { defaultLaunchState, useLaunchStore } from '../../stores/launchStore'
-import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
 import { launcherUpdateHealthStatus, launcherUpdatePrimaryDetail, launcherUpdateVisibleInTopBar } from '../../utils/launcherUpdateState'
 import { CyberButton } from '../cyber/CyberButton'
 import { StatusChip } from '../cyber/StatusChip'
@@ -113,26 +112,6 @@ export function TopBar() {
         >
           <Settings className="h-4 w-4" aria-hidden="true" />
         </button>
-        <div className="flex items-center gap-1 rounded-lg border border-cyan-echo/15 bg-white/[0.045] px-1 py-1" aria-label="Window controls">
-          {[
-            { icon: Minus, label: 'Minimize', command: 'window:minimize' as const },
-            { icon: Square, label: 'Maximize', command: 'window:maximize-toggle' as const },
-            { icon: X, label: 'Close', command: 'window:close' as const },
-          ].map(({ icon: Icon, label, command }) => (
-            <button
-              aria-label={label}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white"
-              key={label}
-              onClick={() => {
-                if (isNativeAvailable()) void invokeNative(command)
-                else addToast('Window command unavailable', 'Use the Electron desktop window for native window controls.', 'warning')
-              }}
-              type="button"
-            >
-              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
         <div className="hidden h-10 w-10 overflow-hidden rounded-lg border border-cyan-echo/35 bg-black shadow-cyber xl:block">
           <img alt="" className="h-full w-full object-cover" src={echoLogo} />
         </div>

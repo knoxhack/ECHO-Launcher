@@ -17,7 +17,7 @@ describe('getAshfallHomeActions', () => {
       { version: '1.0.1' },
     )
 
-    expect(actions.primaryActionLabel).toBe('Install Ashfall 1.0.1')
+    expect(actions.primaryActionLabel).toBe('Install Ashfall Native Edition 1.0.1')
     expect(actions.primaryActionKind).toBe('install')
     expect(actions.primaryBusyLabel).toBe('Installing...')
     expect(actions.primaryUsesInstallFlow).toBe(true)
@@ -27,7 +27,7 @@ describe('getAshfallHomeActions', () => {
   it('shows play primary and no update action when Ashfall is current', () => {
     const actions = getAshfallHomeActions(healthyProfile, { version: '1.0.0' })
 
-    expect(actions.primaryActionLabel).toBe('Play Ashfall')
+    expect(actions.primaryActionLabel).toBe('Play Ashfall Native Edition')
     expect(actions.primaryActionKind).toBe('play')
     expect(actions.primaryBusyLabel).toBe('Launching...')
     expect(actions.primaryUsesInstallFlow).toBe(false)
@@ -37,7 +37,7 @@ describe('getAshfallHomeActions', () => {
   it('shows update primary when Ashfall is outdated', () => {
     const actions = getAshfallHomeActions(healthyProfile, { version: '1.0.1' })
 
-    expect(actions.primaryActionLabel).toBe('Update Ashfall 1.0.1')
+    expect(actions.primaryActionLabel).toBe('Update Ashfall Native Edition 1.0.1')
     expect(actions.primaryActionKind).toBe('update')
     expect(actions.primaryBusyLabel).toBe('Updating...')
     expect(actions.primaryUsesInstallFlow).toBe(false)
@@ -47,14 +47,28 @@ describe('getAshfallHomeActions', () => {
   it('shows launch standalone primary for a current standalone pack', () => {
     const actions = getAshfallHomeActions({ ...healthyProfile, runtimeMode: 'native-runtime' }, { version: '1.0.0' })
 
-    expect(actions.primaryActionLabel).toBe('Launch Standalone')
+    expect(actions.primaryActionLabel).toBe('Launch Ashfall Native Edition')
     expect(actions.primaryActionKind).toBe('launch-standalone')
+  })
+
+  it('shows repair primary when an installed pack is blocked but has a manifest', () => {
+    const actions = getAshfallHomeActions(healthyProfile, { version: '1.0.0' })
+    const recoveryActions = getAshfallHomeActions(
+      healthyProfile,
+      { version: '1.0.0' },
+      { canRepair: true, launchBlocked: true },
+    )
+
+    expect(actions.primaryActionKind).toBe('play')
+    expect(recoveryActions.primaryActionLabel).toBe('Repair Ashfall Native Edition')
+    expect(recoveryActions.primaryActionKind).toBe('repair')
+    expect(recoveryActions.primaryBusyLabel).toBe('Repairing...')
   })
 
   it('does not show update action when the installed version is newer than the Catalog release', () => {
     const actions = getAshfallHomeActions({ ...healthyProfile, version: '1.0.2' }, { version: '1.0.1' })
 
-    expect(actions.primaryActionLabel).toBe('Play Ashfall')
+    expect(actions.primaryActionLabel).toBe('Play Ashfall Native Edition')
     expect(actions.primaryActionKind).toBe('play')
     expect(actions.updateActionLabel).toBeNull()
   })
@@ -62,7 +76,7 @@ describe('getAshfallHomeActions', () => {
   it('does not show update action when versions only differ by v prefix', () => {
     const actions = getAshfallHomeActions({ ...healthyProfile, version: 'v1.0.0' }, { version: '1.0.0' })
 
-    expect(actions.primaryActionLabel).toBe('Play Ashfall')
+    expect(actions.primaryActionLabel).toBe('Play Ashfall Native Edition')
     expect(actions.primaryActionKind).toBe('play')
     expect(actions.updateActionLabel).toBeNull()
   })
@@ -70,7 +84,7 @@ describe('getAshfallHomeActions', () => {
   it('does not show update action when latest release metadata is missing', () => {
     const actions = getAshfallHomeActions(healthyProfile, null)
 
-    expect(actions.primaryActionLabel).toBe('Play Ashfall')
+    expect(actions.primaryActionLabel).toBe('Play Ashfall Native Edition')
     expect(actions.primaryActionKind).toBe('play')
     expect(actions.updateActionLabel).toBeNull()
   })

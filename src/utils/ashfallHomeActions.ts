@@ -4,7 +4,13 @@ import type { LauncherRuntimeModeId } from '../types/standaloneRuntime'
 
 type HomeActionProfile = Pick<LauncherProfile, 'installPath' | 'name' | 'runtimeMode' | 'status' | 'version'> & Partial<Pick<LauncherProfile, 'id'>>
 type HomeActionRelease = Pick<ReleaseEntry, 'version'> | null | undefined
-export type AshfallHomeActionKind = 'install' | 'update' | 'play' | 'launch-standalone'
+export type AshfallHomeActionKind = 'install' | 'update' | 'play' | 'launch-standalone' | 'repair'
+
+interface AshfallHomeActionOptions {
+  canRepair?: boolean
+  launchBlocked?: boolean
+  packName?: string
+}
 
 export interface AshfallHomeActions {
   needsInstall: boolean
@@ -29,7 +35,7 @@ const homeRoutes: Record<LauncherRuntimeModeId, AshfallHomeRoute> = {
     mode: 'neoforge-minecraft',
     label: 'Minecraft + NeoForge',
     shortLabel: 'NeoForge',
-    detail: 'Uses the official Minecraft Launcher with the selected Ashfall NeoForge profile.',
+    detail: 'Uses the official Minecraft Launcher with the selected NeoForge profile.',
     steps: ['Approved install package', 'NeoForge profile', 'Minecraft Launcher'],
   },
   'native-loader-minecraft': {
@@ -84,17 +90,33 @@ function isNewerVersion(candidate: string, current: string) {
   return false
 }
 
-export function getAshfallHomeActions(profile: HomeActionProfile, latestRelease: HomeActionRelease): AshfallHomeActions {
+export function getAshfallHomeActions(
+  profile: HomeActionProfile,
+  latestRelease: HomeActionRelease,
+  options: AshfallHomeActionOptions = {},
+): AshfallHomeActions {
+  return getSelectedPackHomeActions(profile, latestRelease, options)
+}
+
+export function getSelectedPackHomeActions(
+  profile: HomeActionProfile,
+  latestRelease: HomeActionRelease,
+  options: AshfallHomeActionOptions = {},
+): AshfallHomeActions {
   const needsInstall = profile.status !== 'healthy' || !profile.installPath
   const needsUpdate = !needsInstall && Boolean(latestRelease?.version && isNewerVersion(latestRelease.version, profile.version))
   const route = getAshfallHomeRoute(profile)
+  const packName = options.packName ?? profile.name ?? 'Selected Pack'
+  const needsRepair = !needsInstall && !needsUpdate && Boolean(options.launchBlocked && options.canRepair)
   const primaryActionKind: AshfallHomeActionKind = needsInstall
     ? 'install'
     : needsUpdate
       ? 'update'
-      : route.mode === 'native-runtime'
-        ? 'launch-standalone'
-        : 'play'
+      : needsRepair
+        ? 'repair'
+        : route.mode === 'native-runtime'
+          ? 'launch-standalone'
+          : 'play'
 
   return {
     needsInstall,
@@ -103,16 +125,24 @@ export function getAshfallHomeActions(profile: HomeActionProfile, latestRelease:
     primaryActionLabel:
       primaryActionKind === 'install'
         ? latestRelease?.version
-          ? `Install Ashfall ${latestRelease.version}`
-          : 'Install Ashfall'
+          ? `Install ${packName} ${latestRelease.version}`
+          : `Install ${packName}`
         : primaryActionKind === 'update'
           ? latestRelease?.version
-            ? `Update Ashfall ${latestRelease.version}`
-            : 'Update Ashfall'
-          : primaryActionKind === 'launch-standalone'
-            ? 'Launch Standalone'
-            : 'Play Ashfall',
-    primaryBusyLabel: primaryActionKind === 'install' ? 'Installing...' : primaryActionKind === 'update' ? 'Updating...' : 'Launching...',
+            ? `Update ${packName} ${latestRelease.version}`
+            : `Update ${packName}`
+          : primaryActionKind === 'repair'
+            ? `Repair ${packName}`
+            : primaryActionKind === 'launch-standalone'
+              ? `Launch ${packName}`
+              : `Play ${packName}`,
+    primaryBusyLabel: primaryActionKind === 'install'
+      ? 'Installing...'
+      : primaryActionKind === 'update'
+        ? 'Updating...'
+        : primaryActionKind === 'repair'
+          ? 'Repairing...'
+          : 'Launching...',
     primaryUsesInstallFlow: primaryActionKind === 'install',
     updateActionLabel: null,
   }
