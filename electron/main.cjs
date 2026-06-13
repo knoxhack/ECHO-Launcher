@@ -503,7 +503,12 @@ function manifestArtifactFamilyStatus(manifest, expectedPackId) {
 }
 
 function manifestRequiresNeoForge(manifest) {
-  return false
+  const packId = normalizeOfficialPackId(manifest?.pack) ?? String(manifest?.pack ?? '')
+  if (packId.endsWith('-neoforge-edition')) return true
+  const loaderType = String(manifest?.loader?.type ?? '').trim().toLowerCase()
+  if (loaderType === 'neoforge') return true
+  const runtimeTarget = String(manifest?.runtimeTarget ?? '').trim().toLowerCase()
+  return Boolean(manifest?.loader?.version && runtimeTarget !== 'echo_runtime_standalone')
 }
 
 function communityChatUrlsFromStatusUrl(statusUrl) {

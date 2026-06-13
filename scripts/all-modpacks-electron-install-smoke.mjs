@@ -550,7 +550,7 @@ async function run() {
         await selectHomePack(cdp, pack)
         const packState = await waitFor(`${pack.name} pack state`, args.packTimeoutMs, async () => {
           const state = await evaluate(cdp, `window.echoNative.invoke('app:get-pack-state', { profileId: ${JSON.stringify(pack.profileId)} })`)
-          return state?.selectedProfile?.id === pack.profileId && state?.primaryAction ? state : null
+          return state?.profile?.id === pack.profileId && state?.primaryAction ? state : null
         })
         packResult.packStateBefore = {
           catalog: packState.catalog,
