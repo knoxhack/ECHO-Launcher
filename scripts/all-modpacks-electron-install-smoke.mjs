@@ -374,6 +374,33 @@ async function readLauncherProfile(minecraftRoot, profileId) {
   }
 }
 
+async function seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecraftRoot, timeoutMs) {
+  const manifest = await readJson(path.join(installPath, '.echo', 'installed-manifest.json'))
+  const versionId = String(manifest.loader?.minecraftLauncherVersionId ?? (manifest.loader?.version ? `neoforge-${manifest.loader.version}` : '')).trim()
+  if (!versionId.startsWith('neoforge-')) return null
+  const versionMetadataPath = path.join(minecraftRoot, 'versions', versionId, `${versionId}.json`)
+  await writeJson(versionMetadataPath, {
+    id: versionId,
+    inheritsFrom: manifest.minecraftVersion ?? manifest.minecraft ?? manifest.loader?.versionJson?.inheritsFrom,
+    echoLauncher: {
+      managedBy: 'ECHO Launcher',
+      bootstrap: true,
+      pack: pack.profileId,
+      seededBy: 'all-modpacks-electron-install-smoke',
+    },
+  })
+  const packState = await evaluate(cdp, `window.echoNative.invoke('app:get-pack-state', { profileId: ${JSON.stringify(pack.profileId)} })`, { timeoutMs })
+  assert(packState?.profile?.id === pack.profileId, `${pack.name} stale NeoForge metadata pack-state profile mismatch.`)
+  assert(packState?.minecraftLauncher?.ok === true, `${pack.name} stale bootstrap-only NeoForge metadata was not treated as repairable: ${JSON.stringify(packState?.minecraftLauncher?.warnings ?? packState?.minecraftLauncher)}`)
+  assert(packState?.primaryAction?.kind === 'play', `${pack.name} stale bootstrap-only NeoForge metadata changed primary action to ${packState?.primaryAction?.kind ?? 'missing'}.`)
+  return {
+    versionId,
+    versionMetadataPath,
+    primaryAction: packState.primaryAction,
+    warnings: packState.minecraftLauncher?.warnings ?? [],
+  }
+}
+
 async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs) {
   const runtimeMode = runtimeModeForPack(pack)
   if (runtimeMode === 'native-runtime') {
@@ -392,6 +419,9 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     }
   }
 
+  const staleNeoForgeMetadata = runtimeMode === 'neoforge-minecraft'
+    ? await seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecraftRoot, timeoutMs)
+    : null
   const handoff = await evaluate(cdp, `window.echoNative.invoke('launch:prepare-handoff', {
     profileId: ${JSON.stringify(pack.profileId)},
     installPath: ${JSON.stringify(installPath)},
@@ -416,6 +446,8 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
   assert(saved.profile?.echoLauncher?.runtimeMode === runtimeMode, `${pack.name} prepared Minecraft profile runtime mismatch: ${saved.profile?.echoLauncher?.runtimeMode}`)
   assert(saved.profile?.gameDir === installPath, `${pack.name} prepared Minecraft profile gameDir mismatch: ${saved.profile?.gameDir}`)
   assert(saved.profile?.lastVersionId === handoff.handoff.versionId, `${pack.name} prepared Minecraft profile version mismatch: ${saved.profile?.lastVersionId}`)
+  const versionMetadata = await readJson(handoff.handoff.versionMetadataPath)
+  assert(versionMetadata?.echoLauncher?.bootstrap !== true, `${pack.name} handoff left bootstrap-only version metadata in place.`)
 
   return {
     kind: 'minecraft-launcher-handoff',
@@ -429,6 +461,7 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     launcherProfilesPath: handoff.handoff.launcherProfilesPath,
     gameDir: handoff.handoff.gameDir,
     validatedModsCount: handoff.handoff.validatedModsCount,
+    staleNeoForgeMetadata,
     warnings: handoff.handoff.warnings ?? [],
   }
 }

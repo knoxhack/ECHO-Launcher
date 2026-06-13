@@ -96,8 +96,8 @@ const ECHO_NATIVE_LOADER_VERSION = '1.0.0'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-1.0.0.jar'
-const ECHO_NATIVE_LOADER_SHA1 = 'a5b1964dd959fe9186c06a6b45af623b687d8449'
-const ECHO_NATIVE_LOADER_SIZE = 1_119_541
+const ECHO_NATIVE_LOADER_SHA1 = '4bc8120a8c554d07d1795e33e057e571c193171c'
+const ECHO_NATIVE_LOADER_SIZE = 1_120_889
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
 const RELEASE_METADATA_ASSET = 'echo-release.json'
 const RELEASE_CACHE_VERSION = 4
@@ -5957,10 +5957,11 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
 
 function repairableEchoManagedRuntimeMetadata(versionId, metadataPath, reason) {
   const id = String(versionId ?? '')
-  if (!id.startsWith('echo-')) return false
   if (!metadataPath || path.basename(metadataPath) !== `${id}.json`) return false
   if (/\bmanifest\b/iu.test(String(reason ?? ''))) return false
-  return true
+  if (id.startsWith('echo-')) return true
+  if (id.startsWith('neoforge-') && /bootstrap-only|no real NeoForge classpath/iu.test(String(reason ?? ''))) return true
+  return false
 }
 
 async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode, installPath) {
