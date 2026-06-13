@@ -819,7 +819,7 @@ async function run() {
           verifiedModule: verifiedAfterRepair,
         },
         rollback: {
-          state: 'covered_by_node_lifecycle_smoke_no_visible_packaged_ui_command',
+          state: 'covered_by_node_lifecycle_smoke_visible_packaged_command_not_exercised_here',
         },
       },
       gates: {
@@ -832,7 +832,7 @@ async function run() {
         packagedElectronInstallClickThrough: 'passed',
         packagedElectronUpdateReconciliationClickThrough: 'passed',
         packagedElectronRepairClickThrough: 'passed',
-        packagedElectronRollbackClickThrough: 'not_available_no_visible_ui_command',
+        packagedElectronRollbackClickThrough: 'not_exercised_by_sky_relay_packaged_smoke',
         realVersionToVersionUpdate: 'covered_by_release-readiness/sky-relay-launcher-lifecycle-smoke.json',
       },
       process: {

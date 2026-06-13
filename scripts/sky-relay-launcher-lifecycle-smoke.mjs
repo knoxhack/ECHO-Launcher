@@ -458,12 +458,12 @@ async function main() {
       realVersionToVersionUpdate: 'passed_with_previous_version_fixture',
       packagedElectronCardUiSmoke: 'covered_separately',
       electronInstallUpdateRepairClickThrough: 'covered_by_packaged_electron_ui_smoke',
-      electronRollbackClickThrough: 'not_available_no_visible_ui_command',
+      electronRollbackClickThrough: 'not_exercised_by_sky_relay_packaged_smoke',
     },
     blockers: [],
     residualRisks: [
       'The previous Sky Relay version is a fixture-local manifest generated from current public assets plus an older module placeholder; it proves launcher update mechanics without claiming a second public Sky Relay release exists.',
-      'This script uses Launcher-owned resolver and lifecycle contracts from Node; packaged Electron install/update/repair click-through is covered by release-readiness/sky-relay-electron-ui-smoke.json, while rollback has no visible packaged UI command yet.',
+      'This script uses Launcher-owned resolver and lifecycle contracts from Node; packaged Electron install/update/repair click-through is covered by release-readiness/sky-relay-electron-ui-smoke.json, while visible packaged rollback remains unexercised by the Sky Relay smoke.',
     ],
   }
   await writeJson(args.out, report)

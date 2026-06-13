@@ -42,7 +42,7 @@ import { usePackOsStore } from '../../stores/packOsStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReadinessStore } from '../../stores/readinessStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import type { ModpackExportReport, NativeRepairResult, NativeVerifyResult } from '../../types/native'
+import type { ModpackExportReport, NativeRepairResult, NativeRollbackRestoreResult, NativeVerifyResult } from '../../types/native'
 import type { AssetValidationReport, LogEntry, WorldCompatibilityReport } from '../../types/diagnostics'
 import type { MinecraftLauncherProfileStatus } from '../../types/launch'
 import type { ToolsTabId } from '../../types/launcher'
@@ -109,6 +109,7 @@ function pathLabel(sourcePath: string | undefined, targetPath: string) {
 
 export function ToolsPage() {
   const [repairReport, setRepairReport] = useState<NativeRepairResult | null>(null)
+  const [rollbackReport, setRollbackReport] = useState<NativeRollbackRestoreResult | null>(null)
   const [verifyReport, setVerifyReport] = useState<NativeVerifyResult | null>(null)
   const [assetReport, setAssetReport] = useState<AssetValidationReport | null>(null)
   const [worldReport, setWorldReport] = useState<WorldCompatibilityReport | null>(null)
@@ -524,8 +525,35 @@ export function ToolsPage() {
     addToast('Performance variant selected', 'Launcher UI state switched to the performance variant. No PackOS files were modified.', 'info')
   }
 
-  const restoreLastKnownGood = () => {
-    addToast('Restore requires confirmation flow', 'Last known good restore is report-only until confirmed recovery execution exists.', 'warning')
+  const restoreLastKnownGood = async () => {
+    addToast('Rollback restore started', 'Restoring the latest launcher-managed install/update rollback plan for this profile.', 'info')
+    try {
+      const result = await repairService.restoreLastKnownGood({
+        profileId: selectedProfile.id,
+        installPath: selectedProfile.installPath,
+        manifestPath: selectedProfile.manifestPath,
+      })
+      setRollbackReport(result)
+      if (result.after) {
+        setVerifyReport(result.after)
+        finishVerification({
+          scanned: result.after.scanned,
+          total: result.after.scanned,
+          errors: result.after.missing.length + result.after.corrupt.length,
+          currentFile: result.restored[0] ?? result.removed[0] ?? 'rollback restore complete',
+        })
+      }
+      addToast(
+        result.ok ? 'Last known good restored' : 'Rollback restore needs attention',
+        result.ok
+          ? `Restored ${result.restored.length} files and removed ${result.removed.length}. Report: ${result.reportPath}`
+          : result.warnings.join(' ') || `Rollback report: ${result.reportPath}`,
+        result.ok ? 'success' : 'warning',
+      )
+      void refreshReadiness(selectedProfile.id)
+    } catch (error) {
+      addToast('Rollback restore failed', error instanceof Error ? error.message : 'Unable to restore last known good install.', 'danger')
+    }
   }
 
   const repairPlanCommand = packOsCommands.find((command) => command.includes('generateEchoRepairPlan')) ?? packOsCommands.find((command) => command.includes('echoPackDoctor'))
@@ -599,6 +627,22 @@ export function ToolsPage() {
                     </div>
                   </GlassCard>
                 ))}
+                <GlassCard tone="amber">
+                  <div className="flex h-full flex-col justify-between gap-5">
+                    <div>
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h3 className="font-semibold text-white">Last Known Good</h3>
+                        <StatusChip label="Rollback" status="warning" />
+                      </div>
+                      <p className="text-sm leading-6 text-slate-300">
+                        Restores the latest launcher-managed install/update rollback plan for the selected profile and rechecks the restored manifest.
+                      </p>
+                    </div>
+                    <CyberButton icon={Archive} onClick={() => void restoreLastKnownGood()} variant="warning">
+                      Restore Last Known Good
+                    </CyberButton>
+                  </div>
+                </GlassCard>
               </div>
             </div>
 
@@ -654,6 +698,19 @@ export function ToolsPage() {
                       <p>Skipped: {repairReport.skipped.map((item) => `${item.path} (${item.reason})`).join(', ') || 'none'}</p>
                     </div>
                   ) : null}
+                </GlassCard>
+              ) : null}
+
+              {rollbackReport ? (
+                <GlassCard tone={rollbackReport.ok ? 'success' : 'amber'}>
+                  <SectionHeader eyebrow="Rollback Restore" title={rollbackReport.ok ? 'Last Known Good Restored' : 'Restore Needs Attention'} />
+                  <div className="mt-4 rounded-lg border border-cyan-soft/20 bg-black/30 p-3 text-xs text-slate-300">
+                    <p>Report: {rollbackReport.reportPath}</p>
+                    <p>Plan: {rollbackReport.rollbackPlanPath}</p>
+                    <p>Restored: {rollbackReport.restored.join(', ') || 'none'}</p>
+                    <p>Removed: {rollbackReport.removed.join(', ') || 'none'}</p>
+                    <p>Warnings: {rollbackReport.warnings.join(', ') || 'none'}</p>
+                  </div>
                 </GlassCard>
               ) : null}
             </div>
@@ -963,7 +1020,7 @@ export function ToolsPage() {
               <CyberButton icon={RotateCcw} onClick={switchToPerformanceVariant} size="sm" variant="warning">
                 Switch Performance
               </CyberButton>
-              <CyberButton icon={Archive} onClick={restoreLastKnownGood} size="sm" variant="ghost">
+              <CyberButton icon={Archive} onClick={() => void restoreLastKnownGood()} size="sm" variant="ghost">
                 Restore Last Known Good
               </CyberButton>
               <CyberButton icon={Copy} onClick={() => void copyPackOsCommand('Launcher status command', launcherStatusCommand)} size="sm" variant="ghost">

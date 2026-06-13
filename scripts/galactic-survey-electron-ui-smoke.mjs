@@ -29,8 +29,8 @@ function usage() {
 
 Launches the packaged Electron app through a remote debugging port, verifies
 that the Galactic Survey Library cards render through the real native bridge, then
-clicks through install, update reconciliation, and repair against a local
-approved Galactic Survey catalog.
+clicks through install, update reconciliation, visible rollback restore, and
+repair against a local approved Galactic Survey catalog.
 
 Options:
   --exe <path>        Packaged launcher executable.
@@ -94,6 +94,10 @@ async function readJson(filePath) {
 
 async function sha256File(filePath) {
   return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
+}
+
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex')
 }
 
 async function exists(filePath) {
@@ -452,18 +456,81 @@ async function waitForRepairReport(logsDir, afterMs, predicate, timeoutMs) {
   })
 }
 
-async function waitForSmokeModuleHash(installPath, expectedSha256, timeoutMs, description) {
-  const modulePath = path.join(installPath, SMOKE_MODULE_PATH)
+async function waitForRollbackReport(logsDir, afterMs, predicate, timeoutMs) {
+  return waitFor('Rollback restore report', timeoutMs, async () => {
+    const data = await newestReportData(logsDir, 'rollback-restore-', afterMs)
+    if (!data?.report?.ok) return null
+    return predicate(data.report) ? data : null
+  })
+}
+
+async function waitForFileHash(installPath, relativePath, expectedSha256, timeoutMs, description) {
+  const filePath = path.join(installPath, relativePath)
   return waitFor(description, timeoutMs, async () => {
-    if (!(await exists(modulePath))) return null
-    const sha256 = await sha256File(modulePath)
+    if (!(await exists(filePath))) return null
+    const sha256 = await sha256File(filePath)
     return sha256 === expectedSha256 ? {
-      relativePath: SMOKE_MODULE_PATH,
-      path: modulePath,
+      relativePath,
+      path: filePath,
       sha256,
       expectedSha256,
     } : null
   })
+}
+
+async function waitForSmokeModuleHash(installPath, expectedSha256, timeoutMs, description) {
+  return waitForFileHash(installPath, SMOKE_MODULE_PATH, expectedSha256, timeoutMs, description)
+}
+
+async function preparePreviousVersionFixture(installPath) {
+  const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
+  const manifest = await readJson(manifestPath)
+  const moduleEntry = manifest.files?.find((file) => String(file.path).replace(/\\/g, '/') === SMOKE_MODULE_PATH)
+  assert(moduleEntry, `${SMOKE_MODULE_PATH} is missing from installed manifest before update fixture.`)
+  const previousBytes = Buffer.from(`previous galactic survey packaged rollback fixture ${new Date().toISOString()}\n`, 'utf8')
+  const previousSha256 = sha256Buffer(previousBytes)
+  const modulePath = path.join(installPath, SMOKE_MODULE_PATH)
+  await fs.writeFile(modulePath, previousBytes)
+  moduleEntry.sha256 = previousSha256
+  moduleEntry.size = previousBytes.length
+
+  const obsoletePath = 'addons/galactic-survey-obsolete-packaged-ui-smoke.echo-addon'
+  const obsoleteBytes = Buffer.from(`obsolete galactic survey packaged rollback fixture ${new Date().toISOString()}\n`, 'utf8')
+  const obsoleteSha256 = sha256Buffer(obsoleteBytes)
+  await fs.mkdir(path.dirname(path.join(installPath, obsoletePath)), { recursive: true })
+  await fs.writeFile(path.join(installPath, obsoletePath), obsoleteBytes)
+  manifest.files = [
+    ...(manifest.files ?? []),
+    {
+      path: obsoletePath,
+      url: '',
+      sha256: obsoleteSha256,
+      size: obsoleteBytes.length,
+      required: true,
+      moduleId: 'galactic-survey-obsolete-packaged-ui-smoke',
+      side: 'both',
+    },
+  ]
+  const currentVersion = manifest.version
+  manifest.version = `${currentVersion}-previous-packaged-ui-smoke`
+  await writeJson(manifestPath, manifest)
+  return {
+    manifestPath,
+    currentVersion,
+    previousVersion: manifest.version,
+    previousModule: {
+      relativePath: SMOKE_MODULE_PATH,
+      path: modulePath,
+      sha256: previousSha256,
+      size: previousBytes.length,
+    },
+    obsolete: {
+      relativePath: obsoletePath,
+      path: path.join(installPath, obsoletePath),
+      sha256: obsoleteSha256,
+      size: obsoleteBytes.length,
+    },
+  }
 }
 
 async function assertZipFile(filePath, description) {
@@ -698,6 +765,14 @@ async function run() {
         manifestPath: profile.manifestPath
       } : null
     })`))
+    const previousVersionFixture = await preparePreviousVersionFixture(installPath)
+    await waitForFileHash(
+      installPath,
+      previousVersionFixture.previousModule.relativePath,
+      previousVersionFixture.previousModule.sha256,
+      args.timeoutMs,
+      'Galactic Survey previous-version module fixture',
+    )
 
     await waitFor('Library navigation', args.timeoutMs, async () => clickButtonContaining(cdp, 'Library'))
     await waitFor('Library page after install', args.timeoutMs, async () => evaluate(cdp, `document.querySelector('h1')?.textContent?.trim() === 'Library'`))
@@ -729,8 +804,47 @@ async function run() {
     args.timeoutMs)
     const verifiedAfterUpdate = await waitForSmokeModuleHash(installPath, smokeModule.sha256, args.timeoutMs, 'Galactic Survey module hash after update reconciliation')
 
-    await fs.writeFile(verifiedAfterUpdate.path, `corrupt galactic survey packaged electron repair smoke ${new Date().toISOString()}\n`, 'utf8')
-    const corruptSha256 = await sha256File(verifiedAfterUpdate.path)
+    await waitFor('Tools navigation for rollback', args.timeoutMs, async () => clickButtonContaining(cdp, 'Tools'))
+    await waitFor('Repair page before rollback', args.timeoutMs, async () => evaluate(cdp, `document.body.innerText.includes('Installation Recovery')`))
+    const rollbackStartedAt = Date.now() - 1000
+    const rollbackClick = await waitFor('Restore Last Known Good button', args.timeoutMs, async () => clickButtonContaining(cdp, 'Restore Last Known Good'))
+    const rollbackData = await waitForRollbackReport(logsDir, rollbackStartedAt, (report) =>
+      report.profileId === SMOKE_PACK.packId &&
+      report.ok === true &&
+      report.restored?.includes(SMOKE_MODULE_PATH) &&
+      report.restored?.includes('.echo/installed-manifest.json') &&
+      report.after?.missing?.length === 0 &&
+      report.after?.corrupt?.length === 0,
+    args.timeoutMs)
+    const verifiedAfterRollback = await waitForFileHash(
+      installPath,
+      previousVersionFixture.previousModule.relativePath,
+      previousVersionFixture.previousModule.sha256,
+      args.timeoutMs,
+      'Galactic Survey module hash after packaged rollback',
+    )
+    const restoredObsoleteFile = await waitForFileHash(
+      installPath,
+      previousVersionFixture.obsolete.relativePath,
+      previousVersionFixture.obsolete.sha256,
+      args.timeoutMs,
+      'Galactic Survey obsolete file after packaged rollback',
+    )
+    const manifestAfterRollback = await readJson(previousVersionFixture.manifestPath)
+    assert(manifestAfterRollback.version === previousVersionFixture.previousVersion, `Rollback did not restore previous manifest version: ${manifestAfterRollback.version}`)
+
+    const reupdateAfterRollback = await evaluate(cdp, `window.echoNative.invoke('install:run', {
+      profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+      installPath: ${JSON.stringify(installPath)},
+      channel: 'alpha',
+      refresh: true
+    })`)
+    assert(reupdateAfterRollback?.ok === true, `Re-update after rollback did not report ok=true: ${JSON.stringify(reupdateAfterRollback?.failed ?? reupdateAfterRollback?.skipped ?? [])}`)
+    assert(reupdateAfterRollback.operation === 'update', `Re-update after rollback returned unexpected operation: ${reupdateAfterRollback.operation}`)
+    const verifiedAfterReupdate = await waitForSmokeModuleHash(installPath, smokeModule.sha256, args.timeoutMs, 'Galactic Survey module hash after re-update following rollback')
+
+    await fs.writeFile(verifiedAfterReupdate.path, `corrupt galactic survey packaged electron repair smoke ${new Date().toISOString()}\n`, 'utf8')
+    const corruptSha256 = await sha256File(verifiedAfterReupdate.path)
     assert(corruptSha256 !== smokeModule.sha256, 'Repair smoke failed to corrupt the Galactic Survey module fixture.')
 
     await waitFor('Tools navigation', args.timeoutMs, async () => clickButtonContaining(cdp, 'Tools'))
@@ -886,6 +1000,30 @@ async function run() {
           downloaded: updateData.report.downloaded?.length ?? 0,
           verifiedModule: verifiedAfterUpdate,
         },
+        rollback: {
+          ok: rollbackData.report.ok,
+          click: rollbackClick,
+          reportPath: rollbackData.reportPath,
+          rollbackPlanPath: rollbackData.report.rollbackPlanPath,
+          previousVersion: previousVersionFixture.previousVersion,
+          restored: rollbackData.report.restored ?? [],
+          removed: rollbackData.report.removed ?? [],
+          skipped: rollbackData.report.skipped ?? [],
+          warnings: rollbackData.report.warnings ?? [],
+          verifiedPreviousModule: verifiedAfterRollback,
+          restoredObsoleteFile,
+          restoredManifestVersion: manifestAfterRollback.version,
+        },
+        reupdateAfterRollback: {
+          ok: reupdateAfterRollback.ok,
+          operation: reupdateAfterRollback.operation,
+          reportPath: reupdateAfterRollback.reportPath,
+          installed: reupdateAfterRollback.installed?.length ?? 0,
+          updated: reupdateAfterRollback.updated?.length ?? 0,
+          verified: reupdateAfterRollback.verified?.length ?? 0,
+          downloaded: reupdateAfterRollback.downloaded?.length ?? 0,
+          verifiedModule: verifiedAfterReupdate,
+        },
         repair: {
           ok: repairData.report.ok,
           click: repairClick,
@@ -986,9 +1124,6 @@ async function run() {
           },
           limitation: 'Prepare-only evidence proves packaged launcher metadata handoff in an isolated Minecraft root. It is not gameplay or official Minecraft Launcher open/play evidence.',
         },
-        rollback: {
-          state: 'covered_by_node_lifecycle_smoke_no_visible_packaged_ui_command',
-        },
       },
       gates: {
         packagedElectronRendererMounted: 'passed',
@@ -1003,7 +1138,7 @@ async function run() {
         packagedElectronLogExport: 'passed',
         packagedElectronMinecraftLauncherHandoffPreparation: 'passed_isolated_prepare_only',
         packagedElectronFirstLaunch: 'blocked_legacy_native_launch_removed',
-        packagedElectronRollbackClickThrough: 'not_available_no_visible_ui_command',
+        packagedElectronRollbackClickThrough: 'passed',
         realVersionToVersionUpdate: 'covered_by_release-readiness/galactic-survey-launcher-lifecycle-smoke.json',
       },
       process: {

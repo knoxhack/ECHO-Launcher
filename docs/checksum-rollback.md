@@ -12,3 +12,5 @@ Every trusted launcher, pack, and module update must have enough metadata to ver
 ## Rollback
 
 Before replacing files, the launcher records the previous managed state. If verification, extraction, or post-update validation fails, the launcher can restore the previous file set and report the failing artifact.
+
+The Repair tab exposes this as **Restore Last Known Good**. The command only consumes launcher-managed install/update rollback plans from the launcher log directory and only restores files from the launcher-managed backup folder. A restore writes `rollback-restore-*.json`, refreshes manifest verification, restores the previous `.echo/installed-manifest.json` when available, and reports every restored, removed, skipped, or warning entry for release evidence.

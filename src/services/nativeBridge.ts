@@ -34,6 +34,7 @@ import type {
   NativeDiagnosticExportResult,
   NativePaths,
   NativeRepairResult,
+  NativeRollbackRestoreResult,
   NativeServerExportResult,
   ServerPlanResult,
   NativeVerifyResult,
@@ -153,6 +154,10 @@ type NativeCommandMap = {
   'java:detect': { payload: undefined; result: NativeJavaDetection }
   'backup:create': { payload: { profileId: string; sourcePath?: string }; result: NativeBackupResult }
   'backup:restore': { payload: { backupPath: string; destinationPath: string }; result: BackupRestoreResult }
+  'rollback:restore-latest': {
+    payload: { profileId: string; installPath?: string; manifestPath?: string }
+    result: NativeRollbackRestoreResult
+  }
   'logs:read': { payload: { installPath?: string }; result: NativeLogResult }
   'logs:export': { payload: { profileId?: string; installPath?: string } | undefined; result: LogsExportResult }
   'asset:validate': { payload: { installPath: string; moduleId?: string; expected?: string[] }; result: AssetValidationReport }

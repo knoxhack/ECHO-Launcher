@@ -385,6 +385,22 @@ function safeJoin(root, relativePath) {
   return resolved
 }
 
+function samePath(left, right) {
+  const normalizedLeft = normalizePath(left)
+  const normalizedRight = normalizePath(right)
+  return process.platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight
+}
+
+function pathInsideRoot(target, root) {
+  const normalizedTarget = normalizePath(target)
+  const normalizedRoot = normalizePath(root)
+  const left = process.platform === 'win32' ? normalizedTarget.toLowerCase() : normalizedTarget
+  const right = process.platform === 'win32' ? normalizedRoot.toLowerCase() : normalizedRoot
+  return left === right || left.startsWith(`${right}${path.sep}`)
+}
+
 function manifestAssetName(channel, version, pack = CANONICAL_PROFILE_ID) {
   return `${pack}-${channel}-${version}.pack.json`
 }
@@ -2448,6 +2464,148 @@ async function backupRestore(payload = {}) {
   }
 }
 
+function safeRelativePathList(values = []) {
+  const seen = new Set()
+  const safe = []
+  for (const value of values) {
+    const relativePath = String(value ?? '').replace(/\\/g, '/')
+    if (!isSafeRelativePath(relativePath)) continue
+    const key = relativePath.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    safe.push(relativePath)
+  }
+  return safe
+}
+
+function rollbackPlanCreatedPaths(plan = {}) {
+  return safeRelativePathList([
+    ...(Array.isArray(plan.created) ? plan.created : []),
+    ...(Array.isArray(plan.createdByOperation) ? plan.createdByOperation : []),
+    ...(Array.isArray(plan.createdDuringOperation) ? plan.createdDuringOperation : []),
+  ])
+}
+
+async function rollbackRestoreLatest(payload = {}) {
+  const paths = getPaths()
+  const profiles = await profileList()
+  const profile = selectLauncherProfile(profiles, payload, true)
+  const profileId = payload.profileId ?? profile?.id
+  const installPath = normalizePath(payload.installPath ?? profile?.installPath)
+  if (!profileId) throw new Error('Profile id is required to restore a rollback plan.')
+  if (!payload.installPath && !profile?.installPath) throw new Error('Install path is required to restore a rollback plan.')
+
+  const logsRoot = normalizePath(paths.logs)
+  await ensureDir(logsRoot)
+  const entries = await fs.readdir(logsRoot, { withFileTypes: true }).catch(() => [])
+  const candidates = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^rollback-(?:legacy-)?install-.+\.json$/u.test(entry.name)) continue
+    const filePath = path.join(logsRoot, entry.name)
+    const plan = await readJson(filePath, null)
+    if (!plan?.installPath || !samePath(plan.installPath, installPath)) continue
+    if (plan.profileId && plan.profileId !== profileId) continue
+    const created = rollbackPlanCreatedPaths(plan)
+    const backedUp = Array.isArray(plan.backedUp) ? plan.backedUp : []
+    if (!created.length && !backedUp.length) continue
+    const stat = await fs.stat(filePath).catch(() => null)
+    candidates.push({
+      filePath,
+      plan,
+      created,
+      backedUp,
+      sortTime: Number.isFinite(Date.parse(plan.createdAt)) ? Date.parse(plan.createdAt) : stat?.mtimeMs ?? 0,
+    })
+  }
+  candidates.sort((a, b) => b.sortTime - a.sortTime)
+  const selected = candidates[0]
+  if (!selected) {
+    throw new Error('No launcher-managed install/update rollback plan is available for this profile.')
+  }
+
+  const rollbackId = nowStamp()
+  const restored = []
+  const removed = []
+  const skipped = []
+  const warnings = []
+  const backedUpPaths = new Set(selected.backedUp
+    .map((item) => String(item?.path ?? '').replace(/\\/g, '/').toLowerCase())
+    .filter(Boolean))
+
+  for (const relativePath of selected.created) {
+    if (backedUpPaths.has(relativePath.toLowerCase())) continue
+    try {
+      await fs.rm(safeJoin(installPath, relativePath), { recursive: true, force: true })
+      removed.push(relativePath)
+    } catch (error) {
+      skipped.push({ path: relativePath, reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  const backupsRoot = normalizePath(paths.backups)
+  for (const backup of selected.backedUp) {
+    const relativePath = String(backup?.path ?? '').replace(/\\/g, '/')
+    if (!isSafeRelativePath(relativePath)) {
+      skipped.push({ path: relativePath || '(empty)', reason: 'Rollback backup path is unsafe.' })
+      continue
+    }
+    const backupPath = normalizePath(backup.backupPath)
+    if (!pathInsideRoot(backupPath, backupsRoot)) {
+      skipped.push({ path: relativePath, reason: 'Rollback backup is outside the launcher-managed backup folder.' })
+      continue
+    }
+    if (!(await exists(backupPath))) {
+      skipped.push({ path: relativePath, reason: `Rollback backup is missing: ${backupPath}` })
+      continue
+    }
+    try {
+      await copyRecursive(backupPath, safeJoin(installPath, relativePath))
+      restored.push(relativePath)
+    } catch (error) {
+      skipped.push({ path: relativePath, reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  const manifestPath = normalizePath(payload.manifestPath ?? profile?.manifestPath ?? path.join(installPath, '.echo', 'installed-manifest.json'))
+  const restoredManifest = await readJson(manifestPath, null)
+  const after = restoredManifest ? await verifyManifest({ manifest: restoredManifest, installPath }) : undefined
+  if (!restoredManifest) warnings.push('Restored install manifest was not found; file integrity verification was skipped.')
+  if (after && (after.missing.length || after.corrupt.length)) {
+    warnings.push(`Restored manifest still reports ${after.missing.length} missing and ${after.corrupt.length} corrupt files.`)
+  }
+
+  const ok = skipped.length === 0 && warnings.length === 0
+  const report = {
+    ok,
+    rollbackId,
+    profileId,
+    installPath,
+    restoredAt: isoNow(),
+    rollbackPlanPath: selected.filePath,
+    restored,
+    removed,
+    skipped,
+    warnings,
+    after,
+  }
+  const reportPath = path.join(paths.logs, `rollback-restore-${rollbackId}.json`)
+  await writeJson(reportPath, report)
+
+  if (profile && restoredManifest) {
+    await profileSave({
+      ...profile,
+      installPath,
+      version: restoredManifest.version ?? profile.version,
+      minecraft: minecraftVersionFromManifest(restoredManifest),
+      neoforge: restoredManifest.loader?.version ?? profile.neoforge,
+      status: ok ? 'healthy' : 'warning',
+      manifestPath,
+    })
+  }
+  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Rollback restore ${rollbackId} completed for ${profileId}. Restored ${restored.length}, removed ${removed.length}, skipped ${skipped.length}.`)
+  return { ...report, reportPath }
+}
+
 async function logsRead(payload = {}) {
   const installPath = normalizePath(payload.installPath)
   const logDir = payload.installPath ? path.join(installPath, 'logs') : path.join(getPaths().logs)
@@ -4272,6 +4430,10 @@ async function installLegacyReleaseZip(payload, profile, entry) {
   const failed = []
   const backedUp = []
   const manifestFiles = []
+  const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
+  const previousManifestBackupPath = await backupFileIfExists(manifestPath, backupRoot, '.echo/installed-manifest.json')
+  if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
+  const operation = previousManifestBackupPath ? 'update' : 'install'
 
   for (const entryItem of entries) {
     if (entryItem.isDirectory) continue
@@ -4313,13 +4475,13 @@ async function installLegacyReleaseZip(payload, profile, entry) {
   }
 
   const manifest = manifestFromLegacyZip({ cfManifest, entry, installPath, files: manifestFiles })
-  const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
   await writeJson(manifestPath, manifest)
   const after = await verifyManifest({ manifest, installPath })
   const ok = installed.length > 0 && failed.length === 0 && after.missing.length === 0 && after.corrupt.length === 0
   const report = {
     ok,
     installId,
+    operation,
     profileId: payload.profileId ?? profile?.id ?? 'ashfall',
     installPath,
     generatedAt: new Date().toISOString(),
@@ -4348,8 +4510,11 @@ async function installLegacyReleaseZip(payload, profile, entry) {
   }
   await writeJson(rollbackPlanPath, {
     installId,
+    operation,
+    profileId: payload.profileId ?? profile?.id ?? 'ashfall',
     installPath,
     backedUp,
+    created: installed,
     createdAt: new Date().toISOString(),
   })
   const reportPath = path.join(paths.logs, `legacy-install-${installId}.json`)
@@ -6777,6 +6942,8 @@ async function installZipPackArtifact(payload, profile, manifest) {
 
   const previousManifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
   const previousManifest = await readJson(previousManifestPath, null)
+  const previousManifestBackupPath = await backupFileIfExists(previousManifestPath, backupRoot, '.echo/installed-manifest.json')
+  if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
   const operation = Array.isArray(previousManifest?.files) ? 'update' : 'install'
   reportOperation({ phaseId: 'install', label: 'Checking existing Ashfall files', progress: 18 })
   const before = await verifyManifest({
@@ -6934,7 +7101,17 @@ async function installZipPackArtifact(payload, profile, manifest) {
     before,
     after,
   }
-  await writeJson(rollbackPlanPath, { installId, operation, installPath, backedUp, removed, createdAt: isoNow() })
+  await writeJson(rollbackPlanPath, {
+    installId,
+    operation,
+    profileId: payload.profileId ?? profile?.id ?? 'ashfall',
+    installPath,
+    backedUp,
+    created: installed,
+    removed,
+    removedDuringOperation: removed,
+    createdAt: isoNow(),
+  })
   if (profile) {
     await profileSave({
       ...profile,
@@ -7180,6 +7357,10 @@ async function installRun(payload = {}) {
   await ensureDir(installPath)
   await ensureDir(path.join(installPath, '.echo'))
   await ensureDir(paths.logs)
+  const previousManifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
+  const previousManifestBackupPath = await backupFileIfExists(previousManifestPath, backupRoot, '.echo/installed-manifest.json')
+  if (previousManifestBackupPath) backedUp.push({ path: '.echo/installed-manifest.json', backupPath: previousManifestBackupPath })
+  const operation = previousManifestBackupPath ? 'update' : 'install'
 
   const installFiles = manifest.files ?? []
   const operationId = payload.operationId
@@ -7248,7 +7429,7 @@ async function installRun(payload = {}) {
   }
 
   if (verificationCacheDirty) await writeVerificationCache(installPath, verificationCache)
-  await writeJson(path.join(installPath, '.echo', 'installed-manifest.json'), manifest)
+  await writeJson(previousManifestPath, manifest)
   reportOperation({ phaseId: 'install', label: 'Verifying Ashfall install', progress: 78 })
   const after = await verifyManifest({
     manifest,
@@ -7266,6 +7447,7 @@ async function installRun(payload = {}) {
   const report = {
     ok,
     installId,
+    operation,
     profileId: payload.profileId ?? profile?.id ?? 'ashfall',
     installPath,
     generatedAt: new Date().toISOString(),
@@ -7282,8 +7464,11 @@ async function installRun(payload = {}) {
   const reportPath = path.join(paths.logs, `install-${installId}.json`)
   await writeJson(rollbackPlanPath, {
     installId,
+    operation,
+    profileId: payload.profileId ?? profile?.id ?? 'ashfall',
     installPath,
     backedUp,
+    created: installed,
     createdAt: new Date().toISOString(),
   })
   await writeJson(reportPath, report)
@@ -8768,6 +8953,7 @@ const handlers = {
   'java:detect': javaDetect,
   'backup:create': backupCreate,
   'backup:restore': backupRestore,
+  'rollback:restore-latest': rollbackRestoreLatest,
   'logs:read': logsRead,
   'logs:export': logsExport,
   'asset:validate': assetValidate,

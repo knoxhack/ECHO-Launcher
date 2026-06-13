@@ -43,7 +43,7 @@ Launcher installers, AppImages, blockmaps, `latest.yml`, and `latest-linux.yml` 
 
 ## Galactic Survey Packaged Smoke
 
-`npm run test:e2e:galactic-survey-electron-ui` launches the packaged Windows directory build, installs Galactic Survey Native Edition from a local approved catalog, verifies update reconciliation and repair, exports diagnostics/log bundles, checks the removed legacy launch path fails closed, and prepares Minecraft Launcher handoff metadata in an isolated `ECHO_LAUNCHER_MINECRAFT_ROOT`. That smoke proves profile/version metadata handoff mechanics without opening the official Minecraft Launcher; real first launch still requires open/play evidence.
+`npm run test:e2e:galactic-survey-electron-ui` launches the packaged Windows directory build, installs Galactic Survey Native Edition from a local approved catalog, verifies update reconciliation, clicks the visible Restore Last Known Good rollback action, re-updates, repairs a corrupted module, exports diagnostics/log bundles, checks the removed legacy launch path fails closed, and prepares Minecraft Launcher handoff metadata in an isolated `ECHO_LAUNCHER_MINECRAFT_ROOT`. That smoke proves packaged install/update/rollback/repair UI and profile/version metadata handoff mechanics without opening the official Minecraft Launcher; real first launch still requires open/play evidence.
 
 ## Docs Index
 

@@ -408,6 +408,21 @@ export interface BackupRestoreResult {
   warnings: string[]
 }
 
+export interface NativeRollbackRestoreResult {
+  ok: boolean
+  rollbackId: string
+  profileId: string
+  installPath: string
+  restoredAt: string
+  rollbackPlanPath: string
+  restored: string[]
+  removed: string[]
+  skipped: Array<{ path: string; reason: string }>
+  warnings: string[]
+  after?: NativeVerifyResult
+  reportPath: string
+}
+
 export interface ServerPlanResult {
   ok: boolean
   profileId: string

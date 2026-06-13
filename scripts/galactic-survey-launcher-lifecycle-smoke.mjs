@@ -462,12 +462,12 @@ async function main() {
       realVersionToVersionUpdate: 'passed_with_previous_version_fixture',
       packagedElectronCardUiSmoke: 'covered_separately',
       electronInstallUpdateRepairClickThrough: 'covered_by_packaged_electron_ui_smoke',
-      electronRollbackClickThrough: 'not_available_no_visible_ui_command',
+      electronRollbackClickThrough: 'covered_by_packaged_electron_ui_smoke',
     },
     blockers: [],
     residualRisks: [
       'The previous Galactic Survey version is a fixture-local manifest generated from current prerelease assets plus an older module placeholder; it proves launcher update mechanics without claiming a second public Galactic Survey release exists.',
-      'This script uses Launcher-owned resolver and lifecycle contracts from Node against downloaded GitHub prerelease assets; packaged Electron install/update/repair click-through is covered by release-readiness/galactic-survey-electron-ui-smoke.json, while rollback has no visible packaged UI command yet.',
+      'This script uses Launcher-owned resolver and lifecycle contracts from Node against downloaded GitHub prerelease assets; packaged Electron install/update/rollback/repair click-through is covered by release-readiness/galactic-survey-electron-ui-smoke.json.',
       'Real gameplay evidence remains required before public alpha promotion.',
     ],
   }
