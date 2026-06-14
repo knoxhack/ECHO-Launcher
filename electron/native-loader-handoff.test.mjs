@@ -59,8 +59,16 @@ describe('native-loader handoff helpers', () => {
       echoworldcore: 'com.echo.WorldCoreNativeModule',
     })
     expect(runtime.bootstrapProfileClass).toBe('com.echo.AdapterBootstrapProfile')
-    expect(runtime.classpathEntries).toHaveLength(2)
-    expect(await readFile(runtime.classpathEntries[0], 'utf8')).toBe('runtime jar bytes')
+    expect(runtime.classpathEntries).toHaveLength(4)
+    const adapterAddonJar = runtime.classpathEntries.find((entry) => entry.endsWith('echoadaptercore-1.0.0.echo-addon.jar'))
+    const worldAddonJar = runtime.classpathEntries.find((entry) => entry.endsWith('echoworldcore-1.0.0.echo-addon.jar'))
+    const adapterRuntimeJar = runtime.classpathEntries.find((entry) => entry.endsWith('echoadaptercore-1.0.0-runtime.jar'))
+    const worldRuntimeJar = runtime.classpathEntries.find((entry) => entry.endsWith('echoworldcore-1.0.0-runtime.jar'))
+    expect(adapterAddonJar).toBeTruthy()
+    expect(worldAddonJar).toBeTruthy()
+    expect(adapterRuntimeJar).toBeTruthy()
+    expect(worldRuntimeJar).toBeTruthy()
+    expect(await readFile(adapterRuntimeJar, 'utf8')).toBe('runtime jar bytes')
     expect(runtime.reportPath).toContain(path.join('.echo', 'native-loader', 'materialized-addons.json'))
 
     const jvm = nativeBootstrapJvmArguments(manifest, runtime)

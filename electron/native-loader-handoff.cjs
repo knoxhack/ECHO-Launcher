@@ -112,6 +112,16 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
     await fs.mkdir(moduleCacheRoot, { recursive: true })
     const runtimeJars = []
 
+    const addonFileName = path.posix.basename(sourcePath)
+    const addonJarDestination = safeJoin(moduleCacheRoot, `${addonFileName}.jar`)
+    await fs.copyFile(sourceAbsolutePath, addonJarDestination)
+    runtimeJars.push({
+      path: addonJarDestination,
+      sourceEntry: addonFileName,
+      sha256: actualSha256,
+      size: (await fs.stat(addonJarDestination)).size,
+    })
+
     for (const entry of runtimeJarEntries) {
       const fileName = path.posix.basename(entry.entryName)
       const destination = safeJoin(moduleCacheRoot, fileName)
