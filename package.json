@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.1.10",
+  "version": "1.1.11",
   "description": "Official desktop launcher for ECHO experiences, PackOS catalogs, and public alpha builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",
@@ -30,12 +30,12 @@
     "rc:mobile:ready": "node scripts/mobile-rc-ready.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "package:win": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win nsis --publish never",
-    "package:win:dir": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win dir --publish never",
-    "package:win:publish": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win nsis --publish always",
-    "package:linux": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux AppImage --publish never",
-    "package:linux:dir": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux dir --publish never",
-    "package:linux:publish": "npm run prepare:native-loader && npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux AppImage --publish always",
+    "package:win": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win nsis --publish never",
+    "package:win:dir": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win dir --publish never",
+    "package:win:publish": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --win nsis --publish always",
+    "package:linux": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux AppImage --publish never",
+    "package:linux:dir": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux dir --publish never",
+    "package:linux:publish": "npm run build && npm run perf:budget && npm run audit:placeholders && electron-builder --linux AppImage --publish always",
     "perf:budget": "node scripts/check-perf-budget.mjs",
     "audit:placeholders": "node scripts/check-placeholders.mjs",
     "test": "vitest run",
@@ -107,19 +107,11 @@
       "build/**",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "build/native-loader",
-        "to": "build/native-loader",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
+    "extraResources": [],
     "asarUnpack": [
       "build/icon.ico",
       "build/icon.png",
-      "build/native-loader/**"
+      "build/icon.png"
     ],
     "asar": true,
     "afterPack": "scripts/after-pack-win-icon.cjs",

@@ -37,12 +37,21 @@ function stageStandaloneRuntime(context) {
   console.log(`[afterPack] Staged standalone runtime from ${runtimeRoot} into ${stagedRoot}`)
 }
 
+function shouldBundleStandaloneRuntime() {
+  const value = String(process.env.ECHO_BUNDLE_STANDALONE_RUNTIME || '').trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
 module.exports = async function afterPackWinIcon(context) {
   if (context.electronPlatformName !== 'win32') {
     return
   }
 
-  stageStandaloneRuntime(context)
+  if (shouldBundleStandaloneRuntime()) {
+    stageStandaloneRuntime(context)
+  } else {
+    console.log('[afterPack] Standalone runtime bundling disabled; launcher will use external/GitHub-hosted runtime artifacts.')
+  }
 
   const { appInfo, platformSpecificBuildOptions } = context.packager
   const exePath = path.join(context.appOutDir, `${appInfo.productFilename}.exe`)
