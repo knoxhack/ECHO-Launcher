@@ -99,12 +99,12 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
-const ECHO_NATIVE_LOADER_VERSION = '1.0.2'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.3'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.2/echo-native-loader-1.0.2.jar'
-const ECHO_NATIVE_LOADER_SHA1 = 'bd17873944e64dbfb7ca5fb6bd7ca7bc2a53cc4e'
-const ECHO_NATIVE_LOADER_SIZE = 1_833_432
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.3/echo-native-loader-1.0.3.jar'
+const ECHO_NATIVE_LOADER_SHA1 = 'f00b56bb967bc2d5233888aa95facc545849b419'
+const ECHO_NATIVE_LOADER_SIZE = 1_833_864
 const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
