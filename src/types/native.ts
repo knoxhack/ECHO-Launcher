@@ -164,6 +164,7 @@ export interface NativeJavaDetection {
 
 export interface NativeBootstrapState {
   protocolVersion: number
+  version: string
   platform: NativePlatformInfo
   paths: NativePaths
   profiles: LauncherProfile[]

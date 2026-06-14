@@ -151,11 +151,18 @@ async function waitFor(description, timeoutMs, probe) {
       const value = await probe()
       if (value) return value
     } catch (error) {
+      if (error?.fatal === true) throw error
       lastError = error
     }
     await sleep(500)
   }
   throw new Error(`${description} timed out.${lastError ? ` Last error: ${lastError.message}` : ''}`)
+}
+
+function fatalError(message) {
+  const error = new Error(message)
+  error.fatal = true
+  return error
 }
 
 async function fetchJson(url) {
@@ -336,7 +343,7 @@ async function waitForInstallReport(logsDir, afterMs, pack, timeoutMs) {
     const data = await newestReportData(logsDir, 'install-', afterMs)
     if (!data?.report) return null
     if (data.report.profileId !== pack.profileId) return null
-    if (!data.report.ok) throw new Error(`${pack.name} install report failed: ${data.report.message ?? data.report.error ?? data.reportPath}`)
+    if (!data.report.ok) throw fatalError(`${pack.name} install report failed: ${data.report.message ?? data.report.error ?? data.reportPath}`)
     return data
   })
 }
@@ -525,8 +532,8 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
   const realMainIndex = game.indexOf('--echo-real-main')
   assert(versionMetadata.mainClass === 'com.echo.NativeLoaderClient', `${pack.name} Native Loader mainClass is ${versionMetadata.mainClass ?? 'missing'}, expected com.echo.NativeLoaderClient.`)
   assert(
-    versionMetadata.libraries?.some((library) => library?.name === 'com.echo:native-loader:1.0.0'),
-    `${pack.name} Native Loader library is not com.echo:native-loader:1.0.0.`,
+    versionMetadata.libraries?.some((library) => library?.name === 'com.echo:native-loader:1.0.1'),
+    `${pack.name} Native Loader library is not com.echo:native-loader:1.0.1.`,
   )
   assert(
     jvm.includes('-Decho.native.minecraftMainClass=dev.echo.nativeplatform.bootstrap.EchoNativeBootstrapMain'),
@@ -638,9 +645,25 @@ async function run() {
   })
   child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
   child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  let childExit = null
+  const childExitPromise = new Promise((resolve) => {
+    child.once('exit', (code, signal) => {
+      childExit = { code, signal }
+      resolve(childExit)
+    })
+  })
+  const guardElectron = (description, promise) => Promise.race([
+    promise,
+    childExitPromise.then((exit) => {
+      throw new Error(
+        `Packaged launcher exited during ${description} (code ${exit.code ?? 'null'}, signal ${exit.signal ?? 'null'}).`,
+      )
+    }),
+  ])
 
   const report = {
     ok: false,
+    phase: 'created',
     generatedAt: new Date().toISOString(),
     channelUrl: args.channelUrl,
     executable: args.exe,
@@ -659,20 +682,32 @@ async function run() {
 
   let cdp = null
   try {
-    const target = await waitForPageTarget(debugPort, args.timeoutMs)
+    report.phase = 'waiting-debug-target'
+    await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
+    const target = await guardElectron('debug target bootstrap', waitForPageTarget(debugPort, args.timeoutMs))
+    report.phase = 'opening-cdp'
+    await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
     cdp = connectCdp(target.webSocketDebuggerUrl)
-    await cdp.open()
-    await cdp.send('Runtime.enable')
-    await cdp.send('Page.enable')
+    await guardElectron('CDP open', cdp.open())
+    await guardElectron('CDP Runtime.enable', cdp.send('Runtime.enable'))
+    await guardElectron('CDP Page.enable', cdp.send('Page.enable'))
 
-    await waitFor('Renderer mount', args.timeoutMs, async () => evaluate(cdp, `(() => {
+    report.phase = 'waiting-renderer'
+    await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
+    await guardElectron('renderer mount', waitFor('Renderer mount', args.timeoutMs, async () => evaluate(cdp, `(() => {
       const root = document.getElementById('root')
       return Boolean(root && root.childElementCount > 0 && !document.querySelector('[data-echo-startup-recovery]'))
-    })()`))
-    await waitFor('Native bridge bootstrap', args.timeoutMs, async () => evaluate(cdp, `Boolean(window.echoNative?.invoke)`))
-    await waitFor('Release Index bootstrap', args.timeoutMs, async () => evaluate(cdp, `window.echoNative.invoke('app:get-bootstrap-state').then((state) => (state.releaseIndex?.acceptedCount ?? state.releaseIndex?.releases?.length ?? 0) >= 15)`))
+    })()`)))
+    report.phase = 'waiting-native-bridge'
+    await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
+    await guardElectron('native bridge bootstrap', waitFor('Native bridge bootstrap', args.timeoutMs, async () => evaluate(cdp, `Boolean(window.echoNative?.invoke)`)))
+    report.phase = 'waiting-release-index'
+    await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
+    await guardElectron('release index bootstrap', waitFor('Release Index bootstrap', args.timeoutMs, async () => evaluate(cdp, `window.echoNative.invoke('app:get-bootstrap-state').then((state) => (state.releaseIndex?.acceptedCount ?? state.releaseIndex?.releases?.length ?? 0) >= 15)`)))
 
     for (const pack of selected) {
+      report.phase = `pack:${pack.profileId}`
+      await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
       const startedAt = Date.now()
       const packResult = {
         profileId: pack.profileId,
@@ -684,10 +719,10 @@ async function run() {
       try {
         await navigateHome(cdp)
         await selectHomePack(cdp, pack)
-        const packState = await waitFor(`${pack.name} pack state`, args.packTimeoutMs, async () => {
+        const packState = await guardElectron(`${pack.name} pack state`, waitFor(`${pack.name} pack state`, args.packTimeoutMs, async () => {
           const state = await evaluate(cdp, `window.echoNative.invoke('app:get-pack-state', { profileId: ${JSON.stringify(pack.profileId)} })`)
           return state?.profile?.id === pack.profileId && state?.primaryAction ? state : null
-        })
+        }))
         packResult.packStateBefore = {
           catalog: packState.catalog,
           route: packState.route,
@@ -695,24 +730,24 @@ async function run() {
           blockers: packState.blockers,
         }
 
-        const action = await waitFor(`${pack.name} visible install action`, args.packTimeoutMs, async () => {
+        const action = await guardElectron(`${pack.name} visible install action`, waitFor(`${pack.name} visible install action`, args.packTimeoutMs, async () => {
           const candidate = await visiblePrimaryInstallAction(cdp, pack)
           if (candidate.unavailable) {
             throw new Error(`${pack.name} is unavailable in UI: ${JSON.stringify(candidate.unavailable)}`)
           }
           if (!candidate.ok) return null
           return candidate
-        })
+        }))
         packResult.visibleInstallAction = action.install
 
         const installStartedAt = Date.now() - 1000
         const click = await clickVisibleButton(cdp, `Install ${pack.name}`)
         packResult.click = click
-        const installData = await waitForInstallReport(logsDir, installStartedAt, pack, args.packTimeoutMs)
+        const installData = await guardElectron(`${pack.name} install report`, waitForInstallReport(logsDir, installStartedAt, pack, args.packTimeoutMs))
         const installPath = installData.report.installPath
         assert(installPath, `${pack.name} install report did not include installPath.`)
         const installed = await hashInstalledManifest(installPath, pack.profileId)
-        const launchRoute = await verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs)
+        const launchRoute = await guardElectron(`${pack.name} launch route`, verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs))
         const durationMs = Date.now() - startedAt
         Object.assign(packResult, {
           ok: true,
@@ -741,10 +776,12 @@ async function run() {
     }
 
     report.ok = report.failures.length === 0 && report.packs.length === selected.length && report.packs.every((pack) => pack.ok)
+    report.phase = 'completed'
     report.completedAt = new Date().toISOString()
     await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
     assert(report.packs.length === selected.length, `Real Electron install smoke completed ${report.packs.length}/${selected.length} selected pack(s).`)
     assert(report.ok, 'One or more official packs failed the real Electron install smoke.')
+    assert(!childExit, `Packaged launcher exited before smoke completion (code ${childExit?.code ?? 'null'}, signal ${childExit?.signal ?? 'null'}).`)
     console.log(`All modpacks Electron install smoke passed: ${args.out}`)
   } finally {
     if (cdp) cdp.close()

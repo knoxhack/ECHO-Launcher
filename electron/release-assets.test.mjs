@@ -197,6 +197,54 @@ describe('release asset resolution', () => {
     })
   })
 
+  it('lets the canonical module asset override stale requirement metadata', () => {
+    const resolved = resolveModuleRequirements(
+      {
+        pack: 'galactic-survey-native-edition',
+        moduleRequirements: [
+          {
+            id: 'echoinputcore',
+            version: '1.0.0',
+            assetName: 'echoinputcore-1.0.0.echo-addon',
+            sha256: sha('0'),
+            size: 100,
+          },
+        ],
+        modules: [],
+        files: [],
+      },
+      [
+        {
+          name: 'echoinputcore-1.0.0.echo-addon',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-all-official-modpacks-runtime-fix-20260614/echoinputcore-1.0.0.echo-addon',
+          sha256: sha('1'),
+          size: 22678,
+          buildMode: 'compiled-runtime',
+        },
+        {
+          name: 'echoinputcore-1.0.0.echo-addon',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-source-packaged-0.1.0/echoinputcore-1.0.0.echo-addon',
+          sha256: sha('0'),
+          size: 100,
+          buildMode: 'source-packaged',
+        },
+      ],
+    )
+
+    expect(resolved.files[0]).toMatchObject({
+      path: 'addons/echoinputcore-1.0.0.echo-addon',
+      assetName: 'echoinputcore-1.0.0.echo-addon',
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-all-official-modpacks-runtime-fix-20260614/echoinputcore-1.0.0.echo-addon',
+      sha256: sha('1'),
+      size: 22678,
+    })
+    expect(resolved.moduleRequirements[0]).toMatchObject({
+      id: 'echoinputcore',
+      sha256: sha('1'),
+      size: 22678,
+    })
+  })
+
   it('builds public fallback URLs for unindexed hash-pinned module artifacts', () => {
     const resolved = resolveModuleRequirements(
       {
@@ -237,7 +285,7 @@ describe('release asset resolution', () => {
         artifactUrl: 'https://example.test/old.zip',
         loader: {
           installer: {
-            assetName: 'echo-native-loader-1.0.0.jar',
+            assetName: 'echo-native-loader-1.0.1.jar',
             url: 'https://api.github.com/repos/knoxhack/ECHO-Native-Platform/releases/assets/111',
           },
         },
@@ -258,8 +306,8 @@ describe('release asset resolution', () => {
           size: 10,
         },
         {
-          name: 'echo-native-loader-1.0.0.jar',
-          browser_download_url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar',
+          name: 'echo-native-loader-1.0.1.jar',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-loader-1.0.1.jar',
           size: 20,
         },
         {
@@ -276,7 +324,7 @@ describe('release asset resolution', () => {
       'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0/openlands-native-edition-0.1.0.zip',
     )
     expect(resolved.loader.installer.url).toBe(
-      'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar',
+      'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-loader-1.0.1.jar',
     )
     expect(resolved.files[0]).toMatchObject({
       url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-arcana-division-1.0.0-beta/echocommonloot-0.1.0.echo-addon',

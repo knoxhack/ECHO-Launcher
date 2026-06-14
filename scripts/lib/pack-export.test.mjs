@@ -374,20 +374,20 @@ describe('default Ashfall pack export', () => {
       jvmArgs: [],
     })
 
-    expect(manifest.version).toBe('1.0.0')
-    expect(manifest.minecraftLauncherVersionId).toBe('echo-native-loader-1.0.0')
+    expect(manifest.version).toBe('1.0.1')
+    expect(manifest.minecraftLauncherVersionId).toBe('echo-native-loader-1.0.1')
     expect(manifest.versionJson).toMatchObject({
-      id: 'echo-native-loader-1.0.0',
+      id: 'echo-native-loader-1.0.1',
       inheritsFrom: '26.1.2',
       mainClass: 'com.echo.NativeLoaderClient',
     })
     expect(manifest.versionJson.libraries).toHaveLength(1)
     expect(manifest.versionJson.libraries[0]).toMatchObject({
-      name: 'com.echo:native-loader:1.0.0',
+      name: 'com.echo:native-loader:1.0.1',
       downloads: {
         artifact: {
-          path: 'com/echo/native-loader/1.0.0/native-loader-1.0.0.jar',
-          url: expect.stringContaining('echo-native-loader-1.0.0.jar'),
+          path: 'com/echo/native-loader/1.0.1/native-loader-1.0.1.jar',
+          url: expect.stringContaining('echo-native-loader-1.0.1.jar'),
           sha1: expect.stringMatching(/^[a-f0-9]{40}$/u),
           size: expect.any(Number),
         },

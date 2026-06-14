@@ -235,7 +235,7 @@ function moduleCatalogFromReleaseAssets(releaseAssets = []) {
   const byName = new Map()
   for (const asset of releaseAssets) {
     if (!asset?.name) continue
-    byName.set(asset.name, asset)
+    if (!byName.has(asset.name)) byName.set(asset.name, asset)
   }
   return { byName, assets: releaseAssets.filter((asset) => asset?.name) }
 }
@@ -341,7 +341,7 @@ function resolveModuleRequirement(requirement, catalog) {
   if (!asset && !fallbackUrls.length) {
     throw new Error(`Module artifact '${requirement.assetName}' was not found in the ECHO-Modules release feed.`)
   }
-  const sha256 = requirement.sha256 ?? releaseAssetSha256(asset)
+  const sha256 = releaseAssetSha256(asset) ?? requirement.sha256
   if (!sha256) {
     throw new Error(`Module artifact '${assetName}' is missing a SHA-256 hash.`)
   }
@@ -352,7 +352,7 @@ function resolveModuleRequirement(requirement, catalog) {
     url: urls[0],
     ...(urls.length > 1 ? { urls } : {}),
     sha256,
-    size: requirement.size ?? asset?.size ?? 0,
+    size: asset?.size ?? requirement.size ?? 0,
     required: requirement.required,
     moduleId: requirement.moduleId,
     side: requirement.side,

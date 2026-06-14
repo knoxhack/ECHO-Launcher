@@ -44,6 +44,7 @@ export function EchoLauncher() {
   const addToast = useLauncherStore((state) => state.addToast)
   const desktopBackend = useLauncherStore((state) => state.desktopBackend)
   const setDesktopBackend = useLauncherStore((state) => state.setDesktopBackend)
+  const setLauncherVersion = useLauncherStore((state) => state.setLauncherVersion)
   const setProfiles = useProfileStore((state) => state.setProfiles)
   const setDesktopSettings = useSettingsStore((state) => state.setDesktopSettings)
   const advancedMode = useSettingsStore((state) => state.advancedMode)
@@ -98,6 +99,7 @@ export function EchoLauncher() {
       .then((state) => {
         if (disposed) return
         setProfiles(state.profiles)
+        setLauncherVersion(state.version)
         setDesktopSettings(state.settings)
         setAccount(state.account ?? defaultAccountState)
         setLaunchState(state.launch ?? defaultLaunchState)
@@ -137,7 +139,7 @@ export function EchoLauncher() {
       disposed = true
       cancelStartupTasks()
     }
-  }, [addToast, checkLauncherUpdate, loadReleases, refreshPackState, refreshReadiness, setAccount, setDesktopBackend, setDesktopSettings, setLaunchState, setLauncherUpdate, setProfiles, setReleaseIndex])
+  }, [addToast, checkLauncherUpdate, loadReleases, refreshPackState, refreshReadiness, setAccount, setDesktopBackend, setDesktopSettings, setLaunchState, setLauncherUpdate, setLauncherVersion, setProfiles, setReleaseIndex])
 
   useEffect(() => {
     if (!isNativeAvailable() || !launcherUpdate || !['checking', 'downloading'].includes(launcherUpdate.status)) return

@@ -200,11 +200,11 @@ const canonicalNativeRuntimeProduct: CanonicalReleaseIndexEntry = {
   ...canonicalLauncherProduct,
   id: 'echo-native-platform',
   kind: 'runtime',
-  version: '1.0.0',
-  releaseTag: 'v1.0.0',
+  version: '1.0.1',
+  releaseTag: 'v1.0.1',
   sourceRepo: 'knoxhack/ECHO-Native-Platform',
   artifacts: {
-    archive: { file: 'echo-native-platform-1.0.0.zip', sha256: '4'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-platform-1.0.0.zip' },
+    archive: { file: 'echo-native-platform-1.0.1.zip', sha256: '4'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-platform-1.0.1.zip' },
   },
   compatibility: ['ashfall-native-edition'],
 }
@@ -577,13 +577,13 @@ describe('releaseValidation', () => {
       canonicalNativeRuntimeProduct,
     ], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
       entry: { id: 'echo-native-platform', kind: 'runtime' },
-      artifact: { name: 'echo-native-platform-1.0.0.zip', sha256: '4'.repeat(64) },
+      artifact: { name: 'echo-native-platform-1.0.1.zip', sha256: '4'.repeat(64) },
     })
   })
 
   it('does not select the direct Native Loader jar as the product update artifact', () => {
     const nativeLoaderLibrary = {
-      file: 'echo-native-loader-1.0.0.jar',
+      file: 'echo-native-loader-1.0.1.jar',
       artifactRole: 'native-loader-library',
       manualInstall: true,
       developerDirectDownload: true,
@@ -591,8 +591,8 @@ describe('releaseValidation', () => {
       moduleArtifact: false,
       packContent: false,
       sha256: '5'.repeat(64),
-      size: 1141527,
-      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar',
+      size: 1827301,
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-loader-1.0.1.jar',
     }
     const directInstallDescriptor = {
       file: 'native-loader-direct-install.json',
@@ -603,8 +603,8 @@ describe('releaseValidation', () => {
       moduleArtifact: false,
       packContent: false,
       sha256: '6'.repeat(64),
-      size: 1279,
-      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/native-loader-direct-install.json',
+      size: 1359,
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/native-loader-direct-install.json',
     }
     const runtimeProduct = {
       ...canonicalNativeRuntimeProduct,
@@ -613,14 +613,14 @@ describe('releaseValidation', () => {
         checksums: {
           file: 'checksums.txt',
           sha256: '7'.repeat(64),
-          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/checksums.txt',
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/checksums.txt',
         },
         nativeLoaderLibrary,
         nativeLoaderDirectInstall: directInstallDescriptor,
         archive: {
-          file: 'echo-native-platform-1.0.0.zip',
+          file: 'echo-native-platform-1.0.1.zip',
           sha256: '8'.repeat(64),
-          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-platform-1.0.0.zip',
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-platform-1.0.1.zip',
           size: 1221,
         },
       },
@@ -634,11 +634,11 @@ describe('releaseValidation', () => {
       },
     }
 
-    expect(productUpdateArtifact(runtimeProduct, 'ashfall-native-edition')?.name).toBe('echo-native-platform-1.0.0.zip')
+    expect(productUpdateArtifact(runtimeProduct, 'ashfall-native-edition')?.name).toBe('echo-native-platform-1.0.1.zip')
     expect(productUpdateArtifact(onlyDirectLoader, 'ashfall-native-edition')).toBeNull()
     expect(productUpdateSelection([onlyDirectLoader], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
       entry: null,
-      warnings: ['Release Index product echo-native-platform 1.0.0 has no indexed updater artifact for ashfall-native-edition.'],
+      warnings: ['Release Index product echo-native-platform 1.0.1 has no indexed updater artifact for ashfall-native-edition.'],
     })
   })
 
@@ -649,14 +649,14 @@ describe('releaseValidation', () => {
       channel: 'alpha',
       minecraft: '26.1.2',
       nativeLoader: {
-        version: '1.0.0',
-        minecraftLauncherVersionId: 'echo-native-loader-1.0.0',
+        version: '1.0.1',
+        minecraftLauncherVersionId: 'echo-native-loader-1.0.1',
         versionJson: {
-          id: 'echo-native-loader-1.0.0',
+          id: 'echo-native-loader-1.0.1',
           inheritsFrom: '26.1.2',
           mainClass: 'com.echo.NativeLoaderClient',
           arguments: { game: [], jvm: [] },
-          libraries: [{ name: 'com.echo:native-loader:1.0.0' }],
+          libraries: [{ name: 'com.echo:native-loader:1.0.1' }],
         },
       },
       moduleRequirements: [{ id: 'echocore', version: '1.4.0' }],
@@ -1032,21 +1032,21 @@ describe('releaseValidation', () => {
     const manifest = validatePackManifest({
       ...baseManifest(),
       nativeLoader: {
-        version: '1.0.0',
-        minecraftLauncherVersionId: 'echo-native-loader-1.0.0',
+        version: '1.0.1',
+        minecraftLauncherVersionId: 'echo-native-loader-1.0.1',
         versionJson: {
-          id: 'echo-native-loader-1.0.0',
+          id: 'echo-native-loader-1.0.1',
           inheritsFrom: '26.1.2',
           mainClass: 'com.echo.NativeLoaderClient',
           arguments: { game: [], jvm: [] },
-          libraries: [{ name: 'com.echo:native-loader:1.0.0' }],
+          libraries: [{ name: 'com.echo:native-loader:1.0.1' }],
         },
       },
     })
 
     expect(nativeLoaderMetadataStatus(manifest)).toMatchObject({
       ok: true,
-      versionId: 'echo-native-loader-1.0.0',
+      versionId: 'echo-native-loader-1.0.1',
     })
   })
 
@@ -1184,14 +1184,14 @@ function baseManifest() {
 
 function baseNativeLoader() {
   return {
-    version: '1.0.0',
-    minecraftLauncherVersionId: 'echo-native-loader-1.0.0',
+    version: '1.0.1',
+    minecraftLauncherVersionId: 'echo-native-loader-1.0.1',
     versionJson: {
-      id: 'echo-native-loader-1.0.0',
+      id: 'echo-native-loader-1.0.1',
       inheritsFrom: '26.1.2',
       mainClass: 'com.echo.NativeLoaderClient',
       arguments: { game: [], jvm: [] },
-      libraries: [{ name: 'com.echo:native-loader:1.0.0' }],
+      libraries: [{ name: 'com.echo:native-loader:1.0.1' }],
     },
   } as const
 }

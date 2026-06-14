@@ -114,7 +114,7 @@ export function LibraryCatalog() {
     async (refresh = false, announce = refresh) => {
       try {
         const index = await loadReleases(refresh)
-        await refreshManyPackStates(visibleModpacks.map((pack) => pack.id))
+        await refreshManyPackStates(visibleModpacks.map((pack) => pack.id), { force: refresh })
         if (announce) {
           addToast('Catalog refreshed', `${index.acceptedCount ?? index.releases.length} approved release entries loaded.`, 'success')
         }

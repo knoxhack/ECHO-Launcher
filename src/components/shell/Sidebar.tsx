@@ -7,6 +7,7 @@ import { getVisibleNavItems } from './navigation'
 
 export function Sidebar() {
   const activePage = useLauncherStore((state) => state.activePage)
+  const launcherVersion = useLauncherStore((state) => state.launcherVersion)
   const setActivePage = useLauncherStore((state) => state.setActivePage)
   const advancedMode = useSettingsStore((state) => state.advancedMode)
   const creatorMode = useSettingsStore((state) => state.creatorMode)
@@ -36,7 +37,7 @@ export function Sidebar() {
       <div className="space-y-3 p-3">
         <div className="rounded-lg border border-cyan-echo/15 bg-black/25 p-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-soft">Launcher</p>
-          <p className="mt-1 text-sm font-semibold text-white">v1.1.0</p>
+          <p className="mt-1 text-sm font-semibold text-white">{launcherVersion ? `v${launcherVersion}` : 'Desktop build'}</p>
           <p className="mt-1 text-xs leading-5 text-slate-400">Pack state, installs, repair, and diagnostics are selected-pack scoped.</p>
         </div>
       </div>

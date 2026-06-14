@@ -11,6 +11,7 @@ interface LauncherStore {
   selectedVariant: PackOsVariant
   activeToolsTab: ToolsTabId
   desktopBackend: 'checking' | 'connected' | 'browser-preview' | 'error'
+  launcherVersion: string
   toasts: ToastMessage[]
   setActivePage: (page: PageId) => void
   setSelectedProfileId: (profileId: string) => void
@@ -18,6 +19,7 @@ interface LauncherStore {
   setSelectedVariant: (variant: PackOsVariant) => void
   setActiveToolsTab: (tab: ToolsTabId) => void
   setDesktopBackend: (status: LauncherStore['desktopBackend']) => void
+  setLauncherVersion: (launcherVersion: string) => void
   addToast: (title: string, detail?: string, tone?: ToastTone) => void
   removeToast: (toastId: string) => void
 }
@@ -70,6 +72,7 @@ export const useLauncherStore = create<LauncherStore>()(
       selectedVariant: 'standard',
       activeToolsTab: 'repair',
       desktopBackend: 'checking',
+      launcherVersion: '',
       toasts: [],
       setActivePage: (activePage) => set({ activePage }),
       setSelectedProfileId: (selectedProfileId) => set({ selectedProfileId }),
@@ -77,6 +80,7 @@ export const useLauncherStore = create<LauncherStore>()(
       setSelectedVariant: (selectedVariant) => set({ selectedVariant }),
       setActiveToolsTab: (activeToolsTab) => set({ activeToolsTab }),
       setDesktopBackend: (desktopBackend) => set({ desktopBackend }),
+      setLauncherVersion: (launcherVersion) => set({ launcherVersion }),
       addToast: (title, detail, tone = 'info') =>
         set((state) => ({
           toasts: [

@@ -219,7 +219,7 @@ describe('minecraftLauncherHandoff', () => {
         profileName: 'Ashfall - Native Loader',
         runtimeMode: 'native-loader-minecraft',
         runtimeLabel: 'Native Loader + Minecraft',
-        minecraftVersionId: 'echo-native-loader-1.0.0',
+        minecraftVersionId: 'echo-native-loader-1.0.1',
       },
     )
 
@@ -228,7 +228,7 @@ describe('minecraftLauncherHandoff', () => {
     })
     expect(updated.profiles['echo-ashfall-native-loader']).toMatchObject({
       name: 'Ashfall - Native Loader',
-      lastVersionId: 'echo-native-loader-1.0.0',
+      lastVersionId: 'echo-native-loader-1.0.1',
       echoLauncher: {
         managedBy: 'ECHO Launcher',
         profileId: 'ashfall',
