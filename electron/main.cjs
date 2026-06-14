@@ -5817,12 +5817,19 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
       size: artifact.size,
       libraryName: artifact.libraryName,
     }
+    let downloadError = null
+    try {
+      await downloadSha1Artifact(file)
+      continue
+    } catch (error) {
+      downloadError = error
+    }
     const localInstall = await installNativeLoaderClientArtifactFromLocalSource(file)
     if (localInstall) {
-      installedFromLocal.push(localInstall)
+      installedFromLocal.push({ ...localInstall, downloadError: downloadError instanceof Error ? downloadError.message : String(downloadError) })
       continue
     }
-    await downloadSha1Artifact(file)
+    throw downloadError ?? new Error(`Native Loader client library preparation failed for ${file.path}.`)
   }
 
   const after = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
@@ -5836,8 +5843,8 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
     nativeRuntime,
     warnings: [
       installedFromLocal.length > 0
-        ? `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the bundled Native Loader library.`
-        : `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} into Minecraft Launcher libraries.`,
+        ? `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO tried the ECHO Native Platform GitHub release first, then installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the bundled verified fallback.`
+        : `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO downloaded ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the ECHO Native Platform GitHub release.`,
     ],
   }
 }
