@@ -5351,35 +5351,15 @@ function echoNativeLoaderDownloadArtifact() {
   }
 }
 
+function allowLocalNativeLoaderFallback() {
+  const value = String(process.env.ECHO_ALLOW_LOCAL_NATIVE_LOADER ?? '').trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+}
+
 function nativeLoaderLocalCandidatePaths() {
   const configured = String(process.env.ECHO_NATIVE_LOADER_LOCAL_JAR ?? '').trim()
-  const appRoot = app.getAppPath()
-  const resourcesRoot = String(process.resourcesPath ?? '').trim()
-  const executableResourcesRoot = path.join(path.dirname(process.execPath), 'resources')
-  const sourceRoots = [
-    path.join(appRoot, 'build', 'native-loader'),
-    path.join(appRoot, 'native-loader'),
-    path.join(resourcesRoot, 'build', 'native-loader'),
-    path.join(resourcesRoot, 'native-loader'),
-    path.join(resourcesRoot, 'app.asar.unpacked', 'build', 'native-loader'),
-    path.join(resourcesRoot, 'app.asar.unpacked', 'native-loader'),
-    path.join(executableResourcesRoot, 'build', 'native-loader'),
-    path.join(executableResourcesRoot, 'native-loader'),
-    path.resolve(process.cwd(), 'build', 'native-loader'),
-    path.resolve(process.cwd(), '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
-    path.resolve(process.cwd(), '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
-    path.resolve(appRoot, '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
-    path.resolve(appRoot, '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
-    path.resolve(appRoot, '..', '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
-    path.resolve(appRoot, '..', '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
-  ].filter(Boolean)
-  const candidatePaths = []
-  if (configured) candidatePaths.push(path.resolve(configured))
-  for (const root of sourceRoots) {
-    candidatePaths.push(path.join(root, ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME))
-    candidatePaths.push(path.join(root, ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME))
-  }
-  return [...new Set(candidatePaths.map((candidate) => path.resolve(candidate)))]
+  if (!allowLocalNativeLoaderFallback() || !configured) return []
+  return [path.resolve(configured)]
 }
 
 async function verifiedNativeLoaderLocalCandidate(candidatePath, artifact) {
@@ -5878,10 +5858,12 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
     } catch (error) {
       downloadError = error
     }
-    const localInstall = await installNativeLoaderClientArtifactFromLocalSource(file)
-    if (localInstall) {
-      installedFromLocal.push({ ...localInstall, downloadError: downloadError instanceof Error ? downloadError.message : String(downloadError) })
-      continue
+    if (allowLocalNativeLoaderFallback()) {
+      const localInstall = await installNativeLoaderClientArtifactFromLocalSource(file)
+      if (localInstall) {
+        installedFromLocal.push({ ...localInstall, downloadError: downloadError instanceof Error ? downloadError.message : String(downloadError) })
+        continue
+      }
     }
     throw downloadError ?? new Error(`Native Loader client library preparation failed for ${file.path}.`)
   }
@@ -5897,7 +5879,7 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
     nativeRuntime,
     warnings: [
       installedFromLocal.length > 0
-        ? `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO tried the ECHO Native Platform GitHub release first, then installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the bundled verified fallback.`
+        ? `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO tried the ECHO Native Platform GitHub release first, then installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the explicit local developer override.`
         : `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO downloaded ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the ECHO Native Platform GitHub release.`,
     ],
   }
