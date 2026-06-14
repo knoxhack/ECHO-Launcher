@@ -96,6 +96,10 @@ async function sha256File(filePath) {
   return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
 }
 
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex')
+}
+
 async function exists(filePath) {
   try {
     await fs.access(filePath)
@@ -452,18 +456,49 @@ async function waitForRepairReport(logsDir, afterMs, predicate, timeoutMs) {
   })
 }
 
-async function waitForSmokeModuleHash(installPath, expectedSha256, timeoutMs, description) {
-  const modulePath = path.join(installPath, SMOKE_MODULE_PATH)
+async function waitForFileHash(installPath, relativePath, expectedSha256, timeoutMs, description) {
+  const filePath = path.join(installPath, relativePath)
   return waitFor(description, timeoutMs, async () => {
-    if (!(await exists(modulePath))) return null
-    const sha256 = await sha256File(modulePath)
+    if (!(await exists(filePath))) return null
+    const sha256 = await sha256File(filePath)
     return sha256 === expectedSha256 ? {
-      relativePath: SMOKE_MODULE_PATH,
-      path: modulePath,
+      relativePath,
+      path: filePath,
       sha256,
       expectedSha256,
     } : null
   })
+}
+
+async function waitForSmokeModuleHash(installPath, expectedSha256, timeoutMs, description) {
+  return waitForFileHash(installPath, SMOKE_MODULE_PATH, expectedSha256, timeoutMs, description)
+}
+
+async function preparePreviousVersionFixture(installPath) {
+  const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
+  const manifest = await readJson(manifestPath)
+  const moduleEntry = manifest.files?.find((file) => String(file.path).replace(/\\/g, '/') === SMOKE_MODULE_PATH)
+  assert(moduleEntry, `${SMOKE_MODULE_PATH} is missing from installed manifest before update fixture.`)
+  const previousBytes = Buffer.from(`previous sky relay packaged update fixture ${new Date().toISOString()}\n`, 'utf8')
+  const previousSha256 = sha256Buffer(previousBytes)
+  const modulePath = path.join(installPath, SMOKE_MODULE_PATH)
+  await fs.writeFile(modulePath, previousBytes)
+  moduleEntry.sha256 = previousSha256
+  moduleEntry.size = previousBytes.length
+  const currentVersion = manifest.version
+  manifest.version = '0.0.0-packaged-ui-smoke'
+  await writeJson(manifestPath, manifest)
+  return {
+    manifestPath,
+    currentVersion,
+    previousVersion: manifest.version,
+    previousModule: {
+      relativePath: SMOKE_MODULE_PATH,
+      path: modulePath,
+      sha256: previousSha256,
+      size: previousBytes.length,
+    },
+  }
 }
 
 async function closeHttpServer(server) {
@@ -696,28 +731,21 @@ async function run() {
         manifestPath: profile.manifestPath
       } : null
     })`))
+    const previousVersionFixture = await preparePreviousVersionFixture(installPath)
+    await waitForFileHash(
+      installPath,
+      previousVersionFixture.previousModule.relativePath,
+      previousVersionFixture.previousModule.sha256,
+      args.timeoutMs,
+      'Sky Relay previous-version module fixture',
+    )
 
     await waitFor('Library navigation', args.timeoutMs, async () => clickButtonContaining(cdp, 'Library'))
     await waitFor('Library page after install', args.timeoutMs, async () => evaluate(cdp, `document.querySelector('h1')?.textContent?.trim() === 'Library'`))
-    await waitFor('Updates tab', args.timeoutMs, async () => clickTabContaining(cdp, 'Updates'))
-    await waitFor('Downloads page', args.timeoutMs, async () => evaluate(cdp, `document.body.innerText.includes('Install & Update Pipeline')`))
-      .catch(async (error) => {
-        const snapshot = await evaluate(cdp, `(() => ({
-          heading: document.querySelector('h1')?.textContent?.trim() ?? '',
-          subheadings: Array.from(document.querySelectorAll('h2')).map((element) => element.textContent?.trim() ?? '').slice(0, 8),
-          tabs: Array.from(document.querySelectorAll('[role="tab"]')).map((element) => ({
-            text: element.textContent?.trim() ?? '',
-            selected: element.getAttribute('aria-selected'),
-            state: element.getAttribute('data-state')
-          })),
-          buttons: Array.from(document.querySelectorAll('button')).map((element) => element.textContent?.trim() ?? '').filter(Boolean).slice(0, 24),
-          bodyStart: document.body.innerText.slice(0, 1200)
-        }))()`)
-        throw new Error(`${error.message} Snapshot: ${JSON.stringify(snapshot)}`)
-      })
+    await waitFor('Sky Relay Library refresh after previous-version fixture', args.timeoutMs, async () => clickButtonContaining(cdp, 'Refresh Catalog'))
 
     const updateStartedAt = Date.now() - 1000
-    const updateClick = await waitFor('Sky Relay update reconciliation button', args.timeoutMs, async () => clickButtonContaining(cdp, `Install ${SMOKE_PACK.name}`))
+    const updateClick = await waitFor('Sky Relay scoped update button', args.timeoutMs, async () => clickCardButtonContaining(cdp, SMOKE_PACK.name, 'Update'))
     const updateData = await waitForInstallReport(logsDir, updateStartedAt, (report) =>
       report.profileId === SMOKE_PACK.packId &&
       report.operation === 'update' &&

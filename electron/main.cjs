@@ -4760,7 +4760,9 @@ async function fetchChecksumText(url, algorithm) {
 
 async function resolveNeoForgeInstallerMetadata(manifest, reportOperation) {
   const configured = manifest.loader?.installer
-  if (configured?.url && configured?.sha256) return configured
+  const configuredSha256 = String(configured?.sha256 ?? '').trim().toLowerCase()
+  const hasTrustedConfiguredSha256 = /^[a-f0-9]{64}$/i.test(configuredSha256) && configuredSha256 !== 'f'.repeat(64)
+  if (configured?.url && hasTrustedConfiguredSha256) return { ...configured, sha256: configuredSha256 }
 
   const version = manifest.loader?.version
   if (!version) return null
@@ -4771,13 +4773,13 @@ async function resolveNeoForgeInstallerMetadata(manifest, reportOperation) {
     progress: 95,
     message: `Checking NeoForge ${version} installer checksum.`,
   })
-  const sha256 = configured?.sha256 ?? await fetchChecksumText(`${url}.sha256`, 'sha256')
+  const sha256 = hasTrustedConfiguredSha256 ? configuredSha256 : await fetchChecksumText(`${url}.sha256`, 'sha256')
   return {
-    assetName: configured?.assetName ?? `neoforge-${version}-installer.jar`,
+    assetName: hasTrustedConfiguredSha256 ? (configured?.assetName ?? `neoforge-${version}-installer.jar`) : `neoforge-${version}-installer.jar`,
     url,
     sha256,
     installMode: configured?.installMode ?? 'client',
-    inferred: !configured?.url,
+    inferred: !configured?.url || !hasTrustedConfiguredSha256,
   }
 }
 

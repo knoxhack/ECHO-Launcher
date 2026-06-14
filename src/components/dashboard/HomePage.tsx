@@ -1,44 +1,29 @@
 import {
-  AlertTriangle,
-  DownloadCloud,
   Gamepad2,
   Monitor,
   RefreshCcw,
   ShieldAlert,
   Terminal,
-  Wrench,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { officialModpacksFromReleaseIndex } from '../../data/officialModpacks'
-import { installService } from '../../services/InstallService'
-import { launchService } from '../../services/LaunchService'
 import { isNativeAvailable, invokeNative } from '../../services/nativeBridge'
-import { repairService } from '../../services/RepairService'
 import { useLauncherStore } from '../../stores/launcherStore'
 import { usePackOsStore } from '../../stores/packOsStore'
 import { usePackStateStore } from '../../stores/packStateStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReadinessStore } from '../../stores/readinessStore'
 import { useReleaseStore } from '../../stores/releaseStore'
-import { useSettingsStore } from '../../stores/settingsStore'
-import { useStandaloneRuntimeStore } from '../../stores/standaloneRuntimeStore'
 import type { HealthStatus } from '../../types/launcher'
 import type { NativePackPrimaryActionKind, NativePackState } from '../../types/native'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
 import { ProgressBar } from '../cyber/ProgressBar'
 import { StatusChip } from '../cyber/StatusChip'
+import { packActionIcons, usePackActions } from '../library/usePackActions'
 
-const actionIcons: Record<NativePackPrimaryActionKind, LucideIcon> = {
-  play: Gamepad2,
-  'launch-standalone': Monitor,
-  install: DownloadCloud,
-  update: RefreshCcw,
-  repair: Wrench,
-  diagnostics: ShieldAlert,
-  unavailable: AlertTriangle,
-}
+const actionIcons: Record<NativePackPrimaryActionKind, LucideIcon> = packActionIcons
 
 const routeIcons: Record<string, LucideIcon> = {
   'native-loader-minecraft': Terminal,
@@ -57,8 +42,6 @@ function packStatus(packState: NativePackState | null): { label: string; status:
 export function HomePage() {
   const selectedProfileId = useLauncherStore((state) => state.selectedProfileId)
   const setSelectedProfileId = useLauncherStore((state) => state.setSelectedProfileId)
-  const setActivePage = useLauncherStore((state) => state.setActivePage)
-  const setActiveToolsTab = useLauncherStore((state) => state.setActiveToolsTab)
   const addToast = useLauncherStore((state) => state.addToast)
   const profiles = useProfileStore((state) => state.profiles)
   const setProfiles = useProfileStore((state) => state.setProfiles)
@@ -66,14 +49,11 @@ export function HomePage() {
   const loadReleases = useReleaseStore((state) => state.loadReleases)
   const refreshReadiness = useReadinessStore((state) => state.refreshReadiness)
   const refreshPackOs = usePackOsStore((state) => state.refreshPackOs)
-  const ramGb = useSettingsStore((state) => state.ramGb)
   const packStates = usePackStateStore((state) => state.states)
   const packStateLoading = usePackStateStore((state) => state.loading[selectedProfileId])
   const packStateError = usePackStateStore((state) => state.error[selectedProfileId])
   const refreshPackState = usePackStateStore((state) => state.refreshPackState)
-  const launchStandaloneRuntime = useStandaloneRuntimeStore((state) => state.launchStandalone)
-  const standaloneLaunching = useStandaloneRuntimeStore((state) => state.launching)
-  const [busy, setBusy] = useState(false)
+  const { busyPackId, openDiagnostics, runPackAction } = usePackActions()
   const [progress, setProgress] = useState(0)
   const [stage, setStage] = useState('Ready')
 
@@ -85,7 +65,8 @@ export function HomePage() {
   const RouteIcon = routeIcons[packState?.route.mode ?? selectedProfile?.runtimeMode ?? 'native-loader-minecraft'] ?? Gamepad2
   const action = packState?.primaryAction
   const ActionIcon = actionIcons[action?.kind ?? 'unavailable']
-  const disabled = busy || standaloneLaunching || !action?.enabled || !isNativeAvailable()
+  const busy = busyPackId === selectedProfileId
+  const disabled = busy || !action?.enabled || !isNativeAvailable()
 
   useEffect(() => {
     if (!selectedProfileId || !isNativeAvailable()) return
@@ -103,94 +84,22 @@ export function HomePage() {
     return nextPackState
   }
 
-  const openDiagnostics = () => {
-    setActiveToolsTab('diagnostics')
-    setActivePage('tools')
+  const openSelectedDiagnostics = () => {
+    openDiagnostics(selectedProfileId)
   }
 
-  const runPackAction = async () => {
-    if (!selectedProfile || !action || !packState) return
-    if (action.kind === 'diagnostics') {
-      openDiagnostics()
-      return
-    }
-    if (action.kind === 'unavailable') {
-      addToast('Pack unavailable', action.reason || status.detail, 'warning')
-      return
-    }
-    if (!isNativeAvailable()) {
-      addToast('Desktop app required', 'Pack actions require the ECHO desktop app.', 'warning')
-      return
-    }
-
-    setBusy(true)
-    setProgress(8)
-    setStage(action.label)
-    try {
-      if (action.kind === 'install' || action.kind === 'update') {
-        const operationId = launchService.createOperationId(action.kind)
-        setStage(action.kind === 'install' ? `Installing ${selectedProfile.name}` : `Updating ${selectedProfile.name}`)
-        const result = await installService.runInstall({
-          profileId: selectedProfile.id,
-          installPath: selectedProfile.installPath,
-          channel: selectedProfile.channel,
-          version: packState.catalog.release?.version,
-          operationId,
-          refresh: true,
-        })
-        setProgress(result.ok ? 100 : 96)
-        addToast(result.ok ? `${selectedProfile.name} ready` : `${selectedProfile.name} install needs attention`, result.ok ? `Verified ${result.after.valid.length} files.` : `${result.after.missing.length} missing and ${result.after.corrupt.length} corrupt files remain.`, result.ok ? 'success' : 'danger')
-      } else if (action.kind === 'repair') {
-        if (!packState.install.manifestPath) {
-          addToast('Repair unavailable', 'This pack does not have a valid installed manifest to repair from.', 'warning')
-          return
-        }
-        setStage(`Repairing ${selectedProfile.name}`)
-        const result = await repairService.runRepair({
-          profileId: selectedProfile.id,
-          installPath: selectedProfile.installPath,
-          manifestPath: packState.install.manifestPath,
-          channel: selectedProfile.channel,
-        })
-        setProgress(result.ok ? 100 : 96)
-        const next = await refreshSelectedState()
-        addToast(
-          result.ok && next?.ok ? `${selectedProfile.name} repaired` : 'Files repaired, launch still needs attention',
-          result.ok && next?.ok ? 'The selected pack is ready to play.' : next?.blockers[0]?.detail ?? `${result.after.missing.length} missing and ${result.after.corrupt.length} corrupt files remain.`,
-          result.ok && next?.ok ? 'success' : 'warning',
-        )
-        return
-      } else if (action.kind === 'launch-standalone') {
-        setStage(`Launching ${selectedProfile.name}`)
-        const result = await launchStandaloneRuntime({ profileId: selectedProfile.id })
-        setProgress(result?.ok ? 100 : 96)
-        addToast(result?.ok ? `${selectedProfile.name} launched` : 'Standalone launch failed', result?.message ?? 'Standalone launch did not return a result.', result?.ok ? 'success' : 'danger')
-      } else {
-        const operationId = launchService.createOperationId('handoff')
-        setStage(`Preparing ${selectedProfile.name}`)
-        const result = await launchService.prepareHandoff(
-          selectedProfile.id,
-          selectedProfile.installPath,
-          ramGb,
-          true,
-          operationId,
-          'skip',
-          packState.route.mode === 'native-loader-minecraft' ? 'native-loader-minecraft' : 'neoforge-minecraft',
-        )
-        setProgress(result.ok ? 100 : 96)
-        addToast(result.ok ? 'Minecraft Launcher ready' : `${selectedProfile.name} needs attention`, result.message, result.ok ? 'success' : 'danger')
-      }
-      await refreshSelectedState()
-    } catch (error) {
-      setProgress(96)
-      addToast(`${selectedProfile.name} action failed`, error instanceof Error ? error.message : 'The selected action failed.', 'danger')
-    } finally {
-      setBusy(false)
-    }
+  const runSelectedPackAction = async () => {
+    if (!packState) return
+    await runPackAction(packState, {
+      onProgress: setProgress,
+      onStage: setStage,
+      afterRefresh: async () => {
+        await refreshPackOs()
+      },
+    })
   }
 
   const refreshCatalog = async () => {
-    setBusy(true)
     setStage('Refreshing Catalog')
     try {
       await loadReleases(true)
@@ -198,8 +107,6 @@ export function HomePage() {
       addToast('Catalog refreshed', 'Pack availability was refreshed from the Release Index.', 'success')
     } catch (error) {
       addToast('Catalog refresh failed', error instanceof Error ? error.message : 'Release Index refresh failed.', 'danger')
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -258,11 +165,11 @@ export function HomePage() {
                   className="w-full"
                   disabled={disabled}
                   icon={ActionIcon}
-                  onClick={() => void runPackAction()}
+                  onClick={() => void runSelectedPackAction()}
                   size="lg"
                   variant={action?.variant ?? 'ghost'}
                 >
-                  {busy || standaloneLaunching || packStateLoading ? 'Working...' : action?.label ?? 'Checking...'}
+                  {busy || packStateLoading ? 'Working...' : action?.label ?? 'Checking...'}
                 </CyberButton>
                 <div>
                   <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.14em] text-slate-400">
@@ -298,7 +205,7 @@ export function HomePage() {
             <CyberButton disabled={busy} icon={RefreshCcw} onClick={() => void refreshCatalog()} size="sm" variant="secondary">
               Catalog
             </CyberButton>
-            <CyberButton icon={ShieldAlert} onClick={openDiagnostics} size="sm" variant="secondary">
+            <CyberButton icon={ShieldAlert} onClick={openSelectedDiagnostics} size="sm" variant="secondary">
               Diagnostics
             </CyberButton>
           </div>

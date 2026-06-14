@@ -150,7 +150,12 @@ function resolveManifestReleaseAssets(manifest, entryAssets = []) {
       size: file.size || asset.size,
     }
   })
-  const installer = manifest?.loader?.installer
+  const loader = manifest?.loader && typeof manifest.loader === 'object' && !Array.isArray(manifest.loader)
+    ? manifest.loader
+    : manifest?.loader
+  const installer = loader && typeof loader === 'object' && !Array.isArray(loader)
+    ? loader.installer
+    : undefined
   const installerAsset = installer?.assetName ? lookup.byName.get(installer.assetName) : null
   const installerUrls = releaseAssetUrls(installerAsset)
   const installerUrl = installerUrls[0]
@@ -167,10 +172,12 @@ function resolveManifestReleaseAssets(manifest, entryAssets = []) {
     artifactUrl: releaseAssetUrl(artifact) ?? manifest?.artifactUrl,
     artifactSize: artifact?.size ?? manifest?.artifactSize,
     files,
-    loader: {
-      ...manifest?.loader,
-      installer: resolvedInstaller,
-    },
+    loader: loader && typeof loader === 'object' && !Array.isArray(loader)
+      ? {
+          ...loader,
+          installer: resolvedInstaller,
+        }
+      : loader,
   }
 }
 

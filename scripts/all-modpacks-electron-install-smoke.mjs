@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { execFile, spawn } from 'node:child_process'
+import AdmZip from 'adm-zip'
 
 const OFFICIAL_PACKS = [
   ['ashfall-native-edition', 'Ashfall Native Edition'],
@@ -118,6 +119,16 @@ async function writeJson(filePath, value) {
 
 async function sha256File(filePath) {
   return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
+}
+
+function dependencyBlocks(toml) {
+  return String(toml).match(/\[\[dependencies\.[^\]]+\]\][\s\S]*?(?=\n\[\[dependencies\.|\n\[\[mods\]\]|\s*$)/gu) ?? []
+}
+
+function hasEchoMinecraftDependencyRange(toml) {
+  return dependencyBlocks(toml).some((block) =>
+    /modId\s*=\s*"minecraft"/u.test(block) && /versionRange\s*=\s*"\[26\.1\.2,26\.2\)"/u.test(block)
+  )
 }
 
 async function freePort() {
@@ -335,15 +346,41 @@ async function hashInstalledManifest(installPath, selectedPack) {
   assert(await exists(manifestPath), `Installed manifest missing: ${manifestPath}`)
   const manifest = await readJson(manifestPath)
   assert(manifest.pack === selectedPack, `Installed manifest pack is ${manifest.pack}, expected ${selectedPack}.`)
+  const expectedFolder = selectedPack.endsWith('-native-edition') ? 'addons/' : 'mods/'
+  if (selectedPack.endsWith('-native-edition')) {
+    const minecraftVersion = manifest.minecraftVersion ?? manifest.minecraft ?? manifest.runtime?.minecraftVersion ?? manifest.nativeLoader?.versionJson?.inheritsFrom
+    assert(minecraftVersion === '26.1.2', `${selectedPack} Native manifest Minecraft identity is ${minecraftVersion ?? 'missing'}, expected 26.1.2.`)
+    assert(manifest.nativeLoader?.versionJson?.inheritsFrom === '26.1.2', `${selectedPack} Native Loader inheritsFrom is ${manifest.nativeLoader?.versionJson?.inheritsFrom ?? 'missing'}, expected 26.1.2.`)
+    const nativeLoaderUrl = manifest.nativeLoader?.versionJson?.libraries?.[0]?.downloads?.artifact?.url
+    assert(String(nativeLoaderUrl ?? '').startsWith('https://'), `${selectedPack} Native Loader library is missing an HTTPS artifact URL.`)
+  } else if (selectedPack.endsWith('-neoforge-edition')) {
+    const minecraftVersion = manifest.minecraftVersion ?? manifest.minecraft ?? manifest.runtime?.minecraftVersion ?? manifest.loader?.versionJson?.inheritsFrom
+    assert(minecraftVersion === '26.1.2', `${selectedPack} NeoForge manifest Minecraft identity is ${minecraftVersion ?? 'missing'}, expected 26.1.2.`)
+    assert(manifest.loader?.versionJson?.inheritsFrom === '26.1.2', `${selectedPack} NeoForge inheritsFrom is ${manifest.loader?.versionJson?.inheritsFrom ?? 'missing'}, expected 26.1.2.`)
+  } else if (selectedPack.endsWith('-standalone-edition')) {
+    assert(!manifest.minecraftVersion, `${selectedPack} Standalone manifest must not carry Minecraft version ${manifest.minecraftVersion}.`)
+    assert(manifest.loader === 'echo-standalone-runtime', `${selectedPack} Standalone manifest loader is ${JSON.stringify(manifest.loader)}, expected echo-standalone-runtime.`)
+  }
+
   const files = []
   for (const file of manifest.files ?? []) {
     if (file.required === false) continue
     const relativePath = String(file.path ?? '').replace(/\\/g, '/')
+    assert(relativePath.startsWith(expectedFolder), `${selectedPack} installed file is in the wrong lane folder: ${relativePath}`)
+    assert(!String(file.url ?? '').startsWith('file:'), `${selectedPack} manifest file uses unsupported file:// URL: ${relativePath}`)
     const absolutePath = path.join(installPath, relativePath)
     assert(await exists(absolutePath), `Installed file missing: ${relativePath}`)
     const actualSha256 = await sha256File(absolutePath)
     assert(actualSha256 === String(file.sha256).toLowerCase(), `Installed file corrupt: ${relativePath}`)
     const stat = await fs.stat(absolutePath)
+    if (selectedPack.endsWith('-neoforge-edition') && relativePath.endsWith('.jar')) {
+      const jar = new AdmZip(absolutePath)
+      const tomlEntry = jar.getEntry('META-INF/neoforge.mods.toml')
+      assert(tomlEntry, `${selectedPack} NeoForge jar is missing META-INF/neoforge.mods.toml: ${relativePath}`)
+      const toml = tomlEntry.getData().toString('utf8')
+      assert(!toml.includes('${'), `${selectedPack} NeoForge jar still contains an unresolved template placeholder: ${relativePath}`)
+      assert(hasEchoMinecraftDependencyRange(toml), `${selectedPack} NeoForge jar does not declare the ECHO Minecraft 26.1.2 runtime range: ${relativePath}`)
+    }
     files.push({
       path: relativePath,
       sha256: actualSha256,

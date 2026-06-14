@@ -284,6 +284,44 @@ describe('release asset resolution', () => {
     })
   })
 
+  it('preserves standalone string loaders while resolving release assets', () => {
+    const resolved = resolveManifestReleaseAssets(
+      {
+        pack: 'ashfall-standalone-edition',
+        artifactMode: 'zip',
+        artifactName: 'ashfall-standalone-edition-0.1.0.zip',
+        loader: 'echo-standalone-runtime',
+        files: [
+          {
+            path: 'mods/echocore-1.0.0-standalone.jar',
+            assetName: 'echocore-1.0.0-standalone.jar',
+            sha256: sha('a'),
+            size: 0,
+          },
+        ],
+      },
+      [
+        {
+          name: 'ashfall-standalone-edition-0.1.0.zip',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Ashfall-Standalone-Edition/releases/download/v0.1.0/ashfall-standalone-edition-0.1.0.zip',
+          size: 100,
+        },
+        {
+          name: 'echocore-1.0.0-standalone.jar',
+          browser_download_url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echocore-1.0.0-standalone.jar',
+          sha256: sha('a'),
+          size: 10,
+        },
+      ],
+    )
+
+    expect(resolved.loader).toBe('echo-standalone-runtime')
+    expect(resolved.files[0]).toMatchObject({
+      url: 'https://github.com/knoxhack/ECHO-Modules/releases/download/modules-v1.0.0/echocore-1.0.0-standalone.jar',
+      size: 10,
+    })
+  })
+
   it('normalizes module requirement metadata without fetching when files already cover requirements', () => {
     const resolved = resolveModuleRequirements(
       {

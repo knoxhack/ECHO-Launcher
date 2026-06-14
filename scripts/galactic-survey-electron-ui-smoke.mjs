@@ -512,7 +512,7 @@ async function preparePreviousVersionFixture(installPath) {
     },
   ]
   const currentVersion = manifest.version
-  manifest.version = `${currentVersion}-previous-packaged-ui-smoke`
+  manifest.version = '0.0.0-packaged-ui-smoke'
   await writeJson(manifestPath, manifest)
   return {
     manifestPath,
@@ -776,25 +776,10 @@ async function run() {
 
     await waitFor('Library navigation', args.timeoutMs, async () => clickButtonContaining(cdp, 'Library'))
     await waitFor('Library page after install', args.timeoutMs, async () => evaluate(cdp, `document.querySelector('h1')?.textContent?.trim() === 'Library'`))
-    await waitFor('Updates tab', args.timeoutMs, async () => clickTabContaining(cdp, 'Updates'))
-    await waitFor('Downloads page', args.timeoutMs, async () => evaluate(cdp, `document.body.innerText.includes('Install & Update Pipeline')`))
-      .catch(async (error) => {
-        const snapshot = await evaluate(cdp, `(() => ({
-          heading: document.querySelector('h1')?.textContent?.trim() ?? '',
-          subheadings: Array.from(document.querySelectorAll('h2')).map((element) => element.textContent?.trim() ?? '').slice(0, 8),
-          tabs: Array.from(document.querySelectorAll('[role="tab"]')).map((element) => ({
-            text: element.textContent?.trim() ?? '',
-            selected: element.getAttribute('aria-selected'),
-            state: element.getAttribute('data-state')
-          })),
-          buttons: Array.from(document.querySelectorAll('button')).map((element) => element.textContent?.trim() ?? '').filter(Boolean).slice(0, 24),
-          bodyStart: document.body.innerText.slice(0, 1200)
-        }))()`)
-        throw new Error(`${error.message} Snapshot: ${JSON.stringify(snapshot)}`)
-      })
+    await waitFor('Galactic Survey Library refresh after previous-version fixture', args.timeoutMs, async () => clickButtonContaining(cdp, 'Refresh Catalog'))
 
     const updateStartedAt = Date.now() - 1000
-    const updateClick = await waitFor('Galactic Survey update reconciliation button', args.timeoutMs, async () => clickButtonContaining(cdp, `Install ${SMOKE_PACK.name}`))
+    const updateClick = await waitFor('Galactic Survey scoped update button', args.timeoutMs, async () => clickCardButtonContaining(cdp, SMOKE_PACK.name, 'Update'))
     const updateData = await waitForInstallReport(logsDir, updateStartedAt, (report) =>
       report.profileId === SMOKE_PACK.packId &&
       report.operation === 'update' &&
