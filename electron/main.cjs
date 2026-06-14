@@ -8005,9 +8005,9 @@ async function installZipPackArtifact(payload, profile, manifest) {
       })
     },
   })
-  const payload = await validateAshfallInstallPayload(installPath, manifest)
-  for (const warning of payload.warnings) failed.push({ path: payload.folderName, reason: warning })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false && payload.ok
+  const installPayload = await validateAshfallInstallPayload(installPath, manifest)
+  for (const warning of installPayload.warnings) failed.push({ path: installPayload.folderName, reason: warning })
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false && installPayload.ok
   const report = {
     ok,
     installId,
@@ -8026,7 +8026,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge,
     runtime,
-    payload,
+    payload: installPayload,
     before,
     after,
   }
@@ -8053,7 +8053,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
       manifestPath: path.join(installPath, '.echo', 'installed-manifest.json'),
     })
   }
-  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Hybrid ${operation} ${installId} completed. Installed ${installed.length}, updated ${updated.length}, removed ${removed.length}, verified ${verified.length}, payload=${payload.presentCount}/${payload.expectedCount}, failed ${failed.length}.`)
+  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Hybrid ${operation} ${installId} completed. Installed ${installed.length}, updated ${updated.length}, removed ${removed.length}, verified ${verified.length}, payload=${installPayload.presentCount}/${installPayload.expectedCount}, failed ${failed.length}.`)
   return writeInstallLikeReport('install', installId, report)
 }
 
@@ -8113,9 +8113,9 @@ async function repairZipPackArtifact(payload, profile, manifest) {
 
   await writeJson(path.join(installPath, '.echo', 'installed-manifest.json'), manifest)
   const after = await verifyManifest({ manifest, installPath })
-  const payload = await validateAshfallInstallPayload(installPath, manifest)
-  warnings.push(...payload.warnings)
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0 && payload.ok
+  const repairedPayload = await validateAshfallInstallPayload(installPath, manifest)
+  warnings.push(...repairedPayload.warnings)
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0 && repairedPayload.ok
   const report = {
     ok,
     repairId,
@@ -8129,12 +8129,12 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge: { ok: true, version: manifest.loader?.version ?? 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' },
     runtime,
-    payload,
+    payload: repairedPayload,
     before,
     after,
   }
   await writeJson(rollbackPlanPath, { repairId, installPath, backedUp, createdAt: isoNow() })
-  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Zip repair ${repairId} completed. Repaired ${repaired.length}, skipped ${skipped.length}, payload=${payload.presentCount}/${payload.expectedCount}.`)
+  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Zip repair ${repairId} completed. Repaired ${repaired.length}, skipped ${skipped.length}, payload=${repairedPayload.presentCount}/${repairedPayload.expectedCount}.`)
   return writeInstallLikeReport('repair', repairId, report)
 }
 

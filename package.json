@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.1.11",
+  "version": "1.1.12",
   "description": "Official desktop launcher for ECHO experiences, PackOS catalogs, and public alpha builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",
@@ -21,7 +21,6 @@
     "chat:smoke": "npm --prefix server/community-chat run smoke",
     "chat:migrate": "npm --prefix server/community-chat run migrate",
     "pack:ashfall": "node scripts/pack-ashfall.mjs",
-    "prepare:native-loader": "node scripts/prepare-native-loader-library.mjs",
     "rc:mobile": "node scripts/mobile-rc-verify.mjs --run-checks",
     "rc:mobile:acceptance": "node scripts/mobile-rc-acceptance.mjs",
     "rc:mobile:device": "node scripts/mobile-rc-device-assist.mjs",
@@ -103,14 +102,14 @@
     "files": [
       "dist/**",
       "electron/**",
-      "scripts/**",
-      "build/**",
+      "build/icon.ico",
+      "build/icon.png",
+      "build/installer.nsh",
       "package.json"
     ],
     "extraResources": [],
     "asarUnpack": [
       "build/icon.ico",
-      "build/icon.png",
       "build/icon.png"
     ],
     "asar": true,
