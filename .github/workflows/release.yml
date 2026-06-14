@@ -44,7 +44,8 @@ jobs:
             TAG="v$(node -p \"require('./package.json').version\")"
           fi
 
-          if ! [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.[0-9A-Za-z.-]+)?$ ]]; then
+          VERSION_TAG_REGEX='^v([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.[0-9A-Za-z.-]+)?$'
+          if ! [[ "$TAG" =~ $VERSION_TAG_REGEX ]]; then
             echo "Invalid tag format: $TAG"
             exit 1
           fi
