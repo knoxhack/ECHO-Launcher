@@ -5336,8 +5336,13 @@ async function installNativeLoaderClientArtifactFromLocalSource(artifact) {
   return null
 }
 
+function isEchoNativeLoaderLibrary(library) {
+  const name = String(library?.name ?? '')
+  return name === ECHO_NATIVE_LOADER_LIBRARY_NAME || name.startsWith('com.echo:native-loader:')
+}
+
 function libraryHasEchoNativeLoaderDownload(library) {
-  if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) return false
+  if (!isEchoNativeLoaderLibrary(library)) return false
   const artifact = library?.downloads?.artifact
   return Boolean(
     artifact?.url &&
@@ -5375,7 +5380,7 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
   const normalizedLibraries = libraries
     .filter((library) => library?.echoLauncher?.packAddon !== true)
     .map((library) => {
-      if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) return library
+      if (!isEchoNativeLoaderLibrary(library)) return library
       found = true
       return nativeLoaderLibraryWithDownload(library)
     })
@@ -5643,7 +5648,7 @@ function nativeLoaderRequiredClientArtifacts(minecraftRoot, manifestOrDocument) 
   const artifacts = []
   for (const library of versionJson?.libraries ?? []) {
     if (!minecraftLibraryAllowed(library)) continue
-    if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) continue
+    if (!isEchoNativeLoaderLibrary(library)) continue
     const artifact = library.downloads?.artifact ?? echoNativeLoaderDownloadArtifact()
     const relativePath = String(artifact.path ?? ECHO_NATIVE_LOADER_LIBRARY_PATH).replace(/\\/g, '/')
     artifacts.push({
