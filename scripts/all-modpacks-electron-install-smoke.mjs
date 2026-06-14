@@ -46,7 +46,7 @@ Options:
   --channel-url <url>      Release Index launcher channel URL.
                            Default: ${PUBLIC_CHANNEL_URL}
   --pack <profileId>       Limit to one pack. May be provided multiple times.
-  --pack-timeout-ms <ms>   Timeout per pack. Default: 300000
+  --pack-timeout-ms <ms>   Timeout per pack. Default: 900000
   --timeout-ms <ms>        Renderer startup timeout. Default: 120000
   --clean                  Remove work-root before launching.
   --keep-open              Leave Electron running after the smoke.
@@ -61,7 +61,7 @@ function parseArgs(argv) {
     out: path.resolve(root, '..', 'ECHO-Release-Index', 'release-readiness', 'all-modpacks-electron-install-smoke.json'),
     channelUrl: PUBLIC_CHANNEL_URL,
     timeoutMs: 120_000,
-    packTimeoutMs: 300_000,
+    packTimeoutMs: 900_000,
     clean: false,
     keepOpen: false,
     help: false,
@@ -485,6 +485,9 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
   assert(saved.profile?.lastVersionId === handoff.handoff.versionId, `${pack.name} prepared Minecraft profile version mismatch: ${saved.profile?.lastVersionId}`)
   const versionMetadata = await readJson(handoff.handoff.versionMetadataPath)
   assert(versionMetadata?.echoLauncher?.bootstrap !== true, `${pack.name} handoff left bootstrap-only version metadata in place.`)
+  const nativeRuntime = runtimeMode === 'native-loader-minecraft'
+    ? await verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata)
+    : null
 
   return {
     kind: 'minecraft-launcher-handoff',
@@ -498,8 +501,69 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     launcherProfilesPath: handoff.handoff.launcherProfilesPath,
     gameDir: handoff.handoff.gameDir,
     validatedModsCount: handoff.handoff.validatedModsCount,
+    nativeRuntime,
     staleNeoForgeMetadata,
     warnings: handoff.handoff.warnings ?? [],
+  }
+}
+
+async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata) {
+  const manifest = await readJson(path.join(installPath, '.echo', 'installed-manifest.json'))
+  const jvm = Array.isArray(versionMetadata.arguments?.jvm) ? versionMetadata.arguments.jvm.map(String) : []
+  const game = Array.isArray(versionMetadata.arguments?.game) ? versionMetadata.arguments.game.map(String) : []
+  const expectedModules = new Set([
+    ...(Array.isArray(manifest.modules) ? manifest.modules.map(String) : []),
+    ...(manifest.files ?? [])
+      .filter((file) => file?.required !== false)
+      .filter((file) => /^addons\/.+\.echo-addon$/iu.test(String(file.path ?? '').replace(/\\/g, '/')))
+      .map((file) => String(file.moduleId ?? '').trim())
+      .filter(Boolean),
+  ])
+  const classpathArg = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspath='))
+  const markerIndex = game.indexOf('--echo-marker')
+  const packIndex = game.indexOf('--echo-pack-id')
+  const realMainIndex = game.indexOf('--echo-real-main')
+  assert(versionMetadata.mainClass === 'com.echo.NativeLoaderClient', `${pack.name} Native Loader mainClass is ${versionMetadata.mainClass ?? 'missing'}, expected com.echo.NativeLoaderClient.`)
+  assert(
+    versionMetadata.libraries?.some((library) => library?.name === 'com.echo:native-loader:1.0.0'),
+    `${pack.name} Native Loader library is not com.echo:native-loader:1.0.0.`,
+  )
+  assert(
+    jvm.includes('-Decho.native.minecraftMainClass=dev.echo.nativeplatform.bootstrap.EchoNativeBootstrapMain'),
+    `${pack.name} Native Loader JVM args do not target EchoNativeBootstrapMain.`,
+  )
+  assert(
+    jvm.includes('-Decho.native.bootstrap.authorizedHandoff=startNativeClient'),
+    `${pack.name} Native Loader JVM args are missing authorized handoff.`,
+  )
+  assert(jvm.includes(`-Decho.native.gameDir=${installPath}`), `${pack.name} Native Loader JVM args are missing the install gameDir.`)
+  assert(classpathArg, `${pack.name} Native Loader JVM args are missing echo.native.moduleClasspath.`)
+  const classpathEntries = classpathArg.slice('-Decho.native.moduleClasspath='.length).split(path.delimiter).filter(Boolean)
+  assert(classpathEntries.length >= expectedModules.size, `${pack.name} Native Loader classpath has ${classpathEntries.length} entries for ${expectedModules.size} modules.`)
+  for (const entryPath of classpathEntries) {
+    assert(await exists(entryPath), `${pack.name} Native Loader classpath entry is missing: ${entryPath}`)
+    const stat = await fs.stat(entryPath)
+    assert(stat.isFile() && stat.size > 0, `${pack.name} Native Loader classpath entry is empty: ${entryPath}`)
+  }
+  assert(markerIndex >= 0 && game[markerIndex + 1]?.endsWith(path.join('.echo', 'native-loader', 'module-activation.json')), `${pack.name} Native Loader game args are missing the activation marker.`)
+  assert(packIndex >= 0 && game[packIndex + 1] === pack.profileId, `${pack.name} Native Loader game args are missing --echo-pack-id ${pack.profileId}.`)
+  assert(realMainIndex >= 0 && game[realMainIndex + 1] === 'net.minecraft.client.main.Main', `${pack.name} Native Loader game args are missing the real Minecraft main.`)
+  assert(game.includes('--echo-handoff'), `${pack.name} Native Loader game args are missing --echo-handoff.`)
+  const modules = new Set()
+  const entrypoints = new Set()
+  for (let index = 0; index < game.length; index += 1) {
+    if (game[index] === '--echo-module' && game[index + 1]) modules.add(game[index + 1])
+    if (game[index] === '--echo-native-entrypoint' && game[index + 1]) entrypoints.add(game[index + 1].split('=')[0])
+  }
+  for (const moduleId of expectedModules) {
+    assert(modules.has(moduleId), `${pack.name} Native Loader game args are missing module ${moduleId}.`)
+    assert(entrypoints.has(moduleId), `${pack.name} Native Loader game args are missing native entrypoint for ${moduleId}.`)
+  }
+  return {
+    ok: true,
+    moduleCount: expectedModules.size,
+    classpathEntryCount: classpathEntries.length,
+    markerPath: game[markerIndex + 1],
   }
 }
 
@@ -584,6 +648,8 @@ async function run() {
     userDataDir,
     playerContentRoot,
     minecraftRoot,
+    expectedPackCount: selected.length,
+    expectedPacks: selected.map((pack) => pack.profileId),
     packs: [],
     failures: [],
     stdout: [],
@@ -674,9 +740,10 @@ async function run() {
       }
     }
 
-    report.ok = report.failures.length === 0 && report.packs.every((pack) => pack.ok)
+    report.ok = report.failures.length === 0 && report.packs.length === selected.length && report.packs.every((pack) => pack.ok)
     report.completedAt = new Date().toISOString()
     await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
+    assert(report.packs.length === selected.length, `Real Electron install smoke completed ${report.packs.length}/${selected.length} selected pack(s).`)
     assert(report.ok, 'One or more official packs failed the real Electron install smoke.')
     console.log(`All modpacks Electron install smoke passed: ${args.out}`)
   } finally {

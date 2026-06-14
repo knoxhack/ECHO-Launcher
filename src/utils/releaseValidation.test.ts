@@ -200,9 +200,11 @@ const canonicalNativeRuntimeProduct: CanonicalReleaseIndexEntry = {
   ...canonicalLauncherProduct,
   id: 'echo-native-platform',
   kind: 'runtime',
+  version: '1.0.0',
+  releaseTag: 'v1.0.0',
   sourceRepo: 'knoxhack/ECHO-Native-Platform',
   artifacts: {
-    archive: { file: 'echo-native-product-1.0.0-existing-layout-rc.zip', sha256: '4'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v0.1.0-native-platform-alpha/echo-native-product-1.0.0-existing-layout-rc.zip' },
+    archive: { file: 'echo-native-platform-1.0.0.zip', sha256: '4'.repeat(64), url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-platform-1.0.0.zip' },
   },
   compatibility: ['ashfall-native-edition'],
 }
@@ -575,7 +577,7 @@ describe('releaseValidation', () => {
       canonicalNativeRuntimeProduct,
     ], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
       entry: { id: 'echo-native-platform', kind: 'runtime' },
-      artifact: { name: 'echo-native-product-1.0.0-existing-layout-rc.zip', sha256: '4'.repeat(64) },
+      artifact: { name: 'echo-native-platform-1.0.0.zip', sha256: '4'.repeat(64) },
     })
   })
 
@@ -590,7 +592,7 @@ describe('releaseValidation', () => {
       packContent: false,
       sha256: '5'.repeat(64),
       size: 1141527,
-      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar',
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar',
     }
     const directInstallDescriptor = {
       file: 'native-loader-direct-install.json',
@@ -602,7 +604,7 @@ describe('releaseValidation', () => {
       packContent: false,
       sha256: '6'.repeat(64),
       size: 1279,
-      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/native-loader-direct-install.json',
+      url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/native-loader-direct-install.json',
     }
     const runtimeProduct = {
       ...canonicalNativeRuntimeProduct,
@@ -611,14 +613,14 @@ describe('releaseValidation', () => {
         checksums: {
           file: 'checksums.txt',
           sha256: '7'.repeat(64),
-          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/checksums.txt',
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/checksums.txt',
         },
         nativeLoaderLibrary,
         nativeLoaderDirectInstall: directInstallDescriptor,
         archive: {
-          file: 'echo-native-platform-1.0.0-RC1.zip',
+          file: 'echo-native-platform-1.0.0.zip',
           sha256: '8'.repeat(64),
-          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-platform-1.0.0-RC1.zip',
+          url: 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-platform-1.0.0.zip',
           size: 1221,
         },
       },
@@ -632,11 +634,11 @@ describe('releaseValidation', () => {
       },
     }
 
-    expect(productUpdateArtifact(runtimeProduct, 'ashfall-native-edition')?.name).toBe('echo-native-platform-1.0.0-RC1.zip')
+    expect(productUpdateArtifact(runtimeProduct, 'ashfall-native-edition')?.name).toBe('echo-native-platform-1.0.0.zip')
     expect(productUpdateArtifact(onlyDirectLoader, 'ashfall-native-edition')).toBeNull()
     expect(productUpdateSelection([onlyDirectLoader], 'echo-native-platform', 'ashfall-native-edition')).toMatchObject({
       entry: null,
-      warnings: ['Release Index product echo-native-platform 1.0.1 has no indexed updater artifact for ashfall-native-edition.'],
+      warnings: ['Release Index product echo-native-platform 1.0.0 has no indexed updater artifact for ashfall-native-edition.'],
     })
   })
 

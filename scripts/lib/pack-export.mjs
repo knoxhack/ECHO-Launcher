@@ -11,9 +11,9 @@ export const RELEASE_METADATA_ASSET = 'echo-release.json'
 export const ECHO_PACK_EXTENSION = '.echo-pack.zip'
 export const DEFAULT_ASHFALL_PACK_ID = 'ashfall-neoforge-edition'
 export const DEFAULT_ASHFALL_PACK_NAME = 'Ashfall NeoForge Edition'
-export const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar'
-export const ECHO_NATIVE_LOADER_SHA1 = '39cd53fa487565abd739fe5fbc2f02b422d76a0a'
-export const ECHO_NATIVE_LOADER_SIZE = 1_141_527
+export const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar'
+export const ECHO_NATIVE_LOADER_SHA1 = '006e6d8a73b35f82480d7605f5b7198231151ad4'
+export const ECHO_NATIVE_LOADER_SIZE = 1_827_299
 
 export const INCLUDE_DIRS = ['mods', 'config', 'defaultconfigs', 'datapacks', 'resourcepacks', 'shaderpacks']
 

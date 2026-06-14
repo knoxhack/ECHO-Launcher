@@ -264,7 +264,7 @@ function isDirectNativeLoaderArtifact(artifact) {
     || artifact.artifactRole === 'native-loader-direct-install-descriptor'
     || artifact.role === 'nativeLoaderLibrary'
     || artifact.role === 'nativeLoaderDirectInstall'
-    || artifact.name === 'echo-native-loader-1.0.0.jar'
+    || /^echo-native-loader-[\w.-]+\.jar$/iu.test(String(artifact.name ?? ''))
     || artifact.name === 'native-loader-direct-install.json'
     || /\bnative-loader-library\b/u.test(haystack)
 }

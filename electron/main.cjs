@@ -58,6 +58,13 @@ const {
   minecraftLauncherRootsForPlatform,
 } = require('./platform-support.cjs')
 const {
+  materializeNativeLoaderAddons,
+  nativeBootstrapGameArguments,
+  nativeBootstrapJvmArguments,
+  nativeLauncherArgumentStatus,
+  nativeModuleClasspathEntries,
+} = require('./native-loader-handoff.cjs')
+const {
   assertSelectedManifestPack,
   normalizeOfficialPackId,
   canonicalArtifactRecords,
@@ -95,9 +102,9 @@ const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.
 const ECHO_NATIVE_LOADER_VERSION = '1.0.0'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0-RC1/echo-native-loader-1.0.0.jar'
-const ECHO_NATIVE_LOADER_SHA1 = '39cd53fa487565abd739fe5fbc2f02b422d76a0a'
-const ECHO_NATIVE_LOADER_SIZE = 1_141_527
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.0/echo-native-loader-1.0.0.jar'
+const ECHO_NATIVE_LOADER_SHA1 = '006e6d8a73b35f82480d7605f5b7198231151ad4'
+const ECHO_NATIVE_LOADER_SIZE = 1_827_299
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
 const RELEASE_METADATA_ASSET = 'echo-release.json'
 const RELEASE_CACHE_VERSION = 4
@@ -5050,7 +5057,7 @@ function minecraftLauncherProfileName(profile, runtimeMode) {
 }
 
 function nativeLoaderMinecraftVersionId(manifest) {
-  const version = String(manifest.nativeLoader?.version ?? '').trim()
+  const version = ECHO_NATIVE_LOADER_VERSION
   const packId = normalizeOfficialPackId(manifest?.pack) ?? safeFileName(manifest?.pack ?? 'pack').toLowerCase()
   return version && packId ? `echo-${packId}-native-loader-${version}` : ''
 }
@@ -5220,7 +5227,7 @@ function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
       runtimeMode: normalizedMode,
       label: 'Native Loader',
       loaderKey: 'native-loader',
-      version: String(manifest.nativeLoader?.version ?? '').trim(),
+      version: ECHO_NATIVE_LOADER_VERSION,
       versionJson: manifest.nativeLoader?.versionJson,
       versionId: minecraftLauncherVersionId(manifest, normalizedMode),
       librariesLabel: 'Native Loader libraries',
@@ -5283,15 +5290,17 @@ function nativeLoaderLibraryWithDownload(library = {}) {
   }
 }
 
-function nativePackJvmArguments(manifest) {
-  return [
-    `-Decho.native.packId=${normalizeOfficialPackId(manifest?.pack) ?? String(manifest?.pack ?? '')}`,
-    `-Decho.native.packVersion=${String(manifest?.version ?? '')}`,
-    '-Decho.native.addonsClasspath=true',
-  ]
+function nativePackJvmArguments(manifest, nativeRuntime = null) {
+  return nativeBootstrapJvmArguments(
+    {
+      ...manifest,
+      pack: normalizeOfficialPackId(manifest?.pack) ?? String(manifest?.pack ?? ''),
+    },
+    nativeRuntime,
+  )
 }
 
-function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId = nativeLoaderMinecraftVersionId(manifest), packLibraries = []) {
+function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId = nativeLoaderMinecraftVersionId(manifest), packLibraries = [], nativeRuntime = null) {
   const source = versionJson && typeof versionJson === 'object' && !Array.isArray(versionJson) ? versionJson : {}
   const libraries = Array.isArray(source.libraries) ? source.libraries : []
   let found = false
@@ -5313,8 +5322,18 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
     : { game: [], jvm: [] }
   const jvmArguments = [
     ...(Array.isArray(sourceArguments.jvm) ? sourceArguments.jvm : []),
-    ...nativePackJvmArguments(manifest),
+    ...nativePackJvmArguments(manifest, nativeRuntime),
   ].filter((value, index, values) => value && values.indexOf(value) === index)
+  const gameArguments = [
+    ...nativeBootstrapGameArguments(
+      {
+        ...manifest,
+        pack: normalizeOfficialPackId(manifest?.pack) ?? String(manifest?.pack ?? ''),
+      },
+      nativeRuntime,
+    ),
+    ...(Array.isArray(sourceArguments.game) ? sourceArguments.game : []),
+  ].filter(Boolean)
   return stripNullishLauncherFields({
     ...source,
     id: versionId,
@@ -5322,7 +5341,7 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
     mainClass: source.mainClass || ECHO_NATIVE_LOADER_MAIN_CLASS,
     arguments: {
       ...sourceArguments,
-      game: Array.isArray(sourceArguments.game) ? sourceArguments.game : [],
+      game: gameArguments,
       jvm: jvmArguments,
     },
     libraries: normalizedLibraries,
@@ -5462,6 +5481,10 @@ function validateMinecraftLauncherVersionDocument(document, manifest, versionId,
   if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
     if (!document.libraries.some((library) => libraryHasEchoNativeLoaderDownload(library))) {
       return { valid: false, source: 'invalid', reason: 'Native Loader library download metadata is missing or stale' }
+    }
+    const argumentStatus = nativeLauncherArgumentStatus(document, manifest)
+    if (!argumentStatus.ok) {
+      return { valid: false, source: 'invalid', reason: argumentStatus.errors[0] ?? 'Native Loader bootstrap arguments are missing or stale' }
     }
     for (const library of document.libraries.filter((item) => item?.echoLauncher?.packAddon === true)) {
       const artifact = library.downloads?.artifact
@@ -5678,6 +5701,21 @@ async function missingNativeLoaderPackLibraryArtifacts(minecraftRoot, document) 
   return missing
 }
 
+async function missingNativeLoaderRuntimeClasspathArtifacts(document) {
+  const missing = []
+  for (const entryPath of nativeModuleClasspathEntries(document)) {
+    if (!(await exists(entryPath))) {
+      missing.push({ label: `Native Loader module runtime ${entryPath}`, path: entryPath, relativePath: entryPath, reason: 'missing' })
+      continue
+    }
+    const stats = await fs.stat(entryPath)
+    if (!stats.isFile() || stats.size <= 0) {
+      missing.push({ label: `Native Loader module runtime ${entryPath}`, path: entryPath, relativePath: entryPath, reason: 'corrupt' })
+    }
+  }
+  return missing
+}
+
 async function missingNativeLoaderClientArtifacts(minecraftRoot, manifestOrDocument) {
   const missing = []
   for (const artifact of nativeLoaderRequiredClientArtifacts(minecraftRoot, manifestOrDocument)) {
@@ -5697,7 +5735,8 @@ async function missingNativeLoaderClientArtifacts(minecraftRoot, manifestOrDocum
 async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, installPath) {
   const before = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
   const packLibraries = installPath ? await ensureNativeLoaderPackLibraries(minecraftRoot, manifest, installPath) : []
-  if (before.length === 0) return { created: false, packLibraries, warnings: [] }
+  const nativeRuntime = installPath ? await materializeNativeLoaderAddons(manifest, installPath, { writeReport: true }) : null
+  if (before.length === 0) return { created: false, packLibraries, nativeRuntime, warnings: [] }
 
   for (const artifact of nativeLoaderRequiredClientArtifacts(minecraftRoot, manifest)) {
     await downloadSha1Artifact({
@@ -5719,6 +5758,7 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
   return {
     created: true,
     packLibraries,
+    nativeRuntime,
     warnings: [
       `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} into Minecraft Launcher libraries.`,
     ],
@@ -5746,7 +5786,7 @@ async function missingNeoForgeClientArtifacts(minecraftRoot, manifest) {
   return missing
 }
 
-function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = [], runtimeVersionJson = null) {
+function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = [], runtimeVersionJson = null, nativeRuntime = null) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode, runtimeVersionJson)
   if (!validation.ok) {
@@ -5756,7 +5796,7 @@ function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packL
     throw new Error(`${runtime.manifestName} NeoForge handoff requires official installer metadata for '${runtime.version}'.`)
   }
   const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
-    ? normalizeEchoNativeLoaderVersionJson(validation.versionJson, manifest, versionId, packLibraries)
+    ? normalizeEchoNativeLoaderVersionJson(validation.versionJson, manifest, versionId, packLibraries, nativeRuntime)
     : stripNullishLauncherFields(validation.versionJson)
   return {
     ...versionJson,
@@ -5935,6 +5975,7 @@ async function findMinecraftLauncherVersion(minecraftRoot, manifest, runtimeMode
       const missingArtifacts = [
         ...(await missingNativeLoaderClientArtifacts(minecraftRoot, document)),
         ...(await missingNativeLoaderPackLibraryArtifacts(minecraftRoot, document)),
+        ...(await missingNativeLoaderRuntimeClasspathArtifacts(document)),
       ]
       if (missingArtifacts.length > 0) {
         return {
@@ -5987,6 +6028,7 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
     normalizedMode,
     runtimeArtifacts.packLibraries ?? [],
     normalizedMode === 'neoforge-minecraft' ? runtimeArtifacts.versionJson : null,
+    normalizedMode === 'native-loader-minecraft' ? runtimeArtifacts.nativeRuntime : null,
   )
   await ensureDir(path.dirname(initial.metadataPath))
   await writeJson(initial.metadataPath, metadata)
