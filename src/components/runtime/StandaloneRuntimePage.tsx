@@ -97,7 +97,7 @@ export function StandaloneRuntimePage() {
       const installPath = runtimeProfile?.installPath
       const operationId = launchService.createOperationId('runtime-handoff')
       try {
-        const result = await launchService.prepareHandoff(profileId, installPath, ramGb, true, operationId, 'skip', selectedMode)
+        const result = await launchService.prepareHandoff(profileId, installPath, ramGb, true, operationId, 'allow', selectedMode)
         addToast(
           result.ok ? 'Minecraft Launcher handoff ready' : 'Minecraft Launcher handoff blocked',
           result.message,

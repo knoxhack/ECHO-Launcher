@@ -99,12 +99,12 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
-const ECHO_NATIVE_LOADER_VERSION = '1.0.3'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.4'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.3/echo-native-loader-1.0.3.jar'
-const ECHO_NATIVE_LOADER_SHA1 = 'f00b56bb967bc2d5233888aa95facc545849b419'
-const ECHO_NATIVE_LOADER_SIZE = 1_833_864
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.4/echo-native-loader-1.0.4.jar'
+const ECHO_NATIVE_LOADER_SHA1 = '6c82b842bb325994eca8ac243bb22d69b8a6baef'
+const ECHO_NATIVE_LOADER_SIZE = 1_834_113
 const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
@@ -5207,6 +5207,50 @@ function manifestMinecraftRuntimeFilePaths(manifest, runtimeMode) {
     .filter((filePath) => pattern.test(filePath))
 }
 
+function ashfallPayloadRuntimeMode(manifest) {
+  const packId = normalizeOfficialPackId(manifest?.pack)
+  return packId?.endsWith('-native-edition') ? 'native-loader-minecraft' : 'neoforge-minecraft'
+}
+
+async function validateAshfallInstallPayload(installPath, manifest) {
+  const runtimeMode = ashfallPayloadRuntimeMode(manifest)
+  const native = runtimeMode === 'native-loader-minecraft'
+  const folderName = native ? 'addons' : 'mods'
+  const itemLabel = native ? 'Native addon file' : 'mod jar'
+  const expectedFiles = manifestMinecraftRuntimeFilePaths(manifest, runtimeMode)
+  const missingFiles = []
+  let presentCount = 0
+  for (const relativePath of expectedFiles) {
+    if (await exists(safeJoin(installPath, relativePath))) {
+      presentCount += 1
+    } else {
+      missingFiles.push(relativePath)
+    }
+  }
+  const warnings = []
+  const manifestName = manifest?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected Ashfall pack'
+  if (expectedFiles.length === 0) {
+    warnings.push(`${manifestName} manifest does not list any required ${itemLabel}s.`)
+  }
+  if (missingFiles.length > 0) {
+    warnings.push(`${missingFiles.length} required ${itemLabel}${missingFiles.length === 1 ? '' : 's'} missing from ${path.join(installPath, folderName)}. First missing: ${missingFiles.slice(0, 5).join(', ')}.`)
+  }
+  if (expectedFiles.length > 0 && presentCount === 0) {
+    warnings.push(`${manifestName} installed with an empty ${folderName} payload folder.`)
+  }
+  return {
+    ok: warnings.length === 0,
+    runtimeMode,
+    folderName,
+    itemLabel,
+    expectedCount: expectedFiles.length,
+    presentCount,
+    missingCount: missingFiles.length,
+    missingFiles,
+    warnings,
+  }
+}
+
 async function validateAshfallInstanceMods(installPath, manifest, runtimeMode) {
   const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
   const expectedFiles = manifestMinecraftRuntimeFilePaths(manifest, normalizedMode)
@@ -7961,7 +8005,9 @@ async function installZipPackArtifact(payload, profile, manifest) {
       })
     },
   })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false
+  const payload = await validateAshfallInstallPayload(installPath, manifest)
+  for (const warning of payload.warnings) failed.push({ path: payload.folderName, reason: warning })
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false && payload.ok
   const report = {
     ok,
     installId,
@@ -7980,6 +8026,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge,
     runtime,
+    payload,
     before,
     after,
   }
@@ -8006,7 +8053,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
       manifestPath: path.join(installPath, '.echo', 'installed-manifest.json'),
     })
   }
-  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Hybrid ${operation} ${installId} completed. Installed ${installed.length}, updated ${updated.length}, removed ${removed.length}, verified ${verified.length}, failed ${failed.length}.`)
+  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Hybrid ${operation} ${installId} completed. Installed ${installed.length}, updated ${updated.length}, removed ${removed.length}, verified ${verified.length}, payload=${payload.presentCount}/${payload.expectedCount}, failed ${failed.length}.`)
   return writeInstallLikeReport('install', installId, report)
 }
 
@@ -8066,7 +8113,9 @@ async function repairZipPackArtifact(payload, profile, manifest) {
 
   await writeJson(path.join(installPath, '.echo', 'installed-manifest.json'), manifest)
   const after = await verifyManifest({ manifest, installPath })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0
+  const payload = await validateAshfallInstallPayload(installPath, manifest)
+  warnings.push(...payload.warnings)
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0 && payload.ok
   const report = {
     ok,
     repairId,
@@ -8080,11 +8129,12 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge: { ok: true, version: manifest.loader?.version ?? 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' },
     runtime,
+    payload,
     before,
     after,
   }
   await writeJson(rollbackPlanPath, { repairId, installPath, backedUp, createdAt: isoNow() })
-  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Zip repair ${repairId} completed. Repaired ${repaired.length}, skipped ${skipped.length}.`)
+  await appendLauncherLog(ok ? 'INFO' : 'WARN', `Zip repair ${repairId} completed. Repaired ${repaired.length}, skipped ${skipped.length}, payload=${payload.presentCount}/${payload.expectedCount}.`)
   return writeInstallLikeReport('repair', repairId, report)
 }
 

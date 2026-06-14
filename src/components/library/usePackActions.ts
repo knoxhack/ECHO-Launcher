@@ -146,7 +146,7 @@ export function usePackActions() {
             ramGb,
             true,
             operationId,
-            'skip',
+            'allow',
             packState.route.mode === 'native-loader-minecraft' ? 'native-loader-minecraft' : 'neoforge-minecraft',
           )
           options.onProgress?.(result.ok ? 100 : 96)
