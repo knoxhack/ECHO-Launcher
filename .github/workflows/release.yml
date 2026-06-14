@@ -41,7 +41,7 @@ jobs:
             TAG="${{ github.event.inputs.tag }}"
           fi
           if [ -z "$TAG" ] || [ "$TAG" = "main" ] || [ "$TAG" = "" ]; then
-            TAG="v$(node -p \"require('./package.json').version\")"
+            TAG="v$(node -p 'require("./package.json").version')"
           fi
 
           VERSION_TAG_REGEX='^v([0-9]+)\.([0-9]+)\.([0-9]+)(-beta\.[0-9A-Za-z.-]+)?$'
@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
 
-          PKG_VERSION="v$(node -p \"require('./package.json').version\")"
+          PKG_VERSION="v$(node -p 'require("./package.json").version')"
           if [ "$TAG" != "$PKG_VERSION" ]; then
             echo "Tag/version mismatch: tag=$TAG package=$PKG_VERSION"
             exit 1
