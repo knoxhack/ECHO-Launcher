@@ -105,6 +105,8 @@ const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LO
 const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-loader-1.0.1.jar'
 const ECHO_NATIVE_LOADER_SHA1 = '7abe5fcc00cd907067700396ebd5400759233260'
 const ECHO_NATIVE_LOADER_SIZE = 1_827_301
+const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
+const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
 const RELEASE_METADATA_ASSET = 'echo-release.json'
 const RELEASE_CACHE_VERSION = 4
@@ -5268,6 +5270,72 @@ function echoNativeLoaderDownloadArtifact() {
   }
 }
 
+function nativeLoaderLocalCandidatePaths() {
+  const configured = String(process.env.ECHO_NATIVE_LOADER_LOCAL_JAR ?? '').trim()
+  const appRoot = app.getAppPath()
+  const resourcesRoot = String(process.resourcesPath ?? '').trim()
+  const executableResourcesRoot = path.join(path.dirname(process.execPath), 'resources')
+  const sourceRoots = [
+    path.join(appRoot, 'build', 'native-loader'),
+    path.join(appRoot, 'native-loader'),
+    path.join(resourcesRoot, 'build', 'native-loader'),
+    path.join(resourcesRoot, 'native-loader'),
+    path.join(resourcesRoot, 'app.asar.unpacked', 'build', 'native-loader'),
+    path.join(resourcesRoot, 'app.asar.unpacked', 'native-loader'),
+    path.join(executableResourcesRoot, 'build', 'native-loader'),
+    path.join(executableResourcesRoot, 'native-loader'),
+    path.resolve(process.cwd(), 'build', 'native-loader'),
+    path.resolve(process.cwd(), '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
+    path.resolve(process.cwd(), '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
+    path.resolve(appRoot, '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
+    path.resolve(appRoot, '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
+    path.resolve(appRoot, '..', '..', 'ECHO-Native-Platform', 'build', 'public-alpha'),
+    path.resolve(appRoot, '..', '..', 'ECHO-Native-Platform', 'build', 'native-loader-client-library'),
+  ].filter(Boolean)
+  const candidatePaths = []
+  if (configured) candidatePaths.push(path.resolve(configured))
+  for (const root of sourceRoots) {
+    candidatePaths.push(path.join(root, ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME))
+    candidatePaths.push(path.join(root, ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME))
+  }
+  return [...new Set(candidatePaths.map((candidate) => path.resolve(candidate)))]
+}
+
+async function verifiedNativeLoaderLocalCandidate(candidatePath, artifact) {
+  if (!(await exists(candidatePath))) return null
+  const stats = await fs.stat(candidatePath).catch(() => null)
+  if (!stats?.isFile() || stats.size <= 0) return null
+  if (artifact.size && stats.size !== artifact.size) return null
+  const actualSha1 = await sha1File(candidatePath)
+  if (artifact.sha1 && actualSha1.toLowerCase() !== String(artifact.sha1).toLowerCase()) return null
+  return {
+    path: candidatePath,
+    sha1: actualSha1,
+    size: stats.size,
+  }
+}
+
+async function installNativeLoaderClientArtifactFromLocalSource(artifact) {
+  const targetPath = artifact.absolutePath ?? artifact.path
+  if (!targetPath) return null
+  for (const candidatePath of nativeLoaderLocalCandidatePaths()) {
+    const candidate = await verifiedNativeLoaderLocalCandidate(candidatePath, artifact)
+    if (!candidate) continue
+    await ensureDir(path.dirname(targetPath))
+    if (path.resolve(candidate.path) !== path.resolve(targetPath)) {
+      await fs.copyFile(candidate.path, targetPath)
+    }
+    return {
+      status: path.resolve(candidate.path) === path.resolve(targetPath) ? 'verified' : 'copied',
+      path: targetPath,
+      sourcePath: candidate.path,
+      sha1: candidate.sha1,
+      size: candidate.size,
+    }
+  }
+  return null
+}
+
 function libraryHasEchoNativeLoaderDownload(library) {
   if (String(library?.name ?? '') !== ECHO_NATIVE_LOADER_LIBRARY_NAME) return false
   const artifact = library?.downloads?.artifact
@@ -5738,8 +5806,9 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
   const nativeRuntime = installPath ? await materializeNativeLoaderAddons(manifest, installPath, { writeReport: true }) : null
   if (before.length === 0) return { created: false, packLibraries, nativeRuntime, warnings: [] }
 
+  const installedFromLocal = []
   for (const artifact of nativeLoaderRequiredClientArtifacts(minecraftRoot, manifest)) {
-    await downloadSha1Artifact({
+    const file = {
       kind: 'native-loader-library',
       path: artifact.relativePath,
       absolutePath: artifact.path,
@@ -5747,7 +5816,13 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
       sha1: artifact.sha1,
       size: artifact.size,
       libraryName: artifact.libraryName,
-    })
+    }
+    const localInstall = await installNativeLoaderClientArtifactFromLocalSource(file)
+    if (localInstall) {
+      installedFromLocal.push(localInstall)
+      continue
+    }
+    await downloadSha1Artifact(file)
   }
 
   const after = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
@@ -5760,7 +5835,9 @@ async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, instal
     packLibraries,
     nativeRuntime,
     warnings: [
-      `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} into Minecraft Launcher libraries.`,
+      installedFromLocal.length > 0
+        ? `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} from the bundled Native Loader library.`
+        : `Native Loader client library was ${before.some((artifact) => artifact.reason === 'corrupt') ? 'corrupt or missing' : 'missing'}. ECHO installed ${ECHO_NATIVE_LOADER_LIBRARY_PATH} into Minecraft Launcher libraries.`,
     ],
   }
 }

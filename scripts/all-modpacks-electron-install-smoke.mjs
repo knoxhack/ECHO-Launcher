@@ -121,6 +121,10 @@ async function sha256File(filePath) {
   return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
 }
 
+async function sha1File(filePath) {
+  return crypto.createHash('sha1').update(await fs.readFile(filePath)).digest('hex')
+}
+
 function dependencyBlocks(toml) {
   return String(toml).match(/\[\[dependencies\.[^\]]+\]\][\s\S]*?(?=\n\[\[dependencies\.|\n\[\[mods\]\]|\s*$)/gu) ?? []
 }
@@ -493,7 +497,7 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
   const versionMetadata = await readJson(handoff.handoff.versionMetadataPath)
   assert(versionMetadata?.echoLauncher?.bootstrap !== true, `${pack.name} handoff left bootstrap-only version metadata in place.`)
   const nativeRuntime = runtimeMode === 'native-loader-minecraft'
-    ? await verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata)
+    ? await verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata, handoff.handoff.minecraftRoot ?? minecraftRoot)
     : null
 
   return {
@@ -514,7 +518,7 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
   }
 }
 
-async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata) {
+async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata, minecraftRoot) {
   const manifest = await readJson(path.join(installPath, '.echo', 'installed-manifest.json'))
   const jvm = Array.isArray(versionMetadata.arguments?.jvm) ? versionMetadata.arguments.jvm.map(String) : []
   const game = Array.isArray(versionMetadata.arguments?.game) ? versionMetadata.arguments.game.map(String) : []
@@ -531,10 +535,16 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
   const packIndex = game.indexOf('--echo-pack-id')
   const realMainIndex = game.indexOf('--echo-real-main')
   assert(versionMetadata.mainClass === 'com.echo.NativeLoaderClient', `${pack.name} Native Loader mainClass is ${versionMetadata.mainClass ?? 'missing'}, expected com.echo.NativeLoaderClient.`)
-  assert(
-    versionMetadata.libraries?.some((library) => library?.name === 'com.echo:native-loader:1.0.1'),
-    `${pack.name} Native Loader library is not com.echo:native-loader:1.0.1.`,
-  )
+  const nativeLoaderLibrary = versionMetadata.libraries?.find((library) => library?.name === 'com.echo:native-loader:1.0.1')
+  assert(nativeLoaderLibrary, `${pack.name} Native Loader library is not com.echo:native-loader:1.0.1.`)
+  const nativeLoaderArtifact = nativeLoaderLibrary.downloads?.artifact
+  assert(nativeLoaderArtifact?.path, `${pack.name} Native Loader library is missing artifact path metadata.`)
+  const nativeLoaderLibraryPath = path.join(minecraftRoot, 'libraries', String(nativeLoaderArtifact.path).replace(/\\/g, '/'))
+  assert(await exists(nativeLoaderLibraryPath), `${pack.name} Native Loader library was not preinstalled into Minecraft libraries: ${nativeLoaderLibraryPath}`)
+  const nativeLoaderStats = await fs.stat(nativeLoaderLibraryPath)
+  assert(nativeLoaderStats.isFile() && nativeLoaderStats.size === Number(nativeLoaderArtifact.size), `${pack.name} Native Loader library size mismatch at ${nativeLoaderLibraryPath}`)
+  const nativeLoaderSha1 = await sha1File(nativeLoaderLibraryPath)
+  assert(nativeLoaderSha1.toLowerCase() === String(nativeLoaderArtifact.sha1).toLowerCase(), `${pack.name} Native Loader library SHA-1 mismatch at ${nativeLoaderLibraryPath}`)
   assert(
     jvm.includes('-Decho.native.minecraftMainClass=dev.echo.nativeplatform.bootstrap.EchoNativeBootstrapMain'),
     `${pack.name} Native Loader JVM args do not target EchoNativeBootstrapMain.`,
@@ -570,6 +580,7 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
     ok: true,
     moduleCount: expectedModules.size,
     classpathEntryCount: classpathEntries.length,
+    nativeLoaderLibraryPath,
     markerPath: game[markerIndex + 1],
   }
 }
