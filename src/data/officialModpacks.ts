@@ -256,7 +256,7 @@ const packFallbackSeeds: OfficialModpackSeed[] = [
     summary: 'Official Openlands native-loader family with checksum-backed alpha assets.',
     detail: 'Installs from the approved Openlands Native Release Index entry.',
     image: openlandsFamilyImage,
-    moduleCount: 1,
+    moduleCount: 42,
     catalogStatus: 'approved',
   },
   {
@@ -273,7 +273,7 @@ const packFallbackSeeds: OfficialModpackSeed[] = [
     summary: 'Official Openlands NeoForge family with checksum-backed alpha assets.',
     detail: 'Installs from the approved Openlands NeoForge Release Index entry.',
     image: openlandsFamilyImage,
-    moduleCount: 1,
+    moduleCount: 42,
     catalogStatus: 'approved',
   },
   {
@@ -290,7 +290,7 @@ const packFallbackSeeds: OfficialModpackSeed[] = [
     summary: 'Official Openlands standalone runtime family with checksum-backed alpha assets.',
     detail: 'Installs from the approved Openlands Standalone Release Index entry.',
     image: openlandsFamilyImage,
-    moduleCount: 1,
+    moduleCount: 42,
     catalogStatus: 'approved',
   },
   {
