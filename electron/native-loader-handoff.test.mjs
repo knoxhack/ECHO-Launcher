@@ -13,6 +13,7 @@ const {
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
   nativeLauncherArgumentStatus,
+  nativeModuleClasspathEntries,
 } = require('./native-loader-handoff.cjs')
 
 const tempRoots = []
@@ -70,29 +71,31 @@ describe('native-loader handoff helpers', () => {
     expect(worldRuntimeJar).toBeTruthy()
     expect(await readFile(adapterRuntimeJar, 'utf8')).toBe('runtime jar bytes')
     expect(runtime.reportPath).toContain(path.join('.echo', 'native-loader', 'materialized-addons.json'))
+    expect(runtime.handoffPath).toContain(path.join('.echo', 'native-loader', 'module-activation-handoff.json'))
+    const handoff = JSON.parse(await readFile(runtime.handoffPath, 'utf8'))
+    expect(handoff.modules).toEqual(['echoadaptercore', 'echoworldcore'])
+    expect(handoff.nativeEntrypoints).toEqual(runtime.nativeEntrypoints)
 
     const jvm = nativeBootstrapJvmArguments(manifest, runtime)
     const game = nativeBootstrapGameArguments(manifest, runtime)
     expect(jvm).toContain(`-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`)
     expect(jvm).toContain('-Decho.native.bootstrap.authorizedHandoff=startNativeClient')
-    expect(jvm.some((arg) => arg.startsWith('-Decho.native.moduleClasspath='))).toBe(true)
+    expect(jvm.some((arg) => arg.startsWith('-Decho.native.moduleClasspath='))).toBe(false)
+    expect(jvm).toContain(`-Decho.native.moduleClasspathFile=${runtime.handoffPath}`)
     expect(game).toEqual(expect.arrayContaining([
       '--echo-marker',
       runtime.markerPath,
+      '--echo-handoff-file',
+      runtime.handoffPath,
       '--echo-pack-id',
       'ashfall-native-edition',
       '--echo-real-main',
       'net.minecraft.client.main.Main',
       '--echo-handoff',
-      '--echo-module',
-      'echoadaptercore',
-      'echoworldcore',
-      '--echo-native-entrypoint',
-      'echoadaptercore=com.echo.AdapterCoreNativeModule',
-      'echoworldcore=com.echo.WorldCoreNativeModule',
     ]))
-    expect(game.filter((arg) => arg === '--echo-module')).toHaveLength(2)
-    expect(game.filter((arg) => arg === '--echo-native-entrypoint')).toHaveLength(2)
+    expect(game.filter((arg) => arg === '--echo-module')).toHaveLength(0)
+    expect(game.filter((arg) => arg === '--echo-native-entrypoint')).toHaveLength(0)
+    expect(nativeModuleClasspathEntries({ arguments: { jvm, game } })).toEqual(runtime.classpathEntries)
 
     const status = nativeLauncherArgumentStatus({ arguments: { jvm, game } }, manifest)
     expect(status).toEqual({ ok: true, errors: [] })

@@ -99,12 +99,12 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
-const ECHO_NATIVE_LOADER_VERSION = '1.0.1'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.2'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.1/echo-native-loader-1.0.1.jar'
-const ECHO_NATIVE_LOADER_SHA1 = '8e04a73e3dda61021ed2bbf24165c4a7930ea01c'
-const ECHO_NATIVE_LOADER_SIZE = 1_828_904
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.2/echo-native-loader-1.0.2.jar'
+const ECHO_NATIVE_LOADER_SHA1 = 'bd17873944e64dbfb7ca5fb6bd7ca7bc2a53cc4e'
+const ECHO_NATIVE_LOADER_SIZE = 1_833_432
 const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
@@ -5422,11 +5422,6 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
       return nativeLoaderLibraryWithDownload(library)
     })
   if (!found) normalizedLibraries.push(nativeLoaderLibraryWithDownload())
-  for (const library of packLibraries) {
-    if (!normalizedLibraries.some((candidate) => candidate?.echoLauncher?.sourcePath === library?.echoLauncher?.sourcePath)) {
-      normalizedLibraries.push(library)
-    }
-  }
   const sourceArguments = source.arguments && typeof source.arguments === 'object' && !Array.isArray(source.arguments)
     ? source.arguments
     : { game: [], jvm: [] }
@@ -5592,39 +5587,12 @@ function validateMinecraftLauncherVersionDocument(document, manifest, versionId,
     if (!document.libraries.some((library) => libraryHasEchoNativeLoaderDownload(library))) {
       return { valid: false, source: 'invalid', reason: 'Native Loader library download metadata is missing or stale' }
     }
+    if (document.libraries.some((library) => library?.echoLauncher?.packAddon === true)) {
+      return { valid: false, source: 'invalid', reason: 'Native Loader pack addons must be loaded from the ECHO handoff file, not Minecraft Launcher libraries' }
+    }
     const argumentStatus = nativeLauncherArgumentStatus(document, manifest)
     if (!argumentStatus.ok) {
       return { valid: false, source: 'invalid', reason: argumentStatus.errors[0] ?? 'Native Loader bootstrap arguments are missing or stale' }
-    }
-    for (const library of document.libraries.filter((item) => item?.echoLauncher?.packAddon === true)) {
-      const artifact = library.downloads?.artifact
-      const artifactUrl = String(artifact?.url ?? '').trim().toLowerCase()
-      if (artifactUrl.startsWith('file:')) {
-        return { valid: false, source: 'invalid', reason: `Native Loader pack addon '${library.echoLauncher?.sourcePath ?? library.name}' uses an unsupported file URL.` }
-      }
-      const expectedLibraryPath = artifactPathFromMavenCoordinate(String(library.name ?? ''))?.replace(/\\/g, '/')
-      const actualLibraryPath = String(artifact?.path ?? '').replace(/\\/g, '/')
-      if (!expectedLibraryPath || actualLibraryPath !== expectedLibraryPath) {
-        return { valid: false, source: 'invalid', reason: `Native Loader pack addon '${library.echoLauncher?.sourcePath ?? library.name}' is not stored at its Minecraft library coordinate path.` }
-      }
-    }
-    const expectedAddons = (manifest.files ?? [])
-      .filter((file) => file?.required !== false)
-      .filter((file) => /^addons\/.+\.echo-addon$/iu.test(String(file.path ?? '').replace(/\\/g, '/')))
-      .map((file) => ({
-        path: String(file.path ?? '').replace(/\\/g, '/'),
-        sha256: String(file.sha256 ?? '').toLowerCase(),
-      }))
-    const missingAddons = expectedAddons.filter((expected) =>
-      !document.libraries.some(
-        (library) =>
-          library?.echoLauncher?.packAddon === true &&
-          library?.echoLauncher?.sourcePath === expected.path &&
-          (!expected.sha256 || String(library?.echoLauncher?.sourceSha256 ?? '').toLowerCase() === expected.sha256),
-      ),
-    )
-    if (missingAddons.length > 0) {
-      return { valid: false, source: 'invalid', reason: `Native Loader pack addon classpath is missing: ${missingAddons.slice(0, 5).map((entry) => entry.path).join(', ')}` }
     }
   }
   return {
@@ -5844,7 +5812,7 @@ async function missingNativeLoaderClientArtifacts(minecraftRoot, manifestOrDocum
 
 async function ensureNativeLoaderClientArtifacts(minecraftRoot, manifest, installPath) {
   const before = await missingNativeLoaderClientArtifacts(minecraftRoot, manifest)
-  const packLibraries = installPath ? await ensureNativeLoaderPackLibraries(minecraftRoot, manifest, installPath) : []
+  const packLibraries = []
   const nativeRuntime = installPath ? await materializeNativeLoaderAddons(manifest, installPath, { writeReport: true }) : null
   if (before.length === 0) return { created: false, packLibraries, nativeRuntime, warnings: [] }
 

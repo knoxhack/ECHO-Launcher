@@ -3,9 +3,9 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 
-const VERSION = String(process.env.ECHO_NATIVE_LOADER_VERSION || '1.0.1').trim()
-const EXPECTED_SHA1 = String(process.env.ECHO_NATIVE_LOADER_SHA1 || '8e04a73e3dda61021ed2bbf24165c4a7930ea01c').toLowerCase()
-const EXPECTED_SIZE = Number(process.env.ECHO_NATIVE_LOADER_SIZE || 1_828_904)
+const VERSION = String(process.env.ECHO_NATIVE_LOADER_VERSION || '1.0.2').trim()
+const EXPECTED_SHA1 = String(process.env.ECHO_NATIVE_LOADER_SHA1 || 'bd17873944e64dbfb7ca5fb6bd7ca7bc2a53cc4e').toLowerCase()
+const EXPECTED_SIZE = Number(process.env.ECHO_NATIVE_LOADER_SIZE || 1_833_432)
 const PUBLIC_FILE_NAME = `echo-native-loader-${VERSION}.jar`
 const LIBRARY_FILE_NAME = `native-loader-${VERSION}.jar`
 const OUT_DIR = path.resolve('build', 'native-loader')

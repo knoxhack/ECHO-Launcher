@@ -267,7 +267,7 @@ function validateInstallManifest(issues, warnings, pack, entry, manifest, artifa
   if (pack.lane === 'native') {
     if (manifest.runtimeTarget !== 'echo_native') warnings.push(`Native runtimeTarget is ${manifest.runtimeTarget ?? 'missing'}, expected echo_native.`)
     if (!manifest.nativeLoader?.version) issues.push('Native manifest is missing nativeLoader.version.')
-    const artifact = manifest.nativeLoader?.versionJson?.libraries?.find((library) => library?.name === 'com.echo:native-loader:1.0.1')?.downloads?.artifact
+    const artifact = manifest.nativeLoader?.versionJson?.libraries?.find((library) => /^com\.echo:native-loader:\d+\.\d+\.\d+$/u.test(String(library?.name ?? '')))?.downloads?.artifact
     if (!artifact?.url || artifact.url.startsWith('file:')) warnings.push('Native Loader versionJson is missing a public native-loader artifact URL; launcher must inject verified Native Loader metadata before handoff.')
     if (!artifact?.sha1 || !artifact?.size) warnings.push('Native Loader versionJson is missing native-loader SHA-1 or size; launcher must inject verified Native Loader metadata before handoff.')
   }

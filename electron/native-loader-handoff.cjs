@@ -1,4 +1,5 @@
 const crypto = require('node:crypto')
+const fssync = require('node:fs')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const AdmZip = require('adm-zip')
@@ -136,10 +137,10 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
     }
 
     materialized.push({
-      moduleId,
-      sourcePath,
-      sourceSha256: actualSha256,
-      nativeEntrypoint,
+    moduleId,
+    sourcePath,
+    sourceSha256: actualSha256,
+    nativeEntrypoint,
       bootstrapProfile: descriptorBootstrapProfile(descriptor),
       packRoot: descriptor?.kind === 'pack_root' || descriptor?.role === 'official_pack',
       runtimeJars,
@@ -149,16 +150,24 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
   materialized.sort((left, right) => left.moduleId.localeCompare(right.moduleId))
   const classpathEntries = materialized.flatMap((addon) => addon.runtimeJars.map((jar) => jar.path))
   const rootDescriptor = materialized.find((addon) => addon.packRoot && addon.bootstrapProfile) ?? materialized.find((addon) => addon.bootstrapProfile)
+  const handoffPath = safeJoin(installPath, path.join('.echo', 'native-loader', 'module-activation-handoff.json'))
   const runtime = {
+    schema: 'echo.native.launcher_handoff.v1',
+    packId: String(manifest?.pack ?? ''),
+    packVersion: String(manifest?.version ?? ''),
     gameDir: path.resolve(installPath),
     markerPath: safeJoin(installPath, path.join('.echo', 'native-loader', 'module-activation.json')),
+    handoffPath,
     moduleClasspath: classpathEntries.join(path.delimiter),
+    moduleClasspathFile: handoffPath,
     classpathEntries,
     modules: materialized.map((addon) => addon.moduleId),
     nativeEntrypoints: Object.fromEntries(materialized.map((addon) => [addon.moduleId, addon.nativeEntrypoint])),
     bootstrapProfileClass: rootDescriptor?.bootstrapProfile ?? '',
     addons: materialized,
   }
+  await fs.mkdir(path.dirname(handoffPath), { recursive: true })
+  await fs.writeFile(handoffPath, `${JSON.stringify({ ...runtime, generatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8')
   if (options.writeReport) {
     const reportPath = safeJoin(installPath, path.join('.echo', 'native-loader', 'materialized-addons.json'))
     await fs.mkdir(path.dirname(reportPath), { recursive: true })
@@ -179,7 +188,7 @@ function nativeBootstrapJvmArguments(manifest, runtime = null) {
       `-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`,
       `-Decho.native.bootstrap.authorizedHandoff=${ECHO_NATIVE_AUTHORIZED_HANDOFF}`,
       `-Decho.native.gameDir=${runtime.gameDir}`,
-      `-Decho.native.moduleClasspath=${runtime.moduleClasspath}`,
+      `-Decho.native.moduleClasspathFile=${runtime.moduleClasspathFile}`,
     )
     if (runtime.bootstrapProfileClass) {
       args.push(`-Decho.native.bootstrap.profileClass=${runtime.bootstrapProfileClass}`)
@@ -193,18 +202,14 @@ function nativeBootstrapGameArguments(manifest, runtime = null) {
   const args = [
     '--echo-marker',
     runtime.markerPath,
+    '--echo-handoff-file',
+    runtime.handoffPath,
     '--echo-pack-id',
     String(manifest?.pack ?? ''),
     '--echo-real-main',
     ECHO_NATIVE_REAL_MINECRAFT_MAIN_CLASS,
     '--echo-handoff',
   ]
-  for (const moduleId of runtime.modules) {
-    args.push('--echo-module', moduleId)
-  }
-  for (const [moduleId, entrypoint] of Object.entries(runtime.nativeEntrypoints)) {
-    args.push('--echo-native-entrypoint', `${moduleId}=${entrypoint}`)
-  }
   return args
 }
 
@@ -228,11 +233,21 @@ function nativeLauncherArgumentStatus(document, manifest) {
   if (!jvm.includes(`-Decho.native.bootstrap.authorizedHandoff=${ECHO_NATIVE_AUTHORIZED_HANDOFF}`)) {
     errors.push('Native Loader JVM args are missing authorized bootstrap handoff.')
   }
-  for (const prefix of ['-Decho.native.gameDir', '-Decho.native.moduleClasspath', '-Decho.native.packId', '-Decho.native.packVersion']) {
+  for (const prefix of ['-Decho.native.gameDir', '-Decho.native.packId', '-Decho.native.packVersion']) {
     if (!jvmHas(prefix)) errors.push(`Native Loader JVM args are missing ${prefix}.`)
+  }
+  if (!jvmHas('-Decho.native.moduleClasspath') && !jvmHas('-Decho.native.moduleClasspathFile')) {
+    errors.push('Native Loader JVM args are missing -Decho.native.moduleClasspath or -Decho.native.moduleClasspathFile.')
   }
   for (const flag of ['--echo-marker', '--echo-pack-id', '--echo-real-main', '--echo-handoff']) {
     if (!gameHas(flag)) errors.push(`Native Loader game args are missing ${flag}.`)
+  }
+  const handoffFile = gameValue(game, '--echo-handoff-file')
+  if (handoffFile) {
+    return {
+      ok: errors.length === 0,
+      errors,
+    }
   }
   const modules = new Set()
   const entrypoints = new Set()
@@ -252,8 +267,28 @@ function nativeLauncherArgumentStatus(document, manifest) {
 
 function nativeModuleClasspathEntries(document) {
   const jvm = stringArray(document?.arguments?.jvm)
+  const file = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspathFile='))?.slice('-Decho.native.moduleClasspathFile='.length) ?? ''
+  if (file && fssync.existsSync(file)) {
+    try {
+      const data = JSON.parse(fssync.readFileSync(file, 'utf8'))
+      if (Array.isArray(data.classpathEntries)) {
+        return data.classpathEntries.map((item) => String(item).trim()).filter(Boolean)
+      }
+      if (typeof data.moduleClasspath === 'string') {
+        return data.moduleClasspath.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+      }
+    } catch {
+      const text = fssync.readFileSync(file, 'utf8')
+      return text.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)
+    }
+  }
   const value = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspath='))?.slice('-Decho.native.moduleClasspath='.length) ?? ''
   return value.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+}
+
+function gameValue(game, flag) {
+  const index = game.indexOf(flag)
+  return index >= 0 ? String(game[index + 1] ?? '').trim() : ''
 }
 
 module.exports = {

@@ -531,12 +531,23 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
       .filter(Boolean),
   ])
   const classpathArg = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspath='))
+  const classpathFileArg = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspathFile='))
   const markerIndex = game.indexOf('--echo-marker')
+  const handoffFileIndex = game.indexOf('--echo-handoff-file')
   const packIndex = game.indexOf('--echo-pack-id')
   const realMainIndex = game.indexOf('--echo-real-main')
   assert(versionMetadata.mainClass === 'com.echo.NativeLoaderClient', `${pack.name} Native Loader mainClass is ${versionMetadata.mainClass ?? 'missing'}, expected com.echo.NativeLoaderClient.`)
-  const nativeLoaderLibrary = versionMetadata.libraries?.find((library) => library?.name === 'com.echo:native-loader:1.0.1')
-  assert(nativeLoaderLibrary, `${pack.name} Native Loader library is not com.echo:native-loader:1.0.1.`)
+  const nativeLoaderLibrary = versionMetadata.libraries?.find((library) => /^com\.echo:native-loader:\d+\.\d+\.\d+$/u.test(String(library?.name ?? '')))
+  assert(nativeLoaderLibrary, `${pack.name} Native Loader library is missing or has an invalid coordinate.`)
+  const packAddonLibraries = (versionMetadata.libraries ?? []).filter((library) => library?.echoLauncher?.packAddon === true)
+  assert(
+    packAddonLibraries.length === 0,
+    `${pack.name} Native Loader metadata still exposes ${packAddonLibraries.length} addon libraries to Minecraft Launcher; addon jars must be loaded through the ECHO handoff file.`,
+  )
+  assert(
+    (versionMetadata.libraries ?? []).length <= 8,
+    `${pack.name} Native Loader metadata exposes too many direct launcher libraries (${versionMetadata.libraries.length}); this can exceed Windows process launch limits.`,
+  )
   const nativeLoaderArtifact = nativeLoaderLibrary.downloads?.artifact
   assert(nativeLoaderArtifact?.path, `${pack.name} Native Loader library is missing artifact path metadata.`)
   const nativeLoaderLibraryPath = path.join(minecraftRoot, 'libraries', String(nativeLoaderArtifact.path).replace(/\\/g, '/'))
@@ -554,8 +565,16 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
     `${pack.name} Native Loader JVM args are missing authorized handoff.`,
   )
   assert(jvm.includes(`-Decho.native.gameDir=${installPath}`), `${pack.name} Native Loader JVM args are missing the install gameDir.`)
-  assert(classpathArg, `${pack.name} Native Loader JVM args are missing echo.native.moduleClasspath.`)
-  const classpathEntries = classpathArg.slice('-Decho.native.moduleClasspath='.length).split(path.delimiter).filter(Boolean)
+  assert(!classpathArg, `${pack.name} Native Loader JVM args still use the long inline echo.native.moduleClasspath.`)
+  assert(classpathFileArg, `${pack.name} Native Loader JVM args are missing echo.native.moduleClasspathFile.`)
+  const classpathFile = classpathFileArg.slice('-Decho.native.moduleClasspathFile='.length)
+  assert(await exists(classpathFile), `${pack.name} Native Loader module classpath handoff file is missing: ${classpathFile}`)
+  const handoffFile = handoffFileIndex >= 0 ? game[handoffFileIndex + 1] : ''
+  assert(handoffFile && handoffFile === classpathFile, `${pack.name} Native Loader game args are missing the matching --echo-handoff-file.`)
+  const handoff = await readJson(handoffFile)
+  assert(handoff?.schema === 'echo.native.launcher_handoff.v1', `${pack.name} Native Loader handoff schema is missing or stale.`)
+  assert(handoff.packId === pack.profileId, `${pack.name} Native Loader handoff pack id mismatch: ${handoff.packId}`)
+  const classpathEntries = Array.isArray(handoff.classpathEntries) ? handoff.classpathEntries.map(String).filter(Boolean) : []
   assert(classpathEntries.length >= expectedModules.size, `${pack.name} Native Loader classpath has ${classpathEntries.length} entries for ${expectedModules.size} modules.`)
   for (const entryPath of classpathEntries) {
     assert(await exists(entryPath), `${pack.name} Native Loader classpath entry is missing: ${entryPath}`)
@@ -566,21 +585,25 @@ async function verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetada
   assert(packIndex >= 0 && game[packIndex + 1] === pack.profileId, `${pack.name} Native Loader game args are missing --echo-pack-id ${pack.profileId}.`)
   assert(realMainIndex >= 0 && game[realMainIndex + 1] === 'net.minecraft.client.main.Main', `${pack.name} Native Loader game args are missing the real Minecraft main.`)
   assert(game.includes('--echo-handoff'), `${pack.name} Native Loader game args are missing --echo-handoff.`)
-  const modules = new Set()
-  const entrypoints = new Set()
-  for (let index = 0; index < game.length; index += 1) {
-    if (game[index] === '--echo-module' && game[index + 1]) modules.add(game[index + 1])
-    if (game[index] === '--echo-native-entrypoint' && game[index + 1]) entrypoints.add(game[index + 1].split('=')[0])
-  }
+  assert(game.filter((arg) => arg === '--echo-module').length === 0, `${pack.name} Native Loader game args still use long per-module flags.`)
+  assert(game.filter((arg) => arg === '--echo-native-entrypoint').length === 0, `${pack.name} Native Loader game args still use long per-entrypoint flags.`)
+  assert(jvm.join(' ').length < 4096, `${pack.name} Native Loader JVM args are still too long for a safe Windows handoff: ${jvm.join(' ').length} chars.`)
+  assert(game.join(' ').length < 2048, `${pack.name} Native Loader game args are still too long for a safe Windows handoff: ${game.join(' ').length} chars.`)
+  const modules = new Set(Array.isArray(handoff.modules) ? handoff.modules.map(String) : [])
+  const entrypoints = new Set(Object.keys(handoff.nativeEntrypoints ?? {}))
   for (const moduleId of expectedModules) {
-    assert(modules.has(moduleId), `${pack.name} Native Loader game args are missing module ${moduleId}.`)
-    assert(entrypoints.has(moduleId), `${pack.name} Native Loader game args are missing native entrypoint for ${moduleId}.`)
+    assert(modules.has(moduleId), `${pack.name} Native Loader handoff file is missing module ${moduleId}.`)
+    assert(entrypoints.has(moduleId), `${pack.name} Native Loader handoff file is missing native entrypoint for ${moduleId}.`)
   }
   return {
     ok: true,
     moduleCount: expectedModules.size,
     classpathEntryCount: classpathEntries.length,
+    launcherLibraryCount: versionMetadata.libraries?.length ?? 0,
     nativeLoaderLibraryPath,
+    handoffFile,
+    jvmArgCharCount: jvm.join(' ').length,
+    gameArgCharCount: game.join(' ').length,
     markerPath: game[markerIndex + 1],
   }
 }
