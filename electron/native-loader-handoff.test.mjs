@@ -101,6 +101,55 @@ describe('native-loader handoff helpers', () => {
     expect(status).toEqual({ ok: true, errors: [] })
   })
 
+  it('extracts embedded .echo/content-graph artifacts and writes an install aggregate', async () => {
+    const root = await tempRoot()
+    const addonPath = path.join(root, 'addons', 'echocontent-1.0.0.echo-addon')
+    const bytes = await writeAddon(addonPath, {
+      id: 'echocontent',
+      nativeEntrypoint: 'com.echo.ContentModule',
+      jarName: 'echocontent-1.0.0-runtime.jar',
+      contentGraph: [
+        {
+          entryName: '.echo/content-graph/content-graph.json',
+          content: JSON.stringify({ schemaVersion: 'echo.content_graph.v1', nodes: [{ id: 'a' }, { id: 'b' }], edges: [{ from: 'a', to: 'b' }] }),
+        },
+        { entryName: '.echo/content-graph/features.json', content: JSON.stringify({ features: [{ id: 'f1' }] }) },
+        {
+          entryName: '.echo/content-graph/export-plans/hytale.json',
+          content: JSON.stringify({
+            schemaVersion: 'echo.content_graph.export_plan.v1',
+            target: 'hytale',
+            nodes: [
+              { nodeId: 'a', status: 'direct', rationale: 'Maps directly.' },
+              { nodeId: 'b', status: 'blocked', rationale: 'needs runtime hint' },
+            ],
+            summary: { direct: 1, adapter_required: 0, blocked: 1, not_applicable: 0 },
+          }),
+        },
+      ],
+    })
+    const manifest = manifestFor('content-native-edition', [{
+      path: 'addons/echocontent-1.0.0.echo-addon',
+      moduleId: 'echocontent',
+      sha256: sha256(bytes),
+      size: bytes.length,
+    }])
+
+    const runtime = await materializeNativeLoaderAddons(manifest, root)
+    expect(runtime.contentGraph).toBeDefined()
+    expect(runtime.contentGraph.moduleCount).toBe(1)
+    expect(runtime.contentGraph.nodeCount).toBe(2)
+    expect(runtime.contentGraph.edgeCount).toBe(1)
+    expect(runtime.contentGraph.featureCount).toBe(1)
+    expect(runtime.contentGraph.hytaleBlockerCount).toBe(1)
+    const aggregatePath = path.join(root, '.echo', 'content-graph.json')
+    expect(runtime.contentGraph.aggregatePath).toBe(aggregatePath)
+    const aggregate = JSON.parse(await readFile(aggregatePath, 'utf8'))
+    expect(aggregate.schema).toBe('echo.launcher.content_graph.v1')
+    expect(aggregate.modules[0].moduleId).toBe('echocontent')
+    expect(aggregate.modules[0].hytaleBlockers).toEqual(['b: needs runtime hint'])
+  })
+
   it('rejects addons without native entrypoints', async () => {
     const root = await tempRoot()
     const addonPath = path.join(root, 'addons', 'broken.echo-addon')
@@ -159,6 +208,11 @@ async function writeAddon(filePath, options) {
     },
   }, null, 2), 'utf8'))
   zip.addFile(`lib/${options.jarName}`, Buffer.from('runtime jar bytes', 'utf8'))
+  if (Array.isArray(options.contentGraph)) {
+    for (const { entryName, content } of options.contentGraph) {
+      zip.addFile(entryName, Buffer.from(content, 'utf8'))
+    }
+  }
   await writeFile(filePath, zip.toBuffer())
   return readFile(filePath)
 }

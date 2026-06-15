@@ -85,6 +85,101 @@ function descriptorBootstrapProfile(descriptor) {
   return value || ''
 }
 
+const CONTENT_GRAPH_PREFIX = '.echo/content-graph/'
+
+function contentGraphEntries(zip) {
+  return zip
+    .getEntries()
+    .filter((entry) => !entry.isDirectory && entry.entryName.startsWith(CONTENT_GRAPH_PREFIX))
+}
+
+async function readJsonSafe(filePath) {
+  try {
+    const text = await fs.readFile(filePath, 'utf8')
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+async function extractModuleContentGraph(zip, moduleId, installPath) {
+  const entries = contentGraphEntries(zip)
+  if (entries.length === 0) {
+    return null
+  }
+  const moduleGraphRoot = safeJoin(installPath, path.join('.echo', 'content-graph', 'modules', safeFileName(moduleId).toLowerCase()))
+  await fs.mkdir(moduleGraphRoot, { recursive: true })
+  const written = []
+  for (const entry of entries) {
+    const relative = entry.entryName.slice(CONTENT_GRAPH_PREFIX.length)
+    const destination = safeJoin(moduleGraphRoot, relative)
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    const data = entry.getData()
+    await fs.writeFile(destination, data)
+    written.push({ sourceEntry: entry.entryName, path: destination, size: data.length })
+  }
+  return { moduleGraphRoot, written }
+}
+
+function hytaleBlockerSummaries(hytale) {
+  if (!hytale || typeof hytale !== 'object') {
+    return []
+  }
+  const blockedNodes = Array.isArray(hytale.nodes)
+    ? hytale.nodes.filter((node) => node?.status === 'blocked')
+    : []
+  if (blockedNodes.length > 0) {
+    return blockedNodes.map((node) => {
+      const nodeId = String(node?.nodeId ?? node?.id ?? 'unknown node')
+      const reason = String(node?.rationale ?? node?.reason ?? node?.message ?? 'blocked')
+      return `${nodeId}: ${reason}`
+    })
+  }
+  if (Array.isArray(hytale.blockers)) {
+    return hytale.blockers.map((blocker) => String(blocker?.message ?? blocker))
+  }
+  const blockedCount = Number(hytale?.summary?.blocked ?? 0)
+  if (blockedCount > 0) {
+    return [`${blockedCount} blocked Hytale node${blockedCount === 1 ? '' : 's'}`]
+  }
+  return []
+}
+
+async function summarizeModuleContentGraph(moduleGraphRoot, moduleId) {
+  const graph = await readJsonSafe(path.join(moduleGraphRoot, 'content-graph.json'))
+  const features = await readJsonSafe(path.join(moduleGraphRoot, 'features.json'))
+  const hytale = await readJsonSafe(path.join(moduleGraphRoot, 'export-plans', 'hytale.json'))
+  const nodeCount = Array.isArray(graph?.nodes) ? graph.nodes.length : 0
+  const edgeCount = Array.isArray(graph?.edges) ? graph.edges.length : 0
+  const featureList = Array.isArray(features?.features)
+    ? features.features
+    : Array.isArray(features)
+      ? features
+      : []
+  const blockers = hytaleBlockerSummaries(hytale)
+  return {
+    evidenceSchemaVersion: 'echo.content_graph.evidence.v1',
+    source: 'launcher-native-loader-handoff',
+    moduleId,
+    schemaVersion: graph?.schemaVersion ?? 'unknown',
+    nodeCount,
+    edgeCount,
+    featureCount: featureList.length,
+    exportPlanCount: await countExportPlanFiles(path.join(moduleGraphRoot, 'export-plans')),
+    hytaleBlockerCount: blockers.length,
+    hytaleBlockers: blockers.slice(0, 10),
+  }
+}
+
+async function countExportPlanFiles(exportPlansRoot) {
+  try {
+    const entries = await fs.readdir(exportPlansRoot, { withFileTypes: true })
+    return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.json')).length
+  } catch {
+    return 0
+  }
+}
+
 async function materializeNativeLoaderAddons(manifest, installPath, options = {}) {
   const addonFiles = requiredNativeAddonFiles(manifest)
   if (addonFiles.length === 0) {
@@ -92,8 +187,11 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
   }
 
   const materialized = []
+  const contentGraphSummaries = []
   const cacheRoot = safeJoin(installPath, path.join('.echo', 'native-loader', 'addons'))
+  const contentGraphRoot = safeJoin(installPath, path.join('.echo', 'content-graph'))
   await fs.mkdir(cacheRoot, { recursive: true })
+  await fs.mkdir(contentGraphRoot, { recursive: true })
 
   for (const file of addonFiles) {
     const sourcePath = String(file.path ?? '').replace(/\\/g, '/')
@@ -136,21 +234,56 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
       })
     }
 
+    const contentGraphExtraction = await extractModuleContentGraph(zip, moduleId, installPath)
+    if (contentGraphExtraction) {
+      const summary = await summarizeModuleContentGraph(contentGraphExtraction.moduleGraphRoot, moduleId)
+      contentGraphSummaries.push(summary)
+    }
+
     materialized.push({
-    moduleId,
-    sourcePath,
-    sourceSha256: actualSha256,
-    nativeEntrypoint,
+      moduleId,
+      sourcePath,
+      sourceSha256: actualSha256,
+      nativeEntrypoint,
       bootstrapProfile: descriptorBootstrapProfile(descriptor),
       packRoot: descriptor?.kind === 'pack_root' || descriptor?.role === 'official_pack',
       runtimeJars,
+      contentGraph: contentGraphExtraction
+        ? { root: contentGraphExtraction.moduleGraphRoot, summary: contentGraphSummaries[contentGraphSummaries.length - 1] }
+        : null,
     })
   }
 
   materialized.sort((left, right) => left.moduleId.localeCompare(right.moduleId))
+  contentGraphSummaries.sort((left, right) => left.moduleId.localeCompare(right.moduleId))
   const classpathEntries = materialized.flatMap((addon) => addon.runtimeJars.map((jar) => jar.path))
   const rootDescriptor = materialized.find((addon) => addon.packRoot && addon.bootstrapProfile) ?? materialized.find((addon) => addon.bootstrapProfile)
   const handoffPath = safeJoin(installPath, path.join('.echo', 'native-loader', 'module-activation-handoff.json'))
+  const aggregatePath = safeJoin(installPath, path.join('.echo', 'content-graph.json'))
+  const contentGraph = {
+    source: 'installed-scan',
+    root: contentGraphRoot,
+    aggregatePath,
+    moduleCount: contentGraphSummaries.length,
+    nodeCount: contentGraphSummaries.reduce((sum, summary) => sum + summary.nodeCount, 0),
+    edgeCount: contentGraphSummaries.reduce((sum, summary) => sum + summary.edgeCount, 0),
+    featureCount: contentGraphSummaries.reduce((sum, summary) => sum + summary.featureCount, 0),
+    exportPlanCount: contentGraphSummaries.reduce((sum, summary) => sum + summary.exportPlanCount, 0),
+    hytaleBlockerCount: contentGraphSummaries.reduce((sum, summary) => sum + summary.hytaleBlockerCount, 0),
+    modules: contentGraphSummaries,
+  }
+  if (contentGraphSummaries.length > 0) {
+    await fs.writeFile(
+      aggregatePath,
+      `${JSON.stringify({
+        schema: 'echo.launcher.content_graph.v1',
+        evidenceSchemaVersion: 'echo.content_graph.evidence.v1',
+        generatedAt: new Date().toISOString(),
+        ...contentGraph,
+      }, null, 2)}\n`,
+      'utf8',
+    )
+  }
   const runtime = {
     schema: 'echo.native.launcher_handoff.v1',
     packId: String(manifest?.pack ?? ''),
@@ -165,6 +298,7 @@ async function materializeNativeLoaderAddons(manifest, installPath, options = {}
     nativeEntrypoints: Object.fromEntries(materialized.map((addon) => [addon.moduleId, addon.nativeEntrypoint])),
     bootstrapProfileClass: rootDescriptor?.bootstrapProfile ?? '',
     addons: materialized,
+    contentGraph,
   }
   await fs.mkdir(path.dirname(handoffPath), { recursive: true })
   await fs.writeFile(handoffPath, `${JSON.stringify({ ...runtime, generatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8')

@@ -2034,6 +2034,44 @@ async function contentGraphLoad(payload = {}) {
   }
 }
 
+async function contentGraphLoadInstalled(payload = {}) {
+  if (!payload.installPath) throw new Error('installPath is required.')
+  const installPath = normalizePath(payload.installPath)
+  const aggregatePath = path.join(installPath, '.echo', 'content-graph.json')
+  const aggregate = await readJson(aggregatePath, null)
+  if (!aggregate) {
+    return {
+      available: false,
+      aggregate: null,
+      modules: [],
+      message: `No installed content graph aggregate found at ${aggregatePath}.`,
+    }
+  }
+  const modules = []
+  if (aggregate.modules && Array.isArray(aggregate.modules)) {
+    for (const summary of aggregate.modules) {
+      const moduleId = String(summary?.moduleId ?? '')
+      if (!moduleId) continue
+      const moduleRoot = path.join(installPath, '.echo', 'content-graph', 'modules', moduleId.toLowerCase())
+      const graph = await readJson(path.join(moduleRoot, 'content-graph.json'), null)
+      const features = await readJson(path.join(moduleRoot, 'features.json'), null)
+      const hytalePlan = await readJson(path.join(moduleRoot, 'export-plans', 'hytale.json'), null)
+      modules.push({
+        moduleId,
+        summary,
+        graph,
+        features,
+        hytalePlan,
+      })
+    }
+  }
+  return {
+    available: true,
+    aggregate,
+    modules,
+  }
+}
+
 function validatePackManifest(manifest, options = {}) {
   const normalizedPack = normalizeOfficialPackId(manifest?.pack)
   manifest = normalizeLegacyPackManifest(manifest, normalizedPack)
@@ -9826,6 +9864,7 @@ const handlers = {
   'manifest:import': manifestImport,
   'manifest:verify': verifyManifest,
   'content-graph:load': contentGraphLoad,
+  'content-graph:load-installed': contentGraphLoadInstalled,
   'settings:get': readSettings,
   'settings:save': writeSettings,
   'mobile-bridge:get-state': mobileBridgeGetState,

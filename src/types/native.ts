@@ -192,6 +192,46 @@ export interface NativePackStateBlocker {
   action: NativePackPrimaryActionKind | 'diagnostics'
 }
 
+export interface InstalledContentGraphModuleSummary {
+  evidenceSchemaVersion?: 'echo.content_graph.evidence.v1'
+  source?: string
+  moduleId: string
+  schemaVersion: string
+  nodeCount: number
+  edgeCount: number
+  featureCount: number
+  exportPlanCount?: number
+  hytaleBlockerCount: number
+  hytaleBlockers: string[]
+}
+
+export interface InstalledContentGraphSummary {
+  schema: string
+  evidenceSchemaVersion?: 'echo.content_graph.evidence.v1'
+  generatedAt: string
+  available: boolean
+  aggregate: {
+    source?: 'release-evidence' | 'installed-scan' | 'workspace-scan' | string
+    root: string
+    aggregatePath: string
+    moduleCount: number
+    nodeCount: number
+    edgeCount: number
+    featureCount: number
+    exportPlanCount?: number
+    hytaleBlockerCount: number
+    modules: InstalledContentGraphModuleSummary[]
+  } | null
+  modules: Array<{
+    moduleId: string
+    summary: InstalledContentGraphModuleSummary
+    graph: unknown
+    features: unknown
+    hytalePlan: unknown
+  }>
+  message?: string
+}
+
 export interface NativePackState {
   ok: boolean
   generatedAt: string

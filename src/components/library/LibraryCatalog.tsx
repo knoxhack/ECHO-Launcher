@@ -10,6 +10,7 @@ import {
   Gamepad2,
   Home,
   Monitor,
+  Network,
   RadioTower,
   Search,
   ShieldAlert,
@@ -27,12 +28,13 @@ import {
   type OfficialModpack,
 } from '../../data/officialModpacks'
 import { invokeNative, isNativeAvailable } from '../../services/nativeBridge'
+import { useContentGraphStore } from '../../stores/contentGraphStore'
 import { useLauncherStore } from '../../stores/launcherStore'
 import { usePackStateStore } from '../../stores/packStateStore'
 import { useProfileStore } from '../../stores/profileStore'
 import { useReleaseStore } from '../../stores/releaseStore'
 import type { HealthStatus } from '../../types/launcher'
-import type { NativeImportCandidate, NativePackState } from '../../types/native'
+import type { InstalledContentGraphSummary, NativeImportCandidate, NativePackState } from '../../types/native'
 import type { LauncherRuntimeModeId } from '../../types/standaloneRuntime'
 import { cn } from '../../utils/cn'
 import { CyberButton } from '../cyber/CyberButton'
@@ -40,6 +42,7 @@ import { GlassCard } from '../cyber/GlassCard'
 import { MetricCard } from '../cyber/MetricCard'
 import { ProgressBar } from '../cyber/ProgressBar'
 import { StatusChip } from '../cyber/StatusChip'
+import { WarningCard } from '../cyber/WarningCard'
 import {
   filterLibraryPacks,
   groupLibraryPacks,
@@ -103,6 +106,13 @@ export function LibraryCatalog() {
   const selectedPack = visibleModpacks.find((pack) => pack.id === selectedPackId) ?? visibleModpacks.find((pack) => pack.id === selectedProfileId) ?? visibleModpacks[0]
   const selectedPackState = selectedPack ? packStates[selectedPack.id] : undefined
   const selectedProfile = profiles.find((profile) => profile.id === selectedPack?.id)
+  const contentGraph = useContentGraphStore((state) =>
+    selectedPackState?.install?.installPath ? state.graphs[selectedPackState.install.installPath] : null,
+  )
+  const contentGraphLoading = useContentGraphStore((state) =>
+    selectedPackState?.install?.installPath ? Boolean(state.loading[selectedPackState.install.installPath]) : false,
+  )
+  const loadContentGraph = useContentGraphStore((state) => state.loadInstalledContentGraph)
   const readyCount = visibleModpacks.filter((pack) => packStates[pack.id]?.ok).length
   const attentionCount = visibleModpacks.filter((pack) => {
     const packState = packStates[pack.id]
@@ -139,6 +149,13 @@ export function LibraryCatalog() {
     const timer = window.setTimeout(() => void refreshCatalog(false, false), 0)
     return () => window.clearTimeout(timer)
   }, [refreshCatalog])
+
+  useEffect(() => {
+    if (!isNativeAvailable()) return
+    const installPath = selectedPackState?.install?.installPath ?? selectedProfile?.installPath
+    if (!installPath || !selectedPack) return
+    void loadContentGraph(installPath)
+  }, [selectedPack, selectedPackState?.install?.installPath, selectedProfile?.installPath, loadContentGraph])
 
   const selectPack = (pack: OfficialModpack, openDrawer = false) => {
     setSelectedPackId(pack.id)
@@ -405,6 +422,8 @@ export function LibraryCatalog() {
         profileInstallPath={selectedProfile?.installPath}
         setOpen={setDrawerOpen}
         stage={stage}
+        contentGraph={contentGraph}
+        contentGraphLoading={contentGraphLoading}
       />
     </div>
   )
@@ -518,6 +537,8 @@ function PackDetailDrawer({
   profileInstallPath,
   setOpen,
   stage,
+  contentGraph,
+  contentGraphLoading,
 }: {
   busy: boolean
   onAction: (packState: NativePackState) => void
@@ -533,6 +554,8 @@ function PackDetailDrawer({
   profileInstallPath?: string
   setOpen: (open: boolean) => void
   stage: string
+  contentGraph: InstalledContentGraphSummary | null
+  contentGraphLoading: boolean
 }) {
   if (!pack) return null
   const action = packState?.primaryAction
@@ -657,6 +680,66 @@ function PackDetailDrawer({
                 <DetailFact label="Route" value={packState?.route.shortLabel ?? 'Checking'} />
                 <DetailFact label="Modules" value={pack.moduleCount === null ? 'Catalog defined' : `${pack.moduleCount}`} />
               </div>
+            </section>
+
+            <section className="space-y-3 rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-soft">Content Graph</p>
+                  <h3 className="mt-1 text-lg font-semibold text-white">Installed content graph evidence</h3>
+                </div>
+                <StatusChip
+                  compact
+                  label={contentGraphLoading ? 'Loading' : contentGraph?.available ? 'Available' : 'Not materialized'}
+                  status={contentGraphLoading ? 'warning' : contentGraph?.available ? 'healthy' : 'missing'}
+                />
+              </div>
+              {contentGraph?.available ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
+                    <MetricCard icon={Network} label="Modules" value={`${contentGraph.aggregate?.moduleCount ?? 0}`} />
+                    <MetricCard icon={Boxes} label="Nodes" value={`${contentGraph.aggregate?.nodeCount ?? 0}`} />
+                    <MetricCard icon={Sparkles} label="Edges" value={`${contentGraph.aggregate?.edgeCount ?? 0}`} />
+                    <MetricCard icon={Sparkles} label="Features" value={`${contentGraph.aggregate?.featureCount ?? 0}`} />
+                    <MetricCard icon={Network} label="Export Plans" value={`${contentGraph.aggregate?.exportPlanCount ?? 0}`} />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <DetailFact label="Evidence source" value={contentGraph.aggregate?.source === 'release-evidence' ? 'Release evidence' : 'Installed scan'} />
+                    <DetailFact label="Evidence schema" value={contentGraph.evidenceSchemaVersion ?? 'echo.content_graph.evidence.v1'} />
+                  </div>
+                  {(contentGraph.aggregate?.hytaleBlockerCount ?? 0) > 0 ? (
+                    <WarningCard
+                      tone="amber"
+                      title="Hytale export blockers"
+                      text={`${contentGraph.aggregate?.hytaleBlockerCount} blocker(s) across installed modules prevent a clean Hytale export plan. Hytale status is planning evidence, not runtime support.`}
+                    />
+                  ) : null}
+                  {(contentGraph.aggregate?.modules ?? []).length > 0 ? (
+                    <div className="space-y-2">
+                      {contentGraph.aggregate?.modules.slice(0, 5).map((moduleSummary) => (
+                        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/30 px-3 py-2" key={moduleSummary.moduleId}>
+                          <p className="text-sm font-medium text-white">{moduleSummary.moduleId}</p>
+                          <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+                            <span>{moduleSummary.nodeCount} nodes</span>
+                            <span>{moduleSummary.edgeCount} edges</span>
+                            <span>{moduleSummary.featureCount} features</span>
+                            <span>{moduleSummary.exportPlanCount ?? 0} plans</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(contentGraph.aggregate?.modules.length ?? 0) > 5 ? (
+                        <p className="text-xs text-slate-500">+{(contentGraph.aggregate?.modules.length ?? 0) - 5} more modules</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-sm leading-6 text-slate-300">
+                  {contentGraphLoading
+                    ? 'Reading installed content graph evidence...'
+                    : contentGraph?.message ?? 'Run install or repair for this pack to materialize .ECHO Content Graph evidence.'}
+                </p>
+              )}
             </section>
           </div>
         </Dialog.Content>
