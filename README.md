@@ -8,7 +8,7 @@ Official desktop launcher, updater, repair tool, profile manager, diagnostics ce
 
 ## What Lives Here
 
-React/Electron launcher source, pack export scripts, installer configuration, launcher update metadata support, mobile command-center experiments, and release policy docs.
+React/Electron launcher source, pack export scripts, installer configuration, launcher update metadata support, `.ECHO Content Graph` display for installed packs, mobile command-center experiments, and release policy docs.
 
 ## Release And Update Role
 
@@ -36,6 +36,17 @@ Run commands from the repository root.
 ## Artifact Ownership
 
 Launcher installers, AppImages, blockmaps, `latest.yml`, and `latest-linux.yml` belong to GitHub Releases in this repo. Pack/module artifacts do not belong here.
+
+## Installed Pack Content Graph
+
+When a native pack is installed or repaired, the launcher extracts the embedded `.echo/content-graph/` tree from each `.echo-addon` and writes an aggregate `.echo/content-graph.json` to the install root. The **Library** pack detail drawer then surfaces module count, node count, edge count, feature count, and any Hytale export blockers.
+
+Hytale data in the launcher is planning evidence only. `direct`, `adapter_required`, `fallback`, and `blocked` statuses describe export readiness; they do not mean the launcher has generated or installed Hytale runtime assets.
+
+The underlying IPC handlers are:
+
+- `content-graph:load` — reads a module path's `.echo/content-graph/` files.
+- `content-graph:load-installed` — reads the install aggregate and per-module graphs.
 
 ## Release Index E2E Fixture
 

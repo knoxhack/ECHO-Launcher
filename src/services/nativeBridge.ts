@@ -31,6 +31,7 @@ import type {
   NativeLogResult,
   NativeOperationStatus,
   NativePackState,
+  InstalledContentGraphSummary,
   NativeDiagnosticExportResult,
   NativePaths,
   NativeRepairResult,
@@ -73,6 +74,8 @@ type NativeCommandMap = {
     payload: { profileId?: string; pack?: OfficialPackId; installPath?: string; manifestPath?: string; manifest?: PackManifest }
     result: NativeVerifyResult
   }
+  'content-graph:load': { payload: { modulePath: string }; result: { graph: unknown; features: unknown; hytalePlan: unknown } }
+  'content-graph:load-installed': { payload: { installPath: string }; result: InstalledContentGraphSummary }
   'settings:get': { payload: undefined; result: NativeLauncherSettings }
   'settings:save': { payload: Partial<NativeLauncherSettings>; result: NativeLauncherSettings }
   'mobile-bridge:get-state': { payload: undefined; result: MobileBridgeState }
