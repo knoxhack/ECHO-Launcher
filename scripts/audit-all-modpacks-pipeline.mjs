@@ -262,6 +262,7 @@ function validateInstallManifest(issues, warnings, pack, entry, manifest, artifa
       issues.push('Install manifest has no moduleRequirements and none can be inferred from module files.')
     }
   }
+  validateModuleRequirementFileRows(issues, manifest)
   const minecraftVersion = minecraftVersionFromManifest(manifest)
   if (pack.lane !== 'standalone' && !minecraftVersion) issues.push('Minecraft Launcher pack manifest requires a Minecraft version.')
   if (pack.lane === 'native') {
@@ -294,6 +295,26 @@ function validateInstallManifest(issues, warnings, pack, entry, manifest, artifa
     if (!Number.isFinite(Number(file.size)) || Number(file.size) <= 0) issues.push(`${relative} has invalid size.`)
   }
   return { minecraftVersion }
+}
+
+function validateModuleRequirementFileRows(issues, manifest) {
+  const files = Array.isArray(manifest.files) ? manifest.files : []
+  for (const requirement of manifest.moduleRequirements ?? []) {
+    const moduleId = String(requirement?.moduleId ?? requirement?.id ?? '').trim().toLowerCase()
+    const expectedPath = String(requirement?.path ?? '').replace(/\\/g, '/')
+    if (!moduleId || !expectedPath) {
+      issues.push(`Module requirement ${moduleId || 'unknown'} is missing module id or path.`)
+      continue
+    }
+    const matches = files.filter((file) => {
+      const fileModuleId = String(file?.moduleId ?? file?.id ?? '').trim().toLowerCase()
+      const filePath = String(file?.path ?? '').replace(/\\/g, '/')
+      return fileModuleId === moduleId && filePath === expectedPath
+    })
+    if (matches.length !== 1) {
+      issues.push(`Module requirement ${moduleId} at ${expectedPath} must have exactly one matching files[] row; found ${matches.length}.`)
+    }
+  }
 }
 
 function inferModuleRequirementVersion(file, moduleId) {
