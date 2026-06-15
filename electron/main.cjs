@@ -2019,6 +2019,21 @@ async function manifestImport(payload = {}) {
   return { manifest, manifestPath: destination }
 }
 
+async function contentGraphLoad(payload = {}) {
+  if (!payload.modulePath) throw new Error('modulePath is required.')
+  const modulePath = normalizePath(payload.modulePath)
+  const graphPath = path.join(modulePath, '.echo', 'content-graph', 'content-graph.json')
+  const graph = await readJson(graphPath, null)
+  if (!graph) {
+    throw new Error(`Content graph not found at ${graphPath}`)
+  }
+  return {
+    graph,
+    features: await readJson(path.join(modulePath, '.echo', 'content-graph', 'features.json'), {}),
+    hytalePlan: await readJson(path.join(modulePath, '.echo', 'content-graph', 'export-plans', 'hytale.json'), {}),
+  }
+}
+
 function validatePackManifest(manifest, options = {}) {
   const normalizedPack = normalizeOfficialPackId(manifest?.pack)
   manifest = normalizeLegacyPackManifest(manifest, normalizedPack)
@@ -9810,6 +9825,7 @@ const handlers = {
   'manifest:load': manifestLoad,
   'manifest:import': manifestImport,
   'manifest:verify': verifyManifest,
+  'content-graph:load': contentGraphLoad,
   'settings:get': readSettings,
   'settings:save': writeSettings,
   'mobile-bridge:get-state': mobileBridgeGetState,

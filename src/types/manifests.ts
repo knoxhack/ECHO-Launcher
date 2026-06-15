@@ -169,3 +169,45 @@ export interface ReleaseManifest {
   sha256: string
   notes: string[]
 }
+
+export interface ContentGraphNode {
+  schemaVersion: string
+  kind: string
+  id: string
+  moduleId: string
+  addonId?: string
+  displayName?: string
+  tags?: string[]
+  source?: { repo: string; path: string; format: string }
+  aliases?: string[]
+  capabilities?: string[]
+  runtimeHints?: Record<string, Record<string, unknown>>
+  intent?: string
+  actions?: Array<{ id: string; label: string; requires?: string }>
+  fallbacks?: Record<string, string>
+  data?: Record<string, unknown>
+  provenance?: Record<string, unknown>
+}
+
+export interface ContentGraphEdge {
+  schemaVersion: string
+  id: string
+  kind: string
+  from: string
+  to: string
+  moduleId?: string
+  optional?: boolean
+  data?: Record<string, unknown>
+}
+
+export interface ContentGraphManifest {
+  schemaVersion: string
+  id: string
+  moduleId?: string
+  addonId?: string
+  generatedAt: string
+  modules: string[]
+  nodes: ContentGraphNode[]
+  edges: ContentGraphEdge[]
+  unresolvedReferences?: Array<{ id: string; context: string; required?: boolean }>
+}
