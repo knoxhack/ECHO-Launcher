@@ -70,6 +70,7 @@ const {
   canonicalArtifactRecords,
   artifactForPackTarget,
   dependencyClosure,
+  isInstallableModpackEntry,
   parseEchoProtocolUrl,
   resolveEchoProtocolEntry,
   releaseEntryFromCanonicalModpack,
@@ -3305,7 +3306,7 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
     const canonicalEntries = catalog.entries
       .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
       .filter(Boolean)
-    const nonApprovedModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && entry.validation !== 'approved')
+    const nonInstallableModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && !isInstallableModpackEntry(entry))
     const byKey = new Map()
     for (const entry of [...canonicalEntries, ...index.releases]) {
       byKey.set(`${normalizeOfficialPackId(entry.pack) ?? entry.pack}:${entry.channel}:${entry.version}`, entry)
@@ -3332,7 +3333,7 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
           reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
           assets: entry.assets.map((asset) => asset.name),
         })),
-        ...nonApprovedModpacks.map((entry) => ({
+        ...nonInstallableModpacks.map((entry) => ({
           tagName: entry.releaseTag,
           releaseName: entry.id,
           severity: entry.validation === 'blocked' || entry.validation === 'rejected' ? 'critical' : 'warning',
@@ -3358,7 +3359,7 @@ async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWa
     .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
     .filter(Boolean)
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
-  const nonApprovedModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && entry.validation !== 'approved')
+  const nonInstallableModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && !isInstallableModpackEntry(entry))
   return {
     cacheVersion: RELEASE_CACHE_VERSION,
     source: config,
@@ -3375,7 +3376,7 @@ async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWa
         reason: `Accepted Release Index ${entry.pack} ${entry.version}.`,
         assets: entry.assets.map((asset) => asset.name),
       })),
-      ...nonApprovedModpacks.map((entry) => ({
+      ...nonInstallableModpacks.map((entry) => ({
         tagName: entry.releaseTag,
         releaseName: entry.id,
         severity: entry.validation === 'blocked' || entry.validation === 'rejected' ? 'critical' : 'warning',
@@ -3393,14 +3394,19 @@ async function resolveEchoProtocolUrl(rawUrl) {
   if (!request) throw new Error(`Unsupported ECHO protocol URL: ${rawUrl}`)
   const catalog = await releaseIndexCatalog({ refresh: false })
   const entry = catalog.entries.find((item) => {
-    if (item.validation !== 'approved') return false
     if (request.action === 'install-addon') {
+      if (item.validation !== 'approved') return false
       return (item.kind === 'addon' || item.kind === 'module') && item.id.toLowerCase() === request.id
     }
-    return item.kind === 'modpack' && item.id.toLowerCase() === String(request.id).toLowerCase()
+    return isInstallableModpackEntry(item) && item.id.toLowerCase() === String(request.id).toLowerCase()
   })
-  if (!entry) throw new Error(`No approved Release Index entry found for ${request.action} ${request.id}.`)
-  const dependencies = dependencyClosure(catalog.entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
+  if (!entry) throw new Error(`No installable Release Index entry found for ${request.action} ${request.id}.`)
+  const dependencyRoots = entry.kind === 'modpack' && entry.validation !== 'approved'
+    ? (entry.dependencies ?? []).map((dependency) => dependency.id)
+    : [entry.id]
+  const dependencies = dependencyRoots.length > 0
+    ? dependencyClosure(catalog.entries, dependencyRoots).filter((dependency) => dependency.id !== entry.id)
+    : []
   if (request.action === 'install-addon') {
     const targetPack = request.pack ?? 'ashfall-native-edition'
     const artifact = artifactForPackTarget(entry, targetPack)

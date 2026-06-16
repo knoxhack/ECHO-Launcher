@@ -5,6 +5,7 @@ import {
   artifactChecksumStatus,
   artifactForPackTarget,
   dependencyClosure,
+  isInstallableModpackEntry,
   parseEchoProtocolUrl,
   isSafeRelativePath,
   isPlayableAshfallRelease,
@@ -100,6 +101,12 @@ const canonicalNativePack: CanonicalReleaseIndexEntry = {
   id: 'ashfall-native-edition',
   sourceRepo: 'knoxhack/ECHO-Ashfall-Native-Edition',
   artifacts: {
+    pack: {
+      file: 'ashfall-native-edition-0.1.0.zip',
+      sha256: '0'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Ashfall-Native-Edition/releases/download/v0.1.0/ashfall-native-edition-0.1.0.zip',
+      size: 100,
+    },
     manifest: {
       file: 'ashfall-native-edition-alpha-0.1.0.pack.json',
       sha256: '9'.repeat(64),
@@ -165,6 +172,26 @@ const canonicalOpenlandsWarningPack: CanonicalReleaseIndexEntry = {
   compatibility: ['native', 'openlands'],
   trust: 'source-linked',
   validation: 'warning',
+}
+
+const canonicalOpenlandsInstallableWarningPack: CanonicalReleaseIndexEntry = {
+  ...canonicalOpenlandsWarningPack,
+  releaseTag: 'v0.1.0-openlands-native-edition',
+  artifacts: {
+    pack: {
+      file: 'openlands-native-edition-0.1.0.zip',
+      sha256: '3'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0-openlands-native-edition/openlands-native-edition-0.1.0.zip',
+      size: 100,
+    },
+    manifest: {
+      file: 'openlands-native-edition-alpha-0.1.0.pack.json',
+      sha256: '4'.repeat(64),
+      url: 'https://github.com/knoxhack/ECHO-Openlands-Native-Edition/releases/download/v0.1.0-openlands-native-edition/openlands-native-edition-alpha-0.1.0.pack.json',
+      size: 10,
+    },
+  },
+  dependencies: [],
 }
 
 const canonicalLauncherProduct: CanonicalReleaseIndexEntry = {
@@ -403,9 +430,10 @@ describe('releaseValidation', () => {
     })
   })
 
-  it('maps approved Sky Relay entries and keeps warning Openlands entries non-playable', () => {
+  it('maps approved and checksum-complete warning modpacks into strict release entries', () => {
     const skyRelayEntry = releaseEntryFromCanonicalModpack(canonicalSkyRelayPack, '2026-06-12T00:00:00Z')
     const openlandsEntry = releaseEntryFromCanonicalModpack(canonicalOpenlandsWarningPack, '2026-06-12T00:00:00Z')
+    const installableOpenlandsEntry = releaseEntryFromCanonicalModpack(canonicalOpenlandsInstallableWarningPack, '2026-06-12T00:00:00Z')
 
     expect(skyRelayEntry).toMatchObject({
       pack: 'sky-relay-native-edition',
@@ -417,9 +445,21 @@ describe('releaseValidation', () => {
     })
     expect(skyRelayEntry?.assets.map((asset) => asset.name)).toContain('sky-relay-native-edition-0.1.0.zip')
     expect(openlandsEntry).toBeNull()
+    expect(isInstallableModpackEntry(canonicalOpenlandsWarningPack)).toBe(false)
+    expect(isInstallableModpackEntry(canonicalOpenlandsInstallableWarningPack)).toBe(true)
+    expect(installableOpenlandsEntry).toMatchObject({
+      pack: 'openlands-native-edition',
+      channel: 'alpha',
+      version: '0.1.0',
+      tagName: 'v0.1.0-openlands-native-edition',
+      manifestAssetName: 'openlands-native-edition-alpha-0.1.0.pack.json',
+      manifestSha256: '4'.repeat(64),
+      trust: 'verified-metadata',
+    })
+    expect(installableOpenlandsEntry?.releaseNotes).toEqual(['Resolved through the warning-gated Catalog entry openlands-native-edition.'])
   })
 
-  it('parses and resolves echo protocol links only through approved index entries', () => {
+  it('parses and resolves echo protocol links through approved dependencies and installable modpacks', () => {
     expect(parseEchoProtocolUrl('echo://install/addon/echoarmory?pack=ashfall-neoforge-edition')).toEqual({
       rawUrl: 'echo://install/addon/echoarmory?pack=ashfall-neoforge-edition',
       action: 'install-addon',
@@ -448,6 +488,9 @@ describe('releaseValidation', () => {
     expect(addonInstall.artifact.name).toBe('echoarmory-1.0.0.echo-addon')
     expect(addonInstall.dependencies?.map((entry) => entry.id)).toEqual(['echocore'])
     expect(resolveEchoProtocolEntry('echo://update/pack/ashfall-neoforge-edition', [canonicalPack])?.entry.id).toBe('ashfall-neoforge-edition')
+    expect(resolveEchoProtocolEntry('echo://update/pack/openlands-native-edition', [
+      canonicalOpenlandsInstallableWarningPack,
+    ])?.entry.id).toBe('openlands-native-edition')
     expect(parseEchoProtocolUrl('echo://update/pack/sky-relay-native-edition')).toMatchObject({
       action: 'update-pack',
       id: 'sky-relay-native-edition',

@@ -234,8 +234,8 @@ function validateArtifactMetadata(issues, entry, pack) {
     if (!/^[a-f0-9]{64}$/iu.test(artifact.sha256 ?? '')) issues.push(`${role} artifact ${artifact.file} has invalid SHA-256.`)
     if (!Number.isFinite(artifact.size) || artifact.size <= 0) issues.push(`${role} artifact ${artifact.file} has invalid size.`)
   }
-  if (entry.validation !== 'approved') issues.push(`Catalog modpack validation is ${entry.validation ?? 'missing'}, expected approved.`)
-  if (pack?.catalogStatus !== 'approved') issues.push(`Launcher channel catalogStatus is ${pack?.catalogStatus ?? 'missing'}, expected approved.`)
+  if (entry.validation !== 'approved' && entry.validation !== 'warning') issues.push(`Catalog modpack validation is ${entry.validation ?? 'missing'}, expected approved or warning with strict artifacts.`)
+  if (pack?.catalogStatus !== 'approved' && pack?.catalogStatus !== 'warning') issues.push(`Launcher channel catalogStatus is ${pack?.catalogStatus ?? 'missing'}, expected approved or warning with strict artifacts.`)
   return artifacts
 }
 

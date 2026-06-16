@@ -54,6 +54,10 @@ export declare function parseEchoProtocolUrl(rawUrl: string): EchoProtocolReques
 
 export declare function packManifestArtifact(entry: CanonicalReleaseIndexEntry): CanonicalArtifactRecord | null
 
+export declare function packArchiveArtifact(entry: CanonicalReleaseIndexEntry): CanonicalArtifactRecord | null
+
+export declare function isInstallableModpackEntry(entry: CanonicalReleaseIndexEntry): boolean
+
 export declare function resolveEchoProtocolEntry(rawUrl: string, entries: CanonicalReleaseIndexEntry[]): ResolvedEchoProtocolEntry | null
 
 export declare function releaseEntryFromCanonicalModpack(entry: CanonicalReleaseIndexEntry, fetchedAt: string): ReleaseEntry | null
