@@ -557,13 +557,24 @@ async function validateNativeLoaderLocalRuntime(manifest, installPath) {
     }
   }
 
-  const activationReport = await readJsonSafe(markerPath)
+  let activationReport = null
+  let activationReportError = ''
+  if (fssync.existsSync(markerPath)) {
+    try {
+      activationReport = JSON.parse(await fs.readFile(markerPath, 'utf8'))
+    } catch (error) {
+      activationReportError = error instanceof Error ? error.message : String(error)
+    }
+  }
   const activationErrors = Array.isArray(activationReport?.errors) ? activationReport.errors.filter(Boolean) : []
-  if (activationErrors.length > 0) {
+  const activationFailed = activationReport?.ok === false && activationErrors.length === 0
+  if (activationReportError || activationErrors.length > 0 || activationFailed) {
     issues.push({
       id: 'nativeModuleActivationFailed',
       title: 'Native module activation failed',
-      detail: String(activationErrors[0]),
+      detail: activationReportError
+        ? `Native Loader activation marker is invalid JSON: ${activationReportError}`
+        : String(activationErrors[0] ?? activationReport?.message ?? 'Native Loader activation marker reported failure.'),
       status: 'critical',
       action: 'repair',
     })

@@ -252,6 +252,7 @@ describe('native-loader handoff helpers', () => {
   it('rejects malformed Native Loader handoff payloads', async () => {
     const root = await tempRoot()
     const classpathEntry = path.join(root, '.echo', 'native-loader', 'runtime', 'echoadaptercore.jar')
+    const missingClasspathEntry = path.join(root, '.echo', 'native-loader', 'runtime', 'missing.jar')
     const handoffPath = path.join(root, '.echo', 'native-loader', 'module-activation-handoff.json')
     await mkdir(path.dirname(classpathEntry), { recursive: true })
     await mkdir(path.dirname(handoffPath), { recursive: true })
@@ -266,7 +267,7 @@ describe('native-loader handoff helpers', () => {
     await writeFile(handoffPath, JSON.stringify({
       schema: 'echo.native.launcher_handoff.v0',
       packId: 'wrong-pack',
-      classpathEntries: [classpathEntry],
+      classpathEntries: [classpathEntry, missingClasspathEntry],
       modules: [],
       nativeEntrypoints: {},
     }, null, 2))
@@ -274,8 +275,60 @@ describe('native-loader handoff helpers', () => {
 
     expect(errors.join('\n')).toContain('expected echo.native.launcher_handoff.v1')
     expect(errors.join('\n')).toContain("expected 'ashfall-native-edition'")
+    expect(errors.join('\n')).toContain(`module classpath entry is missing: ${missingClasspathEntry}`)
     expect(errors.join('\n')).toContain('missing module echoadaptercore')
     expect(errors.join('\n')).toContain('missing native entrypoint for echoadaptercore')
+  })
+
+  it('propagates handoff payload mismatches through launcher argument validation', async () => {
+    const root = await tempRoot()
+    const missingClasspathEntry = path.join(root, '.echo', 'native-loader', 'runtime', 'missing.jar')
+    const handoffPath = path.join(root, '.echo', 'native-loader', 'module-activation-handoff.json')
+    await mkdir(path.dirname(handoffPath), { recursive: true })
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: 'a'.repeat(64),
+      size: 10,
+    }])
+    await writeFile(handoffPath, JSON.stringify({
+      schema: 'echo.native.launcher_handoff.v0',
+      packId: 'wrong-pack',
+      classpathEntries: [missingClasspathEntry],
+      modules: [],
+      nativeEntrypoints: {},
+    }, null, 2))
+
+    const status = nativeLauncherArgumentStatus({
+      arguments: {
+        jvm: [
+          `-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`,
+          '-Decho.native.bootstrap.authorizedHandoff=startNativeClient',
+          `-Decho.native.gameDir=${root}`,
+          '-Decho.native.packId=ashfall-native-edition',
+          '-Decho.native.packVersion=0.1.0',
+          `-Decho.native.moduleClasspathFile=${handoffPath}`,
+        ],
+        game: [
+          '--echo-marker',
+          path.join(root, '.echo', 'native-loader', 'module-activation.json'),
+          '--echo-handoff-file',
+          handoffPath,
+          '--echo-pack-id',
+          'ashfall-native-edition',
+          '--echo-real-main',
+          'net.minecraft.client.main.Main',
+          '--echo-handoff',
+        ],
+      },
+    }, manifest)
+
+    expect(status.ok).toBe(false)
+    expect(status.errors.join('\n')).toContain('expected echo.native.launcher_handoff.v1')
+    expect(status.errors.join('\n')).toContain("expected 'ashfall-native-edition'")
+    expect(status.errors.join('\n')).toContain(`module classpath entry is missing: ${missingClasspathEntry}`)
+    expect(status.errors.join('\n')).toContain('missing module echoadaptercore')
+    expect(status.errors.join('\n')).toContain('missing native entrypoint for echoadaptercore')
   })
 
   it('rejects local Native Loader runtime state when addon hashes drift', async () => {
@@ -314,6 +367,67 @@ describe('native-loader handoff helpers', () => {
     const state = await validateNativeLoaderLocalRuntime(manifest, root)
     expect(state.ok).toBe(false)
     expect(state.issues.map((issue) => issue.id)).toEqual(expect.arrayContaining(['nativeAddonsMissing', 'nativeHandoffMissing']))
+  })
+
+  it('rejects local Native Loader runtime state when activation marker reports errors', async () => {
+    const root = await tempRoot()
+    const addonPath = path.join(root, 'addons', 'echoadaptercore-1.0.0.echo-addon')
+    const bytes = await writeAddon(addonPath, {
+      id: 'echoadaptercore',
+      nativeEntrypoint: 'com.echo.AdapterCoreNativeModule',
+      jarName: 'echoadaptercore-1.0.0-runtime.jar',
+    })
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: sha256(bytes),
+      size: bytes.length,
+    }])
+
+    const runtime = await materializeNativeLoaderAddons(manifest, root)
+    await writeFile(runtime.markerPath, JSON.stringify({
+      ok: false,
+      errors: ['Native entrypoint echoadaptercore failed to activate.'],
+    }, null, 2))
+    const state = await validateNativeLoaderLocalRuntime(manifest, root)
+
+    expect(state.ok).toBe(false)
+    expect(state.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'nativeModuleActivationFailed',
+        action: 'repair',
+        detail: 'Native entrypoint echoadaptercore failed to activate.',
+      }),
+    ]))
+  })
+
+  it('rejects corrupt Native Loader activation marker reports as repair blockers', async () => {
+    const root = await tempRoot()
+    const addonPath = path.join(root, 'addons', 'echoadaptercore-1.0.0.echo-addon')
+    const bytes = await writeAddon(addonPath, {
+      id: 'echoadaptercore',
+      nativeEntrypoint: 'com.echo.AdapterCoreNativeModule',
+      jarName: 'echoadaptercore-1.0.0-runtime.jar',
+    })
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: sha256(bytes),
+      size: bytes.length,
+    }])
+
+    const runtime = await materializeNativeLoaderAddons(manifest, root)
+    await writeFile(runtime.markerPath, '{not json')
+    const state = await validateNativeLoaderLocalRuntime(manifest, root)
+
+    expect(state.ok).toBe(false)
+    expect(state.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'nativeModuleActivationFailed',
+        action: 'repair',
+      }),
+    ]))
+    expect(state.issues.map((issue) => issue.detail).join('\n')).toContain('activation marker is invalid JSON')
   })
 })
 
