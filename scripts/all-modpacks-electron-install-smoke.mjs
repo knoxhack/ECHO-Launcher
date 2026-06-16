@@ -136,11 +136,36 @@ async function jsonCatalogUrls(root, directory) {
     .map((name) => pathToFileURL(path.join(dir, name)).href)
 }
 
+async function copyJsonDirectory(sourceRoot, targetRoot, directory) {
+  const sourceDir = path.join(sourceRoot, directory)
+  const targetDir = path.join(targetRoot, directory)
+  await fs.mkdir(targetDir, { recursive: true })
+  const entries = await fs.readdir(sourceDir).catch(() => [])
+  for (const name of entries.filter((entry) => entry.endsWith('.json')).sort()) {
+    await fs.copyFile(path.join(sourceDir, name), path.join(targetDir, name))
+  }
+}
+
 async function buildLocalReleaseIndexChannel(args, workRoot) {
   if (!args.releaseIndexRoot) return args.channelUrl
   const channelPath = path.join(workRoot, 'local-release-index-channel.json')
-  const releaseManifestPath = path.join(args.releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')
-  const repositoryCatalogPath = path.join(args.releaseIndexRoot, 'channels', 'alpha', 'repositories.json')
+  const localRoot = path.join(workRoot, 'local-release-index')
+  const localChannelsAlpha = path.join(localRoot, 'channels', 'alpha')
+  await fs.rm(localRoot, { recursive: true, force: true })
+  await fs.mkdir(localChannelsAlpha, { recursive: true })
+  await fs.copyFile(
+    path.join(args.releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json'),
+    path.join(localChannelsAlpha, 'release-manifest.json'),
+  )
+  await fs.copyFile(
+    path.join(args.releaseIndexRoot, 'channels', 'alpha', 'repositories.json'),
+    path.join(localChannelsAlpha, 'repositories.json'),
+  )
+  for (const directory of ['products', 'modpacks', 'modules', 'addons']) {
+    await copyJsonDirectory(args.releaseIndexRoot, localRoot, directory)
+  }
+  const releaseManifestPath = path.join(localChannelsAlpha, 'release-manifest.json')
+  const repositoryCatalogPath = path.join(localChannelsAlpha, 'repositories.json')
   await writeJson(channelPath, {
     schemaVersion: 1,
     channel: 'alpha',
@@ -148,13 +173,80 @@ async function buildLocalReleaseIndexChannel(args, workRoot) {
     releaseManifestUrl: pathToFileURL(releaseManifestPath).href,
     repositoryCatalogUrl: pathToFileURL(repositoryCatalogPath).href,
     catalogUrls: {
-      products: await jsonCatalogUrls(args.releaseIndexRoot, 'products'),
-      modpacks: await jsonCatalogUrls(args.releaseIndexRoot, 'modpacks'),
-      modules: await jsonCatalogUrls(args.releaseIndexRoot, 'modules'),
-      addons: await jsonCatalogUrls(args.releaseIndexRoot, 'addons'),
+      products: await jsonCatalogUrls(localRoot, 'products'),
+      modpacks: await jsonCatalogUrls(localRoot, 'modpacks'),
+      modules: await jsonCatalogUrls(localRoot, 'modules'),
+      addons: await jsonCatalogUrls(localRoot, 'addons'),
     },
   })
   return pathToFileURL(channelPath).href
+}
+
+function parseReleaseTagFromUrl(url) {
+  const match = String(url ?? '').match(/\/ECHO-Modules\/releases\/download\/([^/?#]+)/u)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function parseReleaseTagFromPageUrl(url) {
+  const match = String(url ?? '').match(/\/ECHO-Modules\/releases\/tag\/([^/?#]+)/u)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function releaseSourceStateForTag(releaseTag, primaryReleaseTag) {
+  if (!releaseTag) return 'unknown'
+  if (!primaryReleaseTag) return 'release-evidence'
+  return releaseTag === primaryReleaseTag ? 'full-release-evidence' : 'partial-hotfix-evidence'
+}
+
+async function loadModuleEvidenceSourceIndex(releaseIndexRoot) {
+  if (!releaseIndexRoot) {
+    return {
+      primaryReleaseTag: '',
+      releaseTagDistribution: [],
+      artifactSourcesByUrl: new Map(),
+    }
+  }
+  const manifest = await readJson(path.join(releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')).catch(() => ({}))
+  const modulesRepo = (manifest.repositories ?? []).find((repository) => repository.repoName === 'ECHO-Modules') ?? {}
+  const primaryReleaseTag = modulesRepo.releaseTag ?? modulesRepo.release?.tagName ?? parseReleaseTagFromPageUrl(modulesRepo.release?.htmlUrl)
+  const modulesDir = path.join(releaseIndexRoot, 'modules')
+  const moduleFiles = (await fs.readdir(modulesDir).catch(() => []))
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+  const releaseTagCounts = new Map()
+  const artifactSourcesByUrl = new Map()
+  for (const name of moduleFiles) {
+    const row = await readJson(path.join(modulesDir, name))
+    if (row?.sourceRepo !== 'knoxhack/ECHO-Modules') continue
+    const releaseTag = String(row.releaseTag ?? '')
+    if (releaseTag) releaseTagCounts.set(releaseTag, (releaseTagCounts.get(releaseTag) ?? 0) + 1)
+    const releaseSourceState = releaseSourceStateForTag(releaseTag, primaryReleaseTag)
+    for (const artifact of Object.values(row.artifacts ?? {})) {
+      if (!artifact?.url) continue
+      artifactSourcesByUrl.set(artifact.url, {
+        moduleId: row.id,
+        releaseTag,
+        releaseSourceState,
+        artifactRole: artifact.artifactRole ?? null,
+        file: artifact.file ?? null,
+      })
+    }
+  }
+  return {
+    primaryReleaseTag,
+    releaseTagDistribution: [...releaseTagCounts.entries()]
+      .sort((left, right) => {
+        if (left[0] === primaryReleaseTag) return -1
+        if (right[0] === primaryReleaseTag) return 1
+        return right[1] - left[1]
+      })
+      .map(([releaseTag, moduleRows]) => ({
+        releaseTag,
+        moduleRows,
+        releaseSourceState: releaseSourceStateForTag(releaseTag, primaryReleaseTag),
+      })),
+    artifactSourcesByUrl,
+  }
 }
 
 async function sha256File(filePath) {
@@ -392,7 +484,71 @@ async function waitForInstallReport(logsDir, afterMs, pack, timeoutMs) {
   })
 }
 
-async function hashInstalledManifest(installPath, selectedPack) {
+function classifyInstalledModuleSource(file, moduleEvidenceSourceIndex) {
+  const direct = moduleEvidenceSourceIndex.artifactSourcesByUrl.get(file.url)
+  if (direct) return direct
+  const releaseTag = parseReleaseTagFromUrl(file.url)
+  if (!releaseTag) return null
+  return {
+    moduleId: file.moduleId ?? null,
+    releaseTag,
+    releaseSourceState: releaseSourceStateForTag(releaseTag, moduleEvidenceSourceIndex.primaryReleaseTag),
+    artifactRole: null,
+    file: path.basename(String(file.url ?? '')),
+  }
+}
+
+function summarizeInstalledModuleSources(files) {
+  const counts = new Map()
+  for (const file of files) {
+    const key = `${file.releaseSourceState ?? 'unknown'}\u0000${file.releaseTag ?? 'unknown'}`
+    const current = counts.get(key) ?? {
+      releaseSourceState: file.releaseSourceState ?? 'unknown',
+      releaseTag: file.releaseTag ?? 'unknown',
+      fileCount: 0,
+      moduleIds: new Set(),
+    }
+    current.fileCount += 1
+    if (file.moduleId) current.moduleIds.add(file.moduleId)
+    counts.set(key, current)
+  }
+  return [...counts.values()].map((entry) => ({
+    releaseSourceState: entry.releaseSourceState,
+    releaseTag: entry.releaseTag,
+    fileCount: entry.fileCount,
+    moduleCount: entry.moduleIds.size,
+  }))
+}
+
+function assertInstalledModuleSourceEvidence(selectedPack, installed, moduleEvidenceSourceIndex) {
+  assert(installed.fileCount > 0, `${selectedPack} installed manifest did not include any required files.`)
+  assert(installed.moduleReleaseSources.length > 0, `${selectedPack} did not record module release-source evidence.`)
+  const summarizedFiles = installed.moduleReleaseSources.reduce((total, source) => total + Number(source.fileCount ?? 0), 0)
+  assert(summarizedFiles === installed.fileCount, `${selectedPack} module release-source counts cover ${summarizedFiles}/${installed.fileCount} installed files.`)
+
+  if (!moduleEvidenceSourceIndex.primaryReleaseTag) return
+
+  for (const file of installed.files) {
+    assert(file.releaseTag, `${selectedPack} installed file has no module release tag: ${file.path}`)
+    assert(file.releaseSourceState && file.releaseSourceState !== 'unknown', `${selectedPack} installed file has unknown release-source state: ${file.path}`)
+  }
+  for (const source of installed.moduleReleaseSources) {
+    const expectedState = releaseSourceStateForTag(source.releaseTag, moduleEvidenceSourceIndex.primaryReleaseTag)
+    assert(
+      source.releaseSourceState === expectedState,
+      `${selectedPack} module source ${source.releaseTag} was labeled ${source.releaseSourceState}, expected ${expectedState}.`,
+    )
+  }
+
+  if (selectedPack.startsWith('ashfall-')) {
+    const partialSources = installed.moduleReleaseSources.filter((source) => source.releaseSourceState === 'partial-hotfix-evidence')
+    const fullSources = installed.moduleReleaseSources.filter((source) => source.releaseSourceState === 'full-release-evidence')
+    assert(partialSources.length > 0, `${selectedPack} did not expose the Ashfall partial hotfix module source.`)
+    assert(fullSources.length === 0, `${selectedPack} partial hotfix files were mislabeled as full release evidence.`)
+  }
+}
+
+async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSourceIndex) {
   const manifestPath = path.join(installPath, '.echo', 'installed-manifest.json')
   assert(await exists(manifestPath), `Installed manifest missing: ${manifestPath}`)
   const manifest = await readJson(manifestPath)
@@ -424,6 +580,7 @@ async function hashInstalledManifest(installPath, selectedPack) {
     const actualSha256 = await sha256File(absolutePath)
     assert(actualSha256 === String(file.sha256).toLowerCase(), `Installed file corrupt: ${relativePath}`)
     const stat = await fs.stat(absolutePath)
+    const moduleSource = classifyInstalledModuleSource(file, moduleEvidenceSourceIndex)
     if (selectedPack.endsWith('-neoforge-edition') && relativePath.endsWith('.jar')) {
       const jar = new AdmZip(absolutePath)
       const tomlEntry = jar.getEntry('META-INF/neoforge.mods.toml')
@@ -434,8 +591,11 @@ async function hashInstalledManifest(installPath, selectedPack) {
     }
     files.push({
       path: relativePath,
+      moduleId: file.moduleId ?? moduleSource?.moduleId ?? null,
       sha256: actualSha256,
       size: stat.size,
+      releaseTag: moduleSource?.releaseTag ?? null,
+      releaseSourceState: moduleSource?.releaseSourceState ?? null,
     })
   }
   return {
@@ -443,6 +603,7 @@ async function hashInstalledManifest(installPath, selectedPack) {
     manifestPack: manifest.pack,
     manifestVersion: manifest.version,
     fileCount: files.length,
+    moduleReleaseSources: summarizeInstalledModuleSources(files),
     files,
   }
 }
@@ -733,6 +894,7 @@ async function run() {
   await fs.mkdir(userDataDir, { recursive: true })
   await fs.mkdir(playerContentRoot, { recursive: true })
   await fs.mkdir(minecraftRoot, { recursive: true })
+  const moduleEvidenceSourceIndex = await loadModuleEvidenceSourceIndex(args.releaseIndexRoot)
   await writeJson(settingsPath, {
     releaseIndex: {
       enabled: true,
@@ -793,6 +955,10 @@ async function run() {
     userDataDir,
     playerContentRoot,
     minecraftRoot,
+    moduleEvidenceSources: {
+      primaryReleaseTag: moduleEvidenceSourceIndex.primaryReleaseTag || null,
+      releaseTagDistribution: moduleEvidenceSourceIndex.releaseTagDistribution,
+    },
     expectedPackCount: selected.length,
     expectedPacks: selected.map((pack) => pack.profileId),
     packs: [],
@@ -868,7 +1034,8 @@ async function run() {
         const installData = await guardElectron(`${pack.name} install report`, waitForInstallReport(logsDir, installStartedAt, pack, args.packTimeoutMs))
         const installPath = installData.report.installPath
         assert(installPath, `${pack.name} install report did not include installPath.`)
-        const installed = await hashInstalledManifest(installPath, pack.profileId)
+        const installed = await hashInstalledManifest(installPath, pack.profileId, moduleEvidenceSourceIndex)
+        assertInstalledModuleSourceEvidence(pack.profileId, installed, moduleEvidenceSourceIndex)
         const repairFixture = args.repairHandoffFixture
           ? await corruptInstalledFileForHandoffRepair(installPath, pack, installed)
           : null
@@ -894,9 +1061,11 @@ async function run() {
           manifestPack: installed.manifestPack,
           manifestVersion: installed.manifestVersion,
           fileCount: installed.fileCount,
+          moduleReleaseSources: installed.moduleReleaseSources,
           repairFixture,
           launchRoute,
         })
+        console.log(`${pack.name}: installed ${installed.fileCount} file(s); module sources ${installed.moduleReleaseSources.map((source) => `${source.fileCount} ${source.releaseSourceState} from ${source.releaseTag}`).join(', ')}`)
         await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
       } catch (error) {
         const failure = {
