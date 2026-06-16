@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.1.12",
+  "version": "1.1.13",
   "description": "Official desktop launcher for ECHO experiences, PackOS catalogs, and public alpha builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",
@@ -45,6 +45,7 @@
     "test:e2e:galactic-survey-electron-ui": "node scripts/galactic-survey-electron-ui-smoke.mjs --clean",
     "test:e2e:all-modpacks-electron-install": "node scripts/all-modpacks-electron-install-smoke.mjs --clean",
     "test:e2e:all-native-modpacks-runtime-load": "node scripts/all-native-modpacks-runtime-load-smoke.mjs --clean",
+    "test:e2e:ashfall-lane-game-smoke": "node scripts/ashfall-lane-game-smoke.mjs --strict",
     "audit:all-modpacks:pipeline": "node scripts/audit-all-modpacks-pipeline.mjs",
     "preview": "vite preview"
   },

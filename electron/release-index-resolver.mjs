@@ -143,22 +143,42 @@ export function packManifestArtifact(entry) {
   return manifest
 }
 
+export function packArchiveArtifact(entry) {
+  const artifact = installableArtifactRecords(entry.artifacts)
+    .find((candidate) => candidate.role === 'pack' || /\.zip$/i.test(candidate.name))
+  if (!artifact?.url || !artifact.sha256) return null
+  return artifact
+}
+
+export function isInstallableModpackEntry(entry) {
+  if (entry?.kind !== 'modpack') return false
+  if (entry.validation !== 'approved' && entry.validation !== 'warning') return false
+  return Boolean(packManifestArtifact(entry) && packArchiveArtifact(entry))
+}
+
+function dependencyRootsForInstallableEntry(entry) {
+  if (entry?.kind === 'modpack' && entry.validation !== 'approved' && isInstallableModpackEntry(entry)) {
+    return (entry.dependencies ?? []).map((dependency) => dependency.id)
+  }
+  return [entry.id]
+}
+
 export function resolveEchoProtocolEntry(rawUrl, entries) {
   const request = parseEchoProtocolUrl(rawUrl)
   if (!request) return null
   const entry = entries.find((candidate) => {
-    if (candidate.validation !== 'approved') return false
     if (request.action === 'install-addon') {
+      if (candidate.validation !== 'approved') return false
       return (candidate.kind === 'addon' || candidate.kind === 'module') && candidate.id.toLowerCase() === request.id
     }
-    return candidate.kind === 'modpack' && candidate.id.toLowerCase() === request.id.toLowerCase()
+    return isInstallableModpackEntry(candidate) && candidate.id.toLowerCase() === request.id.toLowerCase()
   })
   if (!entry) return null
   if (request.action === 'install-addon') {
     const targetPack = request.pack ?? 'ashfall-native-edition'
     const packEntry = entries.find((candidate) =>
       candidate.kind === 'modpack' &&
-      candidate.validation === 'approved' &&
+      isInstallableModpackEntry(candidate) &&
       candidate.id.toLowerCase() === targetPack,
     )
     if (!packEntry) return null
@@ -169,7 +189,8 @@ export function resolveEchoProtocolEntry(rawUrl, entries) {
     if (!artifact?.url || !artifact.sha256) return null
     let dependencies
     try {
-      dependencies = dependencyClosure(entries, [entry.id, packEntry.id])
+      const roots = [...new Set([entry.id, ...dependencyRootsForInstallableEntry(packEntry)])]
+      dependencies = dependencyClosure(entries, roots)
         .filter((dependency) => dependency.id !== entry.id && dependency.id !== packEntry.id)
     } catch {
       return null
@@ -191,7 +212,10 @@ export function resolveEchoProtocolEntry(rawUrl, entries) {
   if (!manifest) return null
   let dependencies
   try {
-    dependencies = dependencyClosure(entries, [entry.id]).filter((dependency) => dependency.id !== entry.id)
+    const roots = dependencyRootsForInstallableEntry(entry)
+    dependencies = roots.length > 0
+      ? dependencyClosure(entries, roots).filter((dependency) => dependency.id !== entry.id)
+      : []
   } catch {
     return null
   }
@@ -209,7 +233,7 @@ export function resolveEchoProtocolEntry(rawUrl, entries) {
 }
 
 export function releaseEntryFromCanonicalModpack(entry, fetchedAt) {
-  if (entry.kind !== 'modpack' || entry.validation !== 'approved') return null
+  if (!isInstallableModpackEntry(entry)) return null
   const artifacts = installableArtifactRecords(entry.artifacts)
   const manifest = packManifestArtifact(entry)
   if (!manifest) return null
@@ -226,7 +250,7 @@ export function releaseEntryFromCanonicalModpack(entry, fetchedAt) {
     prerelease: entry.channel !== 'stable',
     publishedAt: entry.publishedAt ?? fetchedAt ?? new Date().toISOString(),
     releasePageUrl,
-    releaseNotes: [`Resolved through the approved Catalog entry ${entry.id}.`],
+    releaseNotes: [`Resolved through the ${entry.validation === 'warning' ? 'warning-gated' : 'approved'} Catalog entry ${entry.id}.`],
     manifestAssetName: manifest.name,
     manifestUrl: manifest.url,
     manifestSha256: manifest.sha256,

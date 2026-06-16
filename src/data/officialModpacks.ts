@@ -428,13 +428,15 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
   const rawCatalogStatus = String(pack.catalogStatus ?? (release ? 'approved' : '')).toLowerCase()
   const approvedWithoutRelease = rawCatalogStatus === 'approved' && !release
   const catalogStatus = approvedWithoutRelease ? 'catalog-mismatch' : rawCatalogStatus
-  const locked = ['unpublished', 'warning', 'rejected', 'blocked', 'catalog-mismatch'].includes(catalogStatus)
+  const locked = ['unpublished', 'rejected', 'blocked', 'catalog-mismatch'].includes(catalogStatus)
+    || (catalogStatus === 'warning' && !release)
   const status: OfficialModpackStatus = !locked && release ? 'playable' : 'preview'
   const runtimeMode = fallback?.runtimeMode ?? runtimeModeFor(normalizedPackId)
   const family = familyForPack(normalizedPackId, fallback)
   const diagnostic = approvedWithoutRelease
     ? 'Catalog entry is approved-looking, but no approved release is installable yet.'
     : pack.diagnostic ?? (locked ? fallback?.diagnostic : undefined)
+  const releasePhasePrefix = catalogStatus === 'warning' ? 'Warning' : 'Approved'
 
   return {
     id: normalizedPackId,
@@ -448,7 +450,7 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
     betaGate: status === 'playable' ? 'open' : fallback?.betaGate ?? 'metadata',
     catalogId: pack.id,
     status,
-    phase: locked ? phaseForCatalogStatus(catalogStatus, fallback) : release ? `Approved ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
+    phase: locked ? phaseForCatalogStatus(catalogStatus, fallback) : release ? `${releasePhasePrefix} ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
     version: release?.version ?? (locked ? fallback?.version ?? 'Catalog gated' : fallback?.version ?? 'Catalog pending'),
     minecraft: fallback?.minecraft ?? (normalizedPackId.endsWith('-standalone-edition') ? 'Standalone' : '26.1.2'),
     channel: release?.channel ?? pack.channel ?? fallback?.channel ?? 'alpha',

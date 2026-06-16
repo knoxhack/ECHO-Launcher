@@ -97,7 +97,62 @@ function ashfallWarningIndexFixture(): ReleaseIndex {
     cacheVersion: 4,
     source: { provider: 'release-index', channelUrl: 'https://example.test/channels/alpha/launcher-channel.json' },
     fetchedAt: '2026-06-12T12:00:00Z',
-    releases: [],
+    releases: [
+      {
+        id: 'release-index:ashfall-native-edition:0.1.0',
+        pack: 'ashfall-native-edition',
+        version: '0.1.0',
+        channel: 'alpha',
+        tagName: 'v0.1.0-ashfall-native-edition',
+        name: 'Ashfall Native Edition 0.1.0',
+        draft: false,
+        prerelease: true,
+        publishedAt: '2026-06-14T12:00:00Z',
+        releasePageUrl: 'https://github.com/knoxhack/ECHO-Ashfall-Native-Edition/releases/tag/v0.1.0-ashfall-native-edition',
+        releaseNotes: ['Resolved through the warning-gated Catalog entry ashfall-native-edition.'],
+        manifestAssetName: 'ashfall-native-edition-alpha-0.1.0.pack.json',
+        manifestUrl: 'https://example.test/ashfall-native-edition-alpha-0.1.0.pack.json',
+        manifestSha256: '5'.repeat(64),
+        trust: 'verified-metadata',
+        assets: [],
+      },
+      {
+        id: 'release-index:ashfall-neoforge-edition:0.1.0',
+        pack: 'ashfall-neoforge-edition',
+        version: '0.1.0',
+        channel: 'alpha',
+        tagName: 'v0.1.0-ashfall-neoforge-edition',
+        name: 'Ashfall NeoForge Edition 0.1.0',
+        draft: false,
+        prerelease: true,
+        publishedAt: '2026-06-14T12:00:00Z',
+        releasePageUrl: 'https://github.com/knoxhack/ECHO-Ashfall-NeoForge-Edition/releases/tag/v0.1.0-ashfall-neoforge-edition',
+        releaseNotes: ['Resolved through the warning-gated Catalog entry ashfall-neoforge-edition.'],
+        manifestAssetName: 'ashfall-neoforge-edition-alpha-0.1.0.pack.json',
+        manifestUrl: 'https://example.test/ashfall-neoforge-edition-alpha-0.1.0.pack.json',
+        manifestSha256: '6'.repeat(64),
+        trust: 'verified-metadata',
+        assets: [],
+      },
+      {
+        id: 'release-index:ashfall-standalone-edition:0.1.0',
+        pack: 'ashfall-standalone-edition',
+        version: '0.1.0',
+        channel: 'experimental',
+        tagName: 'v0.1.0-ashfall-standalone-edition',
+        name: 'Ashfall Standalone Edition 0.1.0',
+        draft: false,
+        prerelease: true,
+        publishedAt: '2026-06-14T12:00:00Z',
+        releasePageUrl: 'https://github.com/knoxhack/ECHO-Ashfall-Standalone-Edition/releases/tag/v0.1.0-ashfall-standalone-edition',
+        releaseNotes: ['Resolved through the warning-gated Catalog entry ashfall-standalone-edition.'],
+        manifestAssetName: 'ashfall-standalone-edition-experimental-0.1.0.pack.json',
+        manifestUrl: 'https://example.test/ashfall-standalone-edition-experimental-0.1.0.pack.json',
+        manifestSha256: '7'.repeat(64),
+        trust: 'verified-metadata',
+        assets: [],
+      },
+    ],
     packs: [
       {
         id: 'ashfall-native-edition',
@@ -107,7 +162,7 @@ function ashfallWarningIndexFixture(): ReleaseIndex {
         moduleArtifactFamily: 'echo-addon',
         catalogStatus: 'warning',
         catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-native.json',
-        diagnostic: 'Ashfall Native assets are checksum-exact, but Phase 7-10 release-readiness evidence is not green; launcher installs stay locked.',
+        diagnostic: 'Ashfall Native assets are checksum-exact, but Phase 7-10 release-readiness evidence is not green.',
       },
       {
         id: 'ashfall-neoforge-edition',
@@ -117,7 +172,7 @@ function ashfallWarningIndexFixture(): ReleaseIndex {
         moduleArtifactFamily: 'neoforge',
         catalogStatus: 'warning',
         catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-neoforge.json',
-        diagnostic: 'Ashfall NeoForge live manifest is missing moduleRequirements and release-readiness evidence is not green; launcher installs stay locked.',
+        diagnostic: 'Ashfall NeoForge release-readiness evidence is not green.',
       },
       {
         id: 'ashfall-standalone-edition',
@@ -127,10 +182,10 @@ function ashfallWarningIndexFixture(): ReleaseIndex {
         moduleArtifactFamily: 'standalone',
         catalogStatus: 'warning',
         catalogEntryUrl: 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/modpacks/ashfall-standalone.json',
-        diagnostic: 'Ashfall Standalone live manifest is missing moduleRequirements and release-readiness evidence is not green; launcher installs stay locked.',
+        diagnostic: 'Ashfall Standalone release-readiness evidence is not green.',
       },
     ],
-    acceptedCount: 0,
+    acceptedCount: 3,
     rejectedReleases: [],
     diagnostics: [],
     latestPlayableRelease: null,
@@ -227,16 +282,16 @@ describe('official modpack catalog', () => {
     })
   })
 
-  it('keeps warning-gated Ashfall channel packs locked with diagnostics', () => {
+  it('keeps warning-gated Ashfall channel packs installable when strict releases exist', () => {
     const cards = officialModpacksFromReleaseIndex(ashfallWarningIndexFixture())
 
     expect(cards).toHaveLength(3)
-    expect(cards.map((pack) => pack.status)).toEqual(['preview', 'preview', 'preview'])
-    expect(cards.map((pack) => pack.phase)).toEqual(['Warning Gated', 'Warning Gated', 'Warning Gated'])
+    expect(cards.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable'])
+    expect(cards.map((pack) => pack.phase)).toEqual(['Warning Alpha', 'Warning Alpha', 'Warning Experimental'])
     expect(cards.map((pack) => pack.version)).toEqual(['0.1.0', '0.1.0', '0.1.0'])
     expect(cards[0]?.detail).toMatch(/Phase 7-10/)
-    expect(cards[1]?.detail).toMatch(/missing moduleRequirements/)
-    expect(cards[2]?.detail).toMatch(/missing moduleRequirements/)
+    expect(cards[1]?.detail).toMatch(/release-readiness/)
+    expect(cards[2]?.detail).toMatch(/release-readiness/)
   })
 
   it('does not treat approved-looking channel rows as playable without an approved release', () => {
