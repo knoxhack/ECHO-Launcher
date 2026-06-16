@@ -429,16 +429,22 @@ function connectCdp(webSocketUrl) {
 }
 
 async function openPageCdp(debugPort, timeoutMs) {
-  const target = await waitForPageTarget(debugPort, timeoutMs)
-  const cdp = connectCdp(target.webSocketDebuggerUrl)
-  try {
-    await cdp.open()
-    await cdp.enableRuntimeDomains()
-    return cdp
-  } catch (error) {
-    cdp.close()
-    throw error
+  const deadline = Date.now() + timeoutMs
+  let lastError = null
+  while (Date.now() < deadline) {
+    const target = await waitForPageTarget(debugPort, Math.max(5_000, Math.min(timeoutMs, deadline - Date.now())))
+    const cdp = connectCdp(target.webSocketDebuggerUrl)
+    try {
+      await cdp.open()
+      await cdp.enableRuntimeDomains()
+      return cdp
+    } catch (error) {
+      lastError = error
+      cdp.close()
+      await sleep(500)
+    }
   }
+  throw lastError ?? new Error('Timed out opening CDP page connection.')
 }
 
 async function evaluate(cdp, expression, options = {}) {
@@ -951,6 +957,32 @@ async function killProcessTree(child) {
   child.kill('SIGTERM')
 }
 
+async function killWorkspaceLauncherProcesses(root) {
+  if (process.platform !== 'win32') return
+  await new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `
+$root = [System.IO.Path]::GetFullPath($env:ECHO_SMOKE_LAUNCHER_ROOT)
+Get-Process -Name ECHOLauncher -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) } |
+  Stop-Process -Force
+`,
+      ],
+      {
+        env: { ...process.env, ECHO_SMOKE_LAUNCHER_ROOT: path.resolve(root) },
+        windowsHide: true,
+      },
+      () => resolve(),
+    )
+  })
+}
+
 function trimLines(lines, max = 100) {
   return lines.slice(Math.max(0, lines.length - max))
 }
@@ -1181,6 +1213,7 @@ async function run() {
   } finally {
     if (cdp) cdp.close()
     if (!args.keepOpen) await killProcessTree(child)
+    if (!args.keepOpen) await killWorkspaceLauncherProcesses(process.cwd())
   }
 }
 
