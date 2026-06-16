@@ -85,9 +85,9 @@ export class LaunchService {
     return invokeNative('launch:prepare-handoff', { profileId, installPath, ramGb, refreshRelease, operationId, updatePolicy, runtimeMode, prepareOnly })
   }
 
-  async handoffToMinecraftLauncher(profileId: string, installPath?: string, ramGb?: number, runtimeMode?: MinecraftRuntimeModeId, prepareOnly = false): Promise<MinecraftLauncherHandoffResult> {
+  async handoffToMinecraftLauncher(profileId: string, installPath?: string, ramGb?: number, runtimeMode?: MinecraftRuntimeModeId, prepareOnly = false, autoRepair = true): Promise<MinecraftLauncherHandoffResult> {
     requireNative()
-    return invokeNative('minecraft-launcher:handoff', { profileId, installPath, ramGb, runtimeMode, prepareOnly })
+    return invokeNative('minecraft-launcher:handoff', { profileId, installPath, ramGb, runtimeMode, prepareOnly, autoRepair })
   }
 }
 

@@ -9,7 +9,7 @@ const path = require('node:path')
 const { Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { execFile, spawn } = require('node:child_process')
-const { pathToFileURL } = require('node:url')
+const { fileURLToPath, pathToFileURL } = require('node:url')
 const zlib = require('node:zlib')
 const AdmZip = require('adm-zip')
 const {
@@ -1325,9 +1325,66 @@ async function standaloneRuntimeGetState(payload = {}) {
   }
 }
 
+async function repairStandalonePackInstallBeforeLaunch(payload = {}, profileId = CANONICAL_PROFILE_ID) {
+  const selectedPack = normalizeOfficialPackId(profileId)
+  if (!selectedPack?.endsWith('-standalone-edition')) return null
+  const profiles = await profileList()
+  const profile = selectLauncherProfile(profiles, { ...payload, profileId: selectedPack }, true)
+  const installPath = normalizePath(payload.installPath ?? profile.installPath ?? defaultInstallPathForProfile(getPaths(), profile.id))
+  const installed = await readInstalledProfileManifest(installPath, profile.id)
+  if (!installed?.manifest) return null
+
+  let verification = await verifyManifest({
+    profileId: profile.id,
+    manifest: installed.manifest,
+    installPath: installed.installPath,
+  })
+  if (!verificationNeedsRepair(verification)) {
+    return { ok: true, repaired: false, profile, installPath: installed.installPath, verification }
+  }
+
+  const repair = await installRun({
+    profileId: profile.id,
+    installPath: installed.installPath,
+    manifest: installed.manifest,
+    channel: profile.channel ?? installed.manifest.channel ?? CANONICAL_CHANNEL,
+    version: installed.manifest.version ?? profile.version,
+    installRuntime: false,
+    operationId: payload.operationId,
+    operationKind: 'launch',
+  })
+  verification = repair.after ?? await verifyManifest({
+    profileId: profile.id,
+    manifest: installed.manifest,
+    installPath: installed.installPath,
+  })
+  return {
+    ok: !verificationNeedsRepair(verification),
+    repaired: true,
+    profile,
+    installPath: installed.installPath,
+    verification,
+    repair,
+  }
+}
+
 async function standaloneRuntimeLaunch(payload = {}) {
-  const state = await standaloneRuntimeGetState(payload)
   const profileId = String(payload?.profileId ?? CANONICAL_PROFILE_ID)
+  const packRepair = await repairStandalonePackInstallBeforeLaunch(payload, profileId)
+  if (packRepair && !packRepair.ok) {
+    const message = `Standalone pack files failed verification after repair. ${summarizeVerificationProblem(packRepair.verification)}`
+    await appendLauncherLog('WARN', `Standalone runtime launch blocked for ${profileId}: ${message}`)
+    return {
+      ok: false,
+      profileId,
+      executablePath: undefined,
+      message,
+      warnings: [message],
+      state: null,
+      packRepair,
+    }
+  }
+  const state = await standaloneRuntimeGetState(payload)
   if (!state.ok || !state.executablePath) {
     const message = state.warnings[0] ?? 'Standalone runtime verification failed.'
     await appendLauncherLog('WARN', `Standalone runtime launch blocked for ${profileId}: ${message}`)
@@ -1336,8 +1393,12 @@ async function standaloneRuntimeLaunch(payload = {}) {
       profileId,
       executablePath: state.executablePath,
       message,
-      warnings: state.warnings,
+      warnings: [
+        ...(packRepair?.repaired ? [`Repaired ${packRepair.repair?.installed?.length ?? 0} standalone pack file${(packRepair.repair?.installed?.length ?? 0) === 1 ? '' : 's'} before launch.`] : []),
+        ...state.warnings,
+      ],
       state,
+      packRepair,
     }
   }
   const args = ['--live', state.runtimeRoot]
@@ -1355,8 +1416,12 @@ async function standaloneRuntimeLaunch(payload = {}) {
     pid: child.pid,
     executablePath: state.executablePath,
     message: `Standalone runtime launched for ${profileId}.`,
-    warnings: state.warnings,
+    warnings: [
+      ...(packRepair?.repaired ? [`Repaired ${packRepair.repair?.installed?.length ?? 0} standalone pack file${(packRepair.repair?.installed?.length ?? 0) === 1 ? '' : 's'} before launch.`] : []),
+      ...state.warnings,
+    ],
     state,
+    packRepair,
   }
 }
 
@@ -3118,6 +3183,9 @@ function requestHeaders(extra = {}) {
 }
 
 function requestBuffer(url, options = {}, redirects = 0) {
+  if (process.env.ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS === '1' && /^file:\/\//i.test(String(url))) {
+    return fs.readFile(fileURLToPath(url))
+  }
   if (!url || !/^https?:\/\//i.test(url)) {
     return Promise.reject(new Error('A valid http(s) URL is required.'))
   }
@@ -3189,7 +3257,7 @@ function catalogUrlsFromLauncherChannel(channel) {
   }
   return [...new Set(urls.map((url) => String(url).trim()).filter((url) => {
     if (/^https:\/\/raw\.githubusercontent\.com\//.test(url)) return true
-    return allowLocalUrls && /^http:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url)
+    return allowLocalUrls && (/^http:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(url) || /^file:\/\//i.test(url))
   }))]
 }
 
@@ -6795,9 +6863,27 @@ async function minecraftLauncherHandoff(payload = {}) {
       ...versionPrep.warnings,
     ],
   }
-  const verification = payload.skipVerification === true ? { missing: [], corrupt: [] } : await verifyManifest({ manifest, installPath })
+  let verification = payload.skipVerification === true ? { missing: [], corrupt: [] } : await verifyManifest({ manifest, installPath })
   const warnings = statusWithVersion.warnings.filter((warning) => !/not been created yet|out of date/i.test(warning))
-  if (verification.missing.length || verification.corrupt.length) {
+  let repair = null
+  if (verificationNeedsRepair(verification) && payload.autoRepair !== false) {
+    await appendLauncherLog('WARN', `Minecraft Launcher ${runtimeLabel} handoff found ${verification.missing.length} missing and ${verification.corrupt.length} corrupt files for ${profile.name}; attempting verified repair before profile handoff.`)
+    repair = await installRun({
+      profileId: profile.id,
+      installPath,
+      manifest,
+      channel: profile.channel ?? manifest.channel ?? CANONICAL_CHANNEL,
+      version: manifest.version ?? profile.version,
+      installRuntime: false,
+      operationId: payload.operationId,
+      operationKind: 'handoff',
+    })
+    verification = repair.after ?? await verifyManifest({ manifest, installPath })
+    if (repair.ok && !verificationNeedsRepair(verification)) {
+      warnings.push(`Repaired ${repair.installed?.length ?? repair.repaired?.length ?? 0} ${profile.name} file${(repair.installed?.length ?? repair.repaired?.length ?? 0) === 1 ? '' : 's'} before Minecraft Launcher handoff.`)
+    }
+  }
+  if (verificationNeedsRepair(verification)) {
     return {
       ...statusWithVersion,
       ok: false,
@@ -6805,9 +6891,10 @@ async function minecraftLauncherHandoff(payload = {}) {
       openedLauncher: false,
       preparedVersionMetadata: versionPrep.created,
       updatedProfile: false,
+      repair,
       warnings: [
         ...warnings,
-        `${verification.missing.length} files are missing and ${verification.corrupt.length} files are corrupt. Run Install / Update or Repair before handoff.`,
+        `${verification.missing.length} files are missing and ${verification.corrupt.length} files are corrupt. ECHO attempted verified repair before handoff; run Diagnostics if this persists.`,
       ],
       message: versionPrep.created
         ? 'Minecraft Launcher metadata was prepared, but handoff is blocked by file verification.'
@@ -6917,6 +7004,7 @@ async function minecraftLauncherHandoff(payload = {}) {
       validatedGameDir: installPath,
       validatedModsCount: modsValidation.validatedModsCount,
       updatedProfile: true,
+      repair,
       prepareOnly: true,
       openSkipped: true,
       message: `${profile.name} ${runtimeLabel} profile is ready in Minecraft Launcher; opening the launcher was skipped by prepare-only mode.`,
@@ -6971,6 +7059,7 @@ async function minecraftLauncherHandoff(payload = {}) {
     validatedGameDir: installPath,
     validatedModsCount: modsValidation.validatedModsCount,
     updatedProfile: true,
+    repair,
     message: opened.opened
       ? `Minecraft Launcher opened with the ${profile.name} ${runtimeLabel} profile ready (${opened.launcherDependencySource ?? 'system'}). ${validatedRuntimeFiles} are available in the ECHO instance.${removedProfileMessage}`
       : `${profile.name} ${runtimeLabel} profile is ready in Minecraft Launcher. ${validatedRuntimeFiles} are available in the ECHO instance; finish/open the official launcher manually from ${opened.launcherExecutablePath ?? opened.launcherInstallPath ?? MINECRAFT_DOWNLOAD_URL}.${removedProfileMessage}`,
@@ -7000,6 +7089,14 @@ function summarizeInstallProblems(install) {
   const detail = firstFailure ?? firstSkipped ?? firstMissing ?? firstCorrupt
   if (!total) return 'Ashfall install did not pass verification.'
   return detail ? `${total} install item${total === 1 ? '' : 's'} need attention. ${detail}` : `${total} install item${total === 1 ? '' : 's'} need attention.`
+}
+
+function verificationNeedsRepair(verification) {
+  return Boolean((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0)
+}
+
+function summarizeVerificationProblem(verification) {
+  return `${verification.missing.length} files missing and ${verification.corrupt.length} corrupt.${verification.missing[0] ? ` First missing: ${verification.missing[0]}.` : ''}${verification.corrupt[0] ? ` First corrupt: ${verification.corrupt[0]}.` : ''}`
 }
 
 async function createVerifiedInstallReport(profile, manifest, installPath, verification) {
@@ -7173,7 +7270,7 @@ async function launchPrepareHandoff(payload = {}) {
       }
 
       const manifest = installed.manifest
-      const verification = await runPhase('check', `Check installed ${profile.name} files`, 12, () =>
+      let verification = await runPhase('check', `Check installed ${profile.name} files`, 12, () =>
         verifyManifest({
           profileId: profile.id,
           manifest,
@@ -7191,8 +7288,31 @@ async function launchPrepareHandoff(payload = {}) {
         }),
       )
 
-      if (verification.missing.length || verification.corrupt.length) {
-        const verificationProblem = `${verification.missing.length} files missing and ${verification.corrupt.length} corrupt.${verification.missing[0] ? ` First missing: ${verification.missing[0]}.` : ''}${verification.corrupt[0] ? ` First corrupt: ${verification.corrupt[0]}.` : ''}`
+      let repairedInstall = null
+      if (verificationNeedsRepair(verification)) {
+        repairedInstall = await runPhase('repair', `Repair ${profile.name} files`, 28, () =>
+          installRun({
+            profileId: profile.id,
+            installPath: installed.installPath,
+            manifest,
+            channel: profile.channel ?? manifest.channel ?? CANONICAL_CHANNEL,
+            version: manifest.version ?? profile.version,
+            installRuntime: false,
+            operationId,
+            operationKind: 'handoff',
+          }),
+        )
+        verification = repairedInstall.after ?? await runPhase('check', `Recheck repaired ${profile.name} files`, 84, () =>
+          verifyManifest({
+            profileId: profile.id,
+            manifest,
+            installPath: installed.installPath,
+          }),
+        )
+      }
+
+      if (verificationNeedsRepair(verification)) {
+        const verificationProblem = summarizeVerificationProblem(verification)
         updateOperationStatus(operationId, {
           kind: 'handoff',
           status: 'failed',
@@ -7209,7 +7329,7 @@ async function launchPrepareHandoff(payload = {}) {
           operationId,
           phases,
           release: null,
-          install: null,
+          install: repairedInstall,
           verification,
           handoff: null,
           packOs,
@@ -7226,11 +7346,11 @@ async function launchPrepareHandoff(payload = {}) {
         progress: 86,
         message: `${verification.valid.length} files verified locally. No ${profile.name} update was applied.`,
       })
-      const install = await createVerifiedInstallReport(profile, manifest, installed.installPath, verification)
+      const verifiedInstall = await createVerifiedInstallReport(profile, manifest, installed.installPath, verification)
       const handoff = await runPhase('handoff', `Prepare ${runtimeLabel} profile`, 95, () =>
         minecraftLauncherHandoff({
           profileId: profile.id,
-          installPath: install.installPath,
+          installPath: verifiedInstall.installPath,
           manifest,
           ramGb: payload.ramGb,
           skipVerification: true,
@@ -7256,8 +7376,9 @@ async function launchPrepareHandoff(payload = {}) {
         operationId,
         phases,
         release: null,
-        install,
+        install: repairedInstall ?? verifiedInstall,
         verification,
+        repair: repairedInstall,
         handoff,
         packOs,
         message: handoff.message,
@@ -7934,8 +8055,13 @@ async function installZipPackArtifact(payload, profile, manifest) {
 
   if (operation === 'install') {
     try {
-      const { zipPath, zip } = await getZipArtifact('Downloading Ashfall archive')
-      reportOperation({ phaseId: 'install', label: 'Reading Ashfall archive', progress: 52, message: archiveDownloadName })
+      const needsArchiveFallback = files.some((file) => !file.url)
+      reportOperation({
+        phaseId: 'install',
+        label: needsArchiveFallback ? 'Preparing Ashfall archive fallback' : 'Downloading Ashfall files',
+        progress: 52,
+        message: needsArchiveFallback ? archiveDownloadName : '',
+      })
       for (const [index, file] of files.entries()) {
         const destination = safeJoin(installPath, file.path)
         const current = beforeByPath.get(file.path)
@@ -7959,6 +8085,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
             await fs.copyFile(cachedArtifact, destination)
             extracted = { sha256: file.sha256, size: Number(file.size ?? (await fs.stat(destination)).size) }
           } else {
+            const { zipPath, zip } = await getZipArtifact('Downloading Ashfall archive fallback')
             extracted = await extractManifestFileFromZip(zipPath, zip, file, destination, {
               onProgress: ({ written }) => reportFileProgress(index, file, written, false),
             })

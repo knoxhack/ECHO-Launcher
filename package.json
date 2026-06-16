@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.1.13",
+  "version": "1.1.14",
   "description": "Official desktop launcher for ECHO experiences, PackOS catalogs, and public alpha builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",
@@ -42,6 +42,7 @@
     "test:e2e:sky-relay-launcher": "node scripts/sky-relay-launcher-lifecycle-smoke.mjs",
     "test:e2e:galactic-survey-launcher": "node scripts/galactic-survey-launcher-lifecycle-smoke.mjs",
     "test:e2e:official-pack-launcher": "node scripts/official-pack-launcher-lifecycle-smoke.mjs --clean",
+    "test:e2e:ashfall-handoff-repair": "node scripts/all-modpacks-electron-install-smoke.mjs --clean --release-index-root ../ECHO-Release-Index --repair-handoff-fixture --pack ashfall-native-edition --pack ashfall-neoforge-edition --out ../ECHO-Release-Index/release-readiness/ashfall-electron-install-handoff-smoke.json",
     "test:e2e:sky-relay-electron-ui": "node scripts/sky-relay-electron-ui-smoke.mjs --clean",
     "test:e2e:galactic-survey-electron-ui": "node scripts/galactic-survey-electron-ui-smoke.mjs --clean",
     "test:e2e:all-modpacks-electron-install": "node scripts/all-modpacks-electron-install-smoke.mjs --clean",

@@ -149,7 +149,7 @@ type NativeCommandMap = {
     result: MinecraftLauncherDependencyStatus & { opened: boolean; openedLauncher: boolean; method?: string; warnings?: string[] }
   }
   'minecraft-launcher:handoff': {
-    payload: { profileId: string; installPath?: string; ramGb?: number; runtimeMode?: MinecraftRuntimeModeId; prepareOnly?: boolean }
+    payload: { profileId: string; installPath?: string; ramGb?: number; runtimeMode?: MinecraftRuntimeModeId; prepareOnly?: boolean; autoRepair?: boolean }
     result: MinecraftLauncherHandoffResult
   }
   'world:scan': { payload: { worldPath: string; profileId?: string }; result: WorldCompatibilityReport }

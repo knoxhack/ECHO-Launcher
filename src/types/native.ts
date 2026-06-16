@@ -600,6 +600,7 @@ export interface NativeHandoffPreparationResult {
   release: ReleaseEntry | null
   install: NativeInstallResult | null
   verification?: NativeVerifyResult | null
+  repair?: NativeInstallResult | null
   handoff: MinecraftLauncherHandoffResult | null
   packOs?: PackOsLauncherState
   message: string

@@ -1,5 +1,7 @@
 import type { LogEntry } from './diagnostics'
 import type { HealthStatus } from './launcher'
+import type { NativeInstallResult, NativeVerifyResult } from './native'
+import type { LauncherProfile } from './profiles'
 
 export type LauncherRuntimeModeId = 'neoforge-minecraft' | 'native-loader-minecraft' | 'native-runtime'
 export type MinecraftRuntimeModeId = Extract<LauncherRuntimeModeId, 'neoforge-minecraft' | 'native-loader-minecraft'>
@@ -49,6 +51,17 @@ export interface StandaloneRuntimeState {
 export interface StandaloneRuntimeLaunchPayload {
   runtimeRoot?: string
   profileId?: string
+  installPath?: string
+  operationId?: string
+}
+
+export interface StandalonePackRepairBeforeLaunchResult {
+  ok: boolean
+  repaired: boolean
+  profile: LauncherProfile
+  installPath: string
+  verification: NativeVerifyResult
+  repair?: NativeInstallResult
 }
 
 export interface StandaloneRuntimeLaunchResult {
@@ -58,7 +71,8 @@ export interface StandaloneRuntimeLaunchResult {
   executablePath?: string
   message: string
   warnings: string[]
-  state: StandaloneRuntimeState
+  state: StandaloneRuntimeState | null
+  packRepair?: StandalonePackRepairBeforeLaunchResult | null
 }
 
 export interface StandaloneRuntimeModeCard {

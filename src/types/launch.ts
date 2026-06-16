@@ -1,4 +1,4 @@
-import type { NativeJavaRuntime, NativeVerifyResult, RuntimeVerificationResult } from './native'
+import type { NativeInstallResult, NativeJavaRuntime, NativeVerifyResult, RuntimeVerificationResult } from './native'
 import type { MinecraftRuntimeModeId } from './standaloneRuntime'
 
 export interface LaunchBlocker {
@@ -72,6 +72,7 @@ export interface MinecraftLauncherHandoffResult extends MinecraftLauncherProfile
   validatedGameDir?: string
   validatedModsCount?: number
   updatedProfile: boolean
+  repair?: NativeInstallResult | null
   message: string
 }
 

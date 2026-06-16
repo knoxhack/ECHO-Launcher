@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { execFile, spawn } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import AdmZip from 'adm-zip'
 
 const OFFICIAL_PACKS = [
@@ -45,7 +46,12 @@ Options:
                            Default: ../ECHO-Release-Index/release-readiness/all-modpacks-electron-install-smoke.json
   --channel-url <url>      Release Index launcher channel URL.
                            Default: ${PUBLIC_CHANNEL_URL}
+  --release-index-root <path>
+                           Build a temporary local file-url channel from this
+                           Release Index checkout instead of using --channel-url.
   --pack <profileId>       Limit to one pack. May be provided multiple times.
+  --repair-handoff-fixture Corrupt one installed pack file before Minecraft
+                           handoff and require auto-repair evidence.
   --pack-timeout-ms <ms>   Timeout per pack. Default: 900000
   --timeout-ms <ms>        Renderer startup timeout. Default: 120000
   --clean                  Remove work-root before launching.
@@ -60,10 +66,12 @@ function parseArgs(argv) {
     workRoot: path.join(os.tmpdir(), 'echo-all-modpacks-electron-install-smoke'),
     out: path.resolve(root, '..', 'ECHO-Release-Index', 'release-readiness', 'all-modpacks-electron-install-smoke.json'),
     channelUrl: PUBLIC_CHANNEL_URL,
+    releaseIndexRoot: null,
     timeoutMs: 120_000,
     packTimeoutMs: 900_000,
     clean: false,
     keepOpen: false,
+    repairHandoffFixture: false,
     help: false,
     packs: [],
   }
@@ -78,7 +86,9 @@ function parseArgs(argv) {
     else if (arg === '--work-root') args.workRoot = path.resolve(next())
     else if (arg === '--out') args.out = path.resolve(next())
     else if (arg === '--channel-url') args.channelUrl = next()
+    else if (arg === '--release-index-root') args.releaseIndexRoot = path.resolve(next())
     else if (arg === '--pack') args.packs.push(next())
+    else if (arg === '--repair-handoff-fixture') args.repairHandoffFixture = true
     else if (arg === '--timeout-ms') args.timeoutMs = Number(next())
     else if (arg === '--pack-timeout-ms') args.packTimeoutMs = Number(next())
     else if (arg === '--clean') args.clean = true
@@ -115,6 +125,36 @@ async function readJson(filePath) {
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+async function jsonCatalogUrls(root, directory) {
+  const dir = path.join(root, directory)
+  const entries = await fs.readdir(dir).catch(() => [])
+  return entries
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .map((name) => pathToFileURL(path.join(dir, name)).href)
+}
+
+async function buildLocalReleaseIndexChannel(args, workRoot) {
+  if (!args.releaseIndexRoot) return args.channelUrl
+  const channelPath = path.join(workRoot, 'local-release-index-channel.json')
+  const releaseManifestPath = path.join(args.releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')
+  const repositoryCatalogPath = path.join(args.releaseIndexRoot, 'channels', 'alpha', 'repositories.json')
+  await writeJson(channelPath, {
+    schemaVersion: 1,
+    channel: 'alpha',
+    generatedAt: new Date().toISOString(),
+    releaseManifestUrl: pathToFileURL(releaseManifestPath).href,
+    repositoryCatalogUrl: pathToFileURL(repositoryCatalogPath).href,
+    catalogUrls: {
+      products: await jsonCatalogUrls(args.releaseIndexRoot, 'products'),
+      modpacks: await jsonCatalogUrls(args.releaseIndexRoot, 'modpacks'),
+      modules: await jsonCatalogUrls(args.releaseIndexRoot, 'modules'),
+      addons: await jsonCatalogUrls(args.releaseIndexRoot, 'addons'),
+    },
+  })
+  return pathToFileURL(channelPath).href
 }
 
 async function sha256File(filePath) {
@@ -407,6 +447,29 @@ async function hashInstalledManifest(installPath, selectedPack) {
   }
 }
 
+async function corruptInstalledFileForHandoffRepair(installPath, pack, installed) {
+  if (runtimeModeForPack(pack) === 'native-runtime') {
+    return {
+      skipped: true,
+      reason: 'Standalone runtime launch repair is not exercised by Minecraft handoff preparation.',
+    }
+  }
+  const target = installed.files.find((file) => file.path && file.sha256)
+  assert(target, `${pack.name} has no installed file available for handoff repair corruption.`)
+  const absolutePath = path.join(installPath, target.path)
+  const beforeSha256 = await sha256File(absolutePath)
+  assert(beforeSha256 === target.sha256, `${pack.name} repair fixture target was not valid before corruption: ${target.path}`)
+  await fs.writeFile(absolutePath, Buffer.from(`corrupted by all-modpacks handoff repair fixture for ${pack.profileId}\n`, 'utf8'))
+  const corruptSha256 = await sha256File(absolutePath)
+  assert(corruptSha256 !== target.sha256, `${pack.name} repair fixture did not alter ${target.path}`)
+  return {
+    skipped: false,
+    path: target.path,
+    expectedSha256: target.sha256,
+    corruptSha256,
+  }
+}
+
 function runtimeModeForPack(pack) {
   if (pack.profileId.endsWith('-standalone-edition')) return 'native-runtime'
   if (pack.profileId.endsWith('-native-edition')) return 'native-loader-minecraft'
@@ -449,7 +512,7 @@ async function seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecr
   }
 }
 
-async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs) {
+async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs, options = {}) {
   const runtimeMode = runtimeModeForPack(pack)
   if (runtimeMode === 'native-runtime') {
     const state = await evaluate(cdp, `window.echoNative.invoke('standalone-runtime:get-state', { profileId: ${JSON.stringify(pack.profileId)} })`, { timeoutMs })
@@ -467,7 +530,7 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     }
   }
 
-  const staleNeoForgeMetadata = runtimeMode === 'neoforge-minecraft'
+  const staleNeoForgeMetadata = runtimeMode === 'neoforge-minecraft' && options.expectRepair !== true
     ? await seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecraftRoot, timeoutMs)
     : null
   const handoff = await evaluate(cdp, `window.echoNative.invoke('launch:prepare-handoff', {
@@ -496,6 +559,20 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
   assert(saved.profile?.lastVersionId === handoff.handoff.versionId, `${pack.name} prepared Minecraft profile version mismatch: ${saved.profile?.lastVersionId}`)
   const versionMetadata = await readJson(handoff.handoff.versionMetadataPath)
   assert(versionMetadata?.echoLauncher?.bootstrap !== true, `${pack.name} handoff left bootstrap-only version metadata in place.`)
+  if (options.expectRepair === true) {
+    const repairReport = handoff.repair ?? (
+      ((handoff.install?.before?.missing?.length ?? 0) > 0 || (handoff.install?.before?.corrupt?.length ?? 0) > 0)
+        ? handoff.install
+        : null
+    )
+    assert(repairReport?.ok === true, `${pack.name} handoff did not return a successful repair report.`)
+    assert((repairReport.before?.missing?.length ?? 0) > 0 || (repairReport.before?.corrupt?.length ?? 0) > 0, `${pack.name} handoff repair report did not capture the corrupt pre-repair state.`)
+    assert((repairReport.after?.missing?.length ?? 1) === 0, `${pack.name} handoff repair still has missing files.`)
+    assert((repairReport.after?.corrupt?.length ?? 1) === 0, `${pack.name} handoff repair still has corrupt files.`)
+    assert((repairReport.installed?.length ?? 0) > 0 || (repairReport.updated?.length ?? 0) > 0 || (repairReport.verified?.length ?? 0) > 0, `${pack.name} handoff repair report did not record install/update/verify activity.`)
+    assert((handoff.verification?.missing?.length ?? 1) === 0, `${pack.name} final handoff verification still has missing files.`)
+    assert((handoff.verification?.corrupt?.length ?? 1) === 0, `${pack.name} final handoff verification still has corrupt files.`)
+  }
   const nativeRuntime = runtimeMode === 'native-loader-minecraft'
     ? await verifyNativeLoaderRuntimeHandoff(pack, installPath, versionMetadata, handoff.handoff.minecraftRoot ?? minecraftRoot)
     : null
@@ -512,6 +589,14 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     launcherProfilesPath: handoff.handoff.launcherProfilesPath,
     gameDir: handoff.handoff.gameDir,
     validatedModsCount: handoff.handoff.validatedModsCount,
+    repair: options.expectRepair === true
+      ? {
+          ok: (handoff.repair ?? handoff.install)?.ok === true,
+          repaired: ((handoff.repair ?? handoff.install)?.installed?.length ?? 0) + ((handoff.repair ?? handoff.install)?.updated?.length ?? 0),
+          verifiedAfterRepair: (handoff.repair ?? handoff.install)?.after?.valid?.length ?? null,
+          reportPath: (handoff.repair ?? handoff.install)?.reportPath ?? null,
+        }
+      : null,
     nativeRuntime,
     staleNeoForgeMetadata,
     warnings: handoff.handoff.warnings ?? [],
@@ -638,6 +723,7 @@ async function run() {
 
   if (args.clean) await fs.rm(args.workRoot, { recursive: true, force: true })
   await fs.mkdir(args.workRoot, { recursive: true })
+  const channelUrl = await buildLocalReleaseIndexChannel(args, args.workRoot)
 
   const userDataDir = path.join(args.workRoot, 'user-data')
   const playerContentRoot = path.join(args.workRoot, 'player-content')
@@ -650,7 +736,7 @@ async function run() {
   await writeJson(settingsPath, {
     releaseIndex: {
       enabled: true,
-      channelUrl: args.channelUrl,
+      channelUrl,
     },
     mobileBridge: {
       enabled: false,
@@ -673,6 +759,7 @@ async function run() {
       ECHO_LAUNCHER_PLAYER_CONTENT_ROOT: playerContentRoot,
       ECHO_LAUNCHER_MINECRAFT_ROOT: minecraftRoot,
       ECHO_LAUNCHER_SMOKE: 'all-modpacks-electron-install',
+      ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: false,
@@ -699,7 +786,8 @@ async function run() {
     ok: false,
     phase: 'created',
     generatedAt: new Date().toISOString(),
-    channelUrl: args.channelUrl,
+    channelUrl,
+    releaseIndexRoot: args.releaseIndexRoot,
     executable: args.exe,
     workRoot: args.workRoot,
     userDataDir,
@@ -781,7 +869,20 @@ async function run() {
         const installPath = installData.report.installPath
         assert(installPath, `${pack.name} install report did not include installPath.`)
         const installed = await hashInstalledManifest(installPath, pack.profileId)
-        const launchRoute = await guardElectron(`${pack.name} launch route`, verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs))
+        const repairFixture = args.repairHandoffFixture
+          ? await corruptInstalledFileForHandoffRepair(installPath, pack, installed)
+          : null
+        const launchRoute = await guardElectron(
+          `${pack.name} launch route`,
+          verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs, {
+            expectRepair: Boolean(repairFixture && repairFixture.skipped !== true),
+          }),
+        )
+        if (repairFixture && repairFixture.skipped !== true) {
+          const repairedSha256 = await sha256File(path.join(installPath, repairFixture.path))
+          assert(repairedSha256 === repairFixture.expectedSha256, `${pack.name} handoff repair did not restore ${repairFixture.path}`)
+          repairFixture.repairedSha256 = repairedSha256
+        }
         const durationMs = Date.now() - startedAt
         Object.assign(packResult, {
           ok: true,
@@ -793,6 +894,7 @@ async function run() {
           manifestPack: installed.manifestPack,
           manifestVersion: installed.manifestVersion,
           fileCount: installed.fileCount,
+          repairFixture,
           launchRoute,
         })
         await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
