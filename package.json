@@ -41,6 +41,7 @@
     "test:e2e:release-index": "node scripts/release-index-local-e2e.mjs",
     "test:e2e:sky-relay-launcher": "node scripts/sky-relay-launcher-lifecycle-smoke.mjs",
     "test:e2e:galactic-survey-launcher": "node scripts/galactic-survey-launcher-lifecycle-smoke.mjs",
+    "test:e2e:official-pack-launcher": "node scripts/official-pack-launcher-lifecycle-smoke.mjs --clean",
     "test:e2e:sky-relay-electron-ui": "node scripts/sky-relay-electron-ui-smoke.mjs --clean",
     "test:e2e:galactic-survey-electron-ui": "node scripts/galactic-survey-electron-ui-smoke.mjs --clean",
     "test:e2e:all-modpacks-electron-install": "node scripts/all-modpacks-electron-install-smoke.mjs --clean",
