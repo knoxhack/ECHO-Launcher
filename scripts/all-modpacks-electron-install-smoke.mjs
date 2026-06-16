@@ -205,25 +205,12 @@ function releaseSourceStateForTag(releaseTag, primaryReleaseTag) {
   return releaseTag === primaryReleaseTag ? 'full-release-evidence' : 'partial-hotfix-evidence'
 }
 
-async function loadModuleEvidenceSourceIndex(releaseIndexRoot) {
-  if (!releaseIndexRoot) {
-    return {
-      primaryReleaseTag: '',
-      releaseTagDistribution: [],
-      artifactSourcesByUrl: new Map(),
-    }
-  }
-  const manifest = await readJson(path.join(releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')).catch(() => ({}))
+function moduleEvidenceSourceIndexFromRows(manifest, moduleRows) {
   const modulesRepo = (manifest.repositories ?? []).find((repository) => repository.repoName === 'ECHO-Modules') ?? {}
   const primaryReleaseTag = modulesRepo.releaseTag ?? modulesRepo.release?.tagName ?? parseReleaseTagFromPageUrl(modulesRepo.release?.htmlUrl)
-  const modulesDir = path.join(releaseIndexRoot, 'modules')
-  const moduleFiles = (await fs.readdir(modulesDir).catch(() => []))
-    .filter((name) => name.endsWith('.json'))
-    .sort()
   const releaseTagCounts = new Map()
   const artifactSourcesByUrl = new Map()
-  for (const name of moduleFiles) {
-    const row = await readJson(path.join(modulesDir, name))
+  for (const row of moduleRows) {
     if (row?.sourceRepo !== 'knoxhack/ECHO-Modules') continue
     const releaseTag = String(row.releaseTag ?? '')
     if (releaseTag) releaseTagCounts.set(releaseTag, (releaseTagCounts.get(releaseTag) ?? 0) + 1)
@@ -253,6 +240,37 @@ async function loadModuleEvidenceSourceIndex(releaseIndexRoot) {
         releaseSourceState: releaseSourceStateForTag(releaseTag, primaryReleaseTag),
       })),
     artifactSourcesByUrl,
+  }
+}
+
+async function loadLocalModuleEvidenceSourceIndex(releaseIndexRoot) {
+  const manifest = await readJson(path.join(releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')).catch(() => ({}))
+  const modulesDir = path.join(releaseIndexRoot, 'modules')
+  const moduleFiles = (await fs.readdir(modulesDir).catch(() => []))
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+  const moduleRows = []
+  for (const name of moduleFiles) moduleRows.push(await readJson(path.join(modulesDir, name)))
+  return moduleEvidenceSourceIndexFromRows(manifest, moduleRows)
+}
+
+async function loadPublicModuleEvidenceSourceIndex(channelUrl) {
+  const channel = await fetchJson(channelUrl)
+  const manifest = channel.releaseManifestUrl
+    ? await fetchJson(channel.releaseManifestUrl)
+    : {}
+  const moduleRows = []
+  for (const url of channel.catalogUrls?.modules ?? []) moduleRows.push(await fetchJson(url))
+  return moduleEvidenceSourceIndexFromRows(manifest, moduleRows)
+}
+
+async function loadModuleEvidenceSourceIndex({ releaseIndexRoot, channelUrl }) {
+  if (releaseIndexRoot) return loadLocalModuleEvidenceSourceIndex(releaseIndexRoot)
+  if (channelUrl && /^https?:\/\//iu.test(channelUrl)) return loadPublicModuleEvidenceSourceIndex(channelUrl)
+  return {
+    primaryReleaseTag: '',
+    releaseTagDistribution: [],
+    artifactSourcesByUrl: new Map(),
   }
 }
 
@@ -635,8 +653,15 @@ function assertInstalledModuleSourceEvidence(selectedPack, installed, moduleEvid
   if (selectedPack.startsWith('ashfall-')) {
     const partialSources = installed.moduleReleaseSources.filter((source) => source.releaseSourceState === 'partial-hotfix-evidence')
     const fullSources = installed.moduleReleaseSources.filter((source) => source.releaseSourceState === 'full-release-evidence')
-    assert(partialSources.length > 0, `${selectedPack} did not expose the Ashfall partial hotfix module source.`)
-    assert(fullSources.length === 0, `${selectedPack} partial hotfix files were mislabeled as full release evidence.`)
+    const partialHotfixReleaseExists = moduleEvidenceSourceIndex.releaseTagDistribution
+      .some((source) => source.releaseSourceState === 'partial-hotfix-evidence')
+    if (partialHotfixReleaseExists) {
+      assert(partialSources.length > 0, `${selectedPack} did not expose the Ashfall partial hotfix module source.`)
+      assert(fullSources.length === 0, `${selectedPack} partial hotfix files were mislabeled as full release evidence.`)
+    } else {
+      assert(fullSources.length > 0, `${selectedPack} did not expose the canonical full release module source.`)
+      assert(partialSources.length === 0, `${selectedPack} unexpectedly exposed a partial hotfix module source.`)
+    }
   }
 }
 
@@ -1012,7 +1037,10 @@ async function run() {
   await fs.mkdir(userDataDir, { recursive: true })
   await fs.mkdir(playerContentRoot, { recursive: true })
   await fs.mkdir(minecraftRoot, { recursive: true })
-  const moduleEvidenceSourceIndex = await loadModuleEvidenceSourceIndex(args.releaseIndexRoot)
+  const moduleEvidenceSourceIndex = await loadModuleEvidenceSourceIndex({
+    releaseIndexRoot: args.releaseIndexRoot,
+    channelUrl,
+  })
   await writeJson(settingsPath, {
     releaseIndex: {
       enabled: true,
