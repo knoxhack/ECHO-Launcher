@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url)
 const {
   ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS,
   materializeNativeLoaderAddons,
+  nativeHandoffPayloadErrors,
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
   nativeLauncherArgumentStatus,
@@ -246,6 +247,59 @@ describe('native-loader handoff helpers', () => {
     const after = await validateNativeLoaderLocalRuntime(manifest, root)
     expect(after.ok).toBe(true)
     expect(after.missingAddons).toEqual([])
+  })
+
+  it('rejects malformed Native Loader handoff payloads', async () => {
+    const root = await tempRoot()
+    const classpathEntry = path.join(root, '.echo', 'native-loader', 'runtime', 'echoadaptercore.jar')
+    const handoffPath = path.join(root, '.echo', 'native-loader', 'module-activation-handoff.json')
+    await mkdir(path.dirname(classpathEntry), { recursive: true })
+    await mkdir(path.dirname(handoffPath), { recursive: true })
+    await writeFile(classpathEntry, 'runtime jar bytes')
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: 'a'.repeat(64),
+      size: 10,
+    }])
+
+    await writeFile(handoffPath, JSON.stringify({
+      schema: 'echo.native.launcher_handoff.v0',
+      packId: 'wrong-pack',
+      classpathEntries: [classpathEntry],
+      modules: [],
+      nativeEntrypoints: {},
+    }, null, 2))
+    const errors = nativeHandoffPayloadErrors(handoffPath, manifest)
+
+    expect(errors.join('\n')).toContain('expected echo.native.launcher_handoff.v1')
+    expect(errors.join('\n')).toContain("expected 'ashfall-native-edition'")
+    expect(errors.join('\n')).toContain('missing module echoadaptercore')
+    expect(errors.join('\n')).toContain('missing native entrypoint for echoadaptercore')
+  })
+
+  it('rejects local Native Loader runtime state when addon hashes drift', async () => {
+    const root = await tempRoot()
+    const addonPath = path.join(root, 'addons', 'echoadaptercore-1.0.0.echo-addon')
+    const bytes = await writeAddon(addonPath, {
+      id: 'echoadaptercore',
+      nativeEntrypoint: 'com.echo.AdapterCoreNativeModule',
+      jarName: 'echoadaptercore-1.0.0-runtime.jar',
+    })
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: sha256(bytes),
+      size: bytes.length,
+    }])
+
+    await materializeNativeLoaderAddons(manifest, root)
+    await writeFile(addonPath, 'corrupted addon bytes')
+    const state = await validateNativeLoaderLocalRuntime(manifest, root)
+
+    expect(state.ok).toBe(false)
+    expect(state.issues.map((issue) => issue.id)).toContain('nativeAddonHashMismatch')
+    expect(state.corruptAddons[0].path).toBe('addons/echoadaptercore-1.0.0.echo-addon')
   })
 
   it('rejects local Native Loader runtime state when required addons are missing', async () => {
