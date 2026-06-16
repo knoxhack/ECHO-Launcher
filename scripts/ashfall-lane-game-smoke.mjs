@@ -115,6 +115,10 @@ Evidence file format:
     "creativeItemSelectable": true,
     "creativeItemPlayable": true,
     "saveReloadVerified": true
+  },
+  "proofs": {
+    "hudVisible": ["screenshots/hud-visible.png"],
+    "saveReloadVerified": ["logs/client-playthrough.log", "saves/reloaded-world.zip"]
   }
 }
 `
@@ -237,6 +241,94 @@ function claimValue(evidence, key) {
   return evidence[key] === true
 }
 
+function objectValue(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+}
+
+function collectProofPathValues(value, found = []) {
+  if (!value) return found
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed) found.push(trimmed)
+    return found
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectProofPathValues(item, found)
+    return found
+  }
+  if (typeof value !== 'object') return found
+
+  for (const key of [
+    'path',
+    'file',
+    'notes',
+    'screenshot',
+    'log',
+    'launcherLog',
+    'clientLog',
+    'saveSnapshot',
+    'artifact',
+  ]) {
+    collectProofPathValues(value[key], found)
+  }
+  for (const key of [
+    'paths',
+    'files',
+    'supportingFiles',
+    'screenshots',
+    'logs',
+    'saveSnapshots',
+    'artifacts',
+  ]) {
+    collectProofPathValues(value[key], found)
+  }
+  return found
+}
+
+function claimProofReferences(evidence, key) {
+  if (!evidence || typeof evidence !== 'object') return []
+  return [
+    ...collectProofPathValues(objectValue(evidence.proofs)?.[key]),
+    ...collectProofPathValues(objectValue(evidence.claimEvidence)?.[key]),
+    ...collectProofPathValues(objectValue(evidence.evidence)?.[key]),
+  ]
+}
+
+function resolveProofPath(reference, evidencePath, instancePath) {
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(reference)) return ''
+  if (path.isAbsolute(reference)) return path.normalize(reference)
+  const baseDir = evidencePath ? path.dirname(evidencePath) : instancePath
+  return path.resolve(baseDir, reference)
+}
+
+async function verifyClaimProofFiles(evidenceRecord, instancePath, key) {
+  const references = [...new Set(claimProofReferences(evidenceRecord.evidence, key))]
+  const files = []
+  const missing = []
+  for (const reference of references) {
+    const absolutePath = resolveProofPath(reference, evidenceRecord.path, instancePath)
+    if (!absolutePath) {
+      missing.push({ reference, reason: 'URL references are not accepted as local gameplay proof.' })
+      continue
+    }
+    const stat = await fs.stat(absolutePath).catch(() => null)
+    if (!stat?.isFile()) {
+      missing.push({ reference, path: absolutePath, reason: 'Proof file does not exist.' })
+      continue
+    }
+    if (stat.size <= 0) {
+      missing.push({ reference, path: absolutePath, reason: 'Proof file is empty.' })
+      continue
+    }
+    files.push({ reference, path: absolutePath, size: stat.size, mtime: stat.mtime.toISOString() })
+  }
+  return {
+    ok: files.length > 0 && missing.length === 0,
+    files,
+    missing,
+  }
+}
+
 function compactCrashSummary(text) {
   const lines = text.split(/\r?\n/u)
   const summary = []
@@ -314,8 +406,19 @@ async function auditLane(args, lane) {
     worldCreatedOrLoaded: hasWorldLoadedSignal(logText) || hasWorldLoadedSignal(crashText),
   }
   const claims = {}
+  const claimProofs = {}
   for (const proof of lane.runtimeProofs) {
-    claims[proof] = claimValue(evidence, proof) || derivedClaims[proof] === true
+    const derived = derivedClaims[proof] === true
+    const evidenceClaim = claimValue(evidence, proof)
+    let evidenceProof = null
+    if (evidenceClaim) {
+      evidenceProof = await verifyClaimProofFiles(evidenceRecord, instancePath, proof)
+      claimProofs[proof] = evidenceProof
+      if (!evidenceProof.ok) {
+        blockers.push(`Gameplay proof ${proof} is claimed true but does not reference at least one non-empty local proof file.`)
+      }
+    }
+    claims[proof] = derived || (evidenceClaim && evidenceProof?.ok === true)
     if (!claims[proof]) blockers.push(`Missing gameplay proof: ${proof}`)
   }
 
@@ -357,6 +460,7 @@ async function auditLane(args, lane) {
       schemaVersion: evidence?.schemaVersion ?? null,
       capturedAt: evidence?.capturedAt ?? null,
     },
+    claimProofs,
     claims,
     blockers,
     warnings,
