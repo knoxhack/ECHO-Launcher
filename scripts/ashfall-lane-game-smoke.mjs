@@ -49,7 +49,7 @@ const ASHFALL_LANES = [
     packId: 'ashfall-standalone-edition',
     lane: 'standalone',
     name: 'Ashfall Standalone Edition',
-    modulePattern: /^modules\/.+-standalone\.jar$/iu,
+    modulePattern: /^mods\/.+-standalone\.jar$/iu,
     runtimeProofs: [
       'clientStarted',
       'worldCreatedOrLoaded',
