@@ -62,7 +62,9 @@ const {
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
   nativeLauncherArgumentStatus,
+  nativeModuleClasspathFile,
   nativeModuleClasspathEntries,
+  validateNativeLoaderLocalRuntime,
 } = require('./native-loader-handoff.cjs')
 const {
   assertSelectedManifestPack,
@@ -5932,6 +5934,36 @@ async function missingNativeLoaderPackLibraryArtifacts(minecraftRoot, document) 
 
 async function missingNativeLoaderRuntimeClasspathArtifacts(document) {
   const missing = []
+  const handoffFile = nativeModuleClasspathFile(document)
+  if (handoffFile) {
+    if (!(await exists(handoffFile))) {
+      return [{
+        label: `Native Loader handoff file ${handoffFile}`,
+        path: handoffFile,
+        relativePath: handoffFile,
+        reason: 'missing',
+      }]
+    }
+    let handoff = null
+    try {
+      handoff = await readJson(handoffFile, null)
+    } catch {
+      handoff = null
+    }
+    const handoffClasspath = Array.isArray(handoff?.classpathEntries)
+      ? handoff.classpathEntries.map((item) => String(item).trim()).filter(Boolean)
+      : typeof handoff?.moduleClasspath === 'string'
+        ? handoff.moduleClasspath.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+        : []
+    if (handoffClasspath.length === 0) {
+      return [{
+        label: `Native Loader handoff file ${handoffFile}`,
+        path: handoffFile,
+        relativePath: handoffFile,
+        reason: 'corrupt',
+      }]
+    }
+  }
   for (const entryPath of nativeModuleClasspathEntries(document)) {
     if (!(await exists(entryPath))) {
       missing.push({ label: `Native Loader module runtime ${entryPath}`, path: entryPath, relativePath: entryPath, reason: 'missing' })
@@ -6314,6 +6346,142 @@ async function backupMinecraftLauncherProfiles(launcherProfilesPath) {
     await fs.writeFile(backupPath, `${JSON.stringify({ profiles: {}, settings: {}, version: 3 }, null, 2)}\n`, 'utf8')
   }
   return backupPath
+}
+
+async function prepareMinecraftLauncherProfileMetadata({
+  minecraftRoot,
+  manifest,
+  profile,
+  installPath,
+  runtimeMode,
+  versionPrep,
+  operationId,
+}) {
+  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, profile)
+  const runtimeLabel = minecraftRuntimeLabel(normalizedMode)
+  const profileId = minecraftLauncherProfileId(profile.id, normalizedMode)
+  const profileName = minecraftLauncherProfileName(profile, normalizedMode)
+  const versionId = versionPrep.versionId ?? minecraftLauncherVersionId(manifest, normalizedMode)
+  const launcherProfilesPath = path.join(minecraftRoot, 'launcher_profiles.json')
+  const backupPath = await backupMinecraftLauncherProfiles(launcherProfilesPath)
+  const document = await readMinecraftLauncherProfiles(launcherProfilesPath)
+  const warnings = []
+  const profileCleanup = normalizedMode === 'neoforge-minecraft'
+    ? cleanupConflictingMinecraftLauncherProfiles(
+        document,
+        profileId,
+        versionId,
+        installPath,
+      )
+    : { removedProfiles: [], warnings: [] }
+  if (profileCleanup.removedProfiles.length > 0) {
+    warnings.push(
+      `Removed ${profileCleanup.removedProfiles.length} generic NeoForge launcher profile${profileCleanup.removedProfiles.length === 1 ? '' : 's'} (${profileCleanup.removedProfiles.join(', ')}) so Minecraft Launcher uses ${profile.name} with the ECHO-managed instance folder.`,
+    )
+  }
+  warnings.push(...profileCleanup.warnings)
+
+  const existing = document.profiles[profileId]
+  if (existing && !isEchoManagedMinecraftProfile(existing, profileId)) {
+    throw new Error(`Minecraft Launcher profile '${profileId}' is not ECHO-managed and will not be overwritten.`)
+  }
+
+  const timestamp = isoNow()
+  document.profiles[profileId] = {
+    ...(existing ?? {}),
+    name: profileName,
+    type: 'custom',
+    created: existing?.created ?? timestamp,
+    lastUsed: timestamp,
+    lastVersionId: versionId,
+    gameDir: installPath,
+    javaArgs: `-Xmx${Number(profile.ramGb ?? 8)}G`,
+    echoManaged: true,
+    echoLauncher: {
+      managedBy: 'ECHO Launcher',
+      profileId: profile.id,
+      pack: manifest.pack,
+      channel: profile.channel,
+      version: manifest.version ?? profile.version,
+      runtimeMode: normalizedMode,
+      runtimeLabel,
+      loader: minecraftRuntimeLoaderKey(normalizedMode),
+      updatedAt: timestamp,
+    },
+  }
+  await writeJson(launcherProfilesPath, document)
+
+  const savedDocument = await readMinecraftLauncherProfiles(launcherProfilesPath)
+  const profileValidation = validateMinecraftLauncherProfileReady(
+    savedDocument,
+    profileId,
+    versionId,
+    installPath,
+  )
+  const modsValidation = await validateAshfallInstanceMods(installPath, manifest, normalizedMode)
+  const launcherProfileWarnings = [...profileCleanup.warnings, ...profileValidation.warnings, ...modsValidation.warnings]
+  if (!profileValidation.ok || !modsValidation.ok) {
+    const message = launcherProfileWarnings.join(' ')
+    await appendLauncherLog('ERROR', `Minecraft Launcher ${runtimeLabel} profile preparation blocked for ${profile.name}: ${message}`)
+    return {
+      ok: false,
+      runtimeMode: normalizedMode,
+      runtimeLabel,
+      minecraftRoot,
+      launcherProfilesPath,
+      profileId,
+      launcherProfileId: profileId,
+      profileName,
+      profileExists: Boolean(savedDocument.profiles?.[profileId]),
+      profileCurrent: false,
+      versionId,
+      versionReady: versionPrep.ready === true,
+      versionSource: versionPrep.source,
+      versionMetadataPath: versionPrep.metadataPath,
+      gameDir: installPath,
+      warnings: [...warnings, ...launcherProfileWarnings],
+      backupPath,
+      preparedVersionMetadata: versionPrep.created,
+      removedLauncherProfiles: profileCleanup.removedProfiles,
+      launcherProfileWarnings,
+      validatedGameDir: installPath,
+      validatedModsCount: modsValidation.validatedModsCount,
+      updatedProfile: true,
+      message,
+    }
+  }
+
+  await appendLauncherLog(
+    'INFO',
+    `Minecraft Launcher ${runtimeLabel} profile ${profileId} prepared for ${profile.name}; ${modsValidation.validatedModsCount} ${modsValidation.validatedFileLabel ?? 'runtime file'}${modsValidation.validatedModsCount === 1 ? '' : 's'} validated in ${installPath}.`,
+  )
+  return {
+    ok: true,
+    runtimeMode: normalizedMode,
+    runtimeLabel,
+    minecraftRoot,
+    launcherProfilesPath,
+    profileId,
+    launcherProfileId: profileId,
+    profileName,
+    profileExists: true,
+    profileCurrent: true,
+    versionId,
+    versionReady: versionPrep.ready === true,
+    versionSource: versionPrep.source,
+    versionMetadataPath: versionPrep.metadataPath,
+    gameDir: installPath,
+    warnings,
+    backupPath,
+    preparedVersionMetadata: versionPrep.created,
+    removedLauncherProfiles: profileCleanup.removedProfiles,
+    launcherProfileWarnings,
+    validatedGameDir: installPath,
+    validatedModsCount: modsValidation.validatedModsCount,
+    updatedProfile: true,
+    operationId,
+    message: `${profile.name} ${runtimeLabel} profile is ready in Minecraft Launcher.`,
+  }
 }
 
 function minecraftLauncherDependencyPaths() {
@@ -7965,6 +8133,74 @@ async function writeInstallLikeReport(kind, id, report) {
   return { ...report, reportPath }
 }
 
+async function prepareNativeLoaderInstallRuntime(profile, manifest, installPath, operationId) {
+  const runtimeMode = normalizeMinecraftRuntimeMode(profile?.runtimeMode, manifest?.pack)
+  if (runtimeMode !== 'native-loader-minecraft') {
+    return { ok: true, skipped: true, warnings: [] }
+  }
+
+  try {
+    const materialized = await materializeNativeLoaderAddons(manifest, installPath, { writeReport: true })
+    const validation = await validateNativeLoaderLocalRuntime(manifest, installPath)
+    if (!validation.ok) {
+      return {
+        ok: false,
+        materialized,
+        validation,
+        warnings: validation.issues.map((issue) => issue.detail),
+      }
+    }
+
+    const minecraftRoot = await detectMinecraftRoot({ createIfMissing: true })
+    if (!minecraftRoot) {
+      return {
+        ok: false,
+        materialized,
+        validation,
+        warnings: ['Minecraft root was not available, so ECHO could not prepare Native Loader version metadata.'],
+      }
+    }
+
+    const versionPrep = await ensureMinecraftLauncherVersionMetadata(
+      minecraftRoot,
+      manifest,
+      profile,
+      operationId,
+      runtimeMode,
+      installPath,
+    )
+    const profilePrep = versionPrep.ready === true
+      ? await prepareMinecraftLauncherProfileMetadata({
+          minecraftRoot,
+          manifest,
+          profile,
+          installPath,
+          runtimeMode,
+          versionPrep,
+          operationId,
+        })
+      : {
+          ok: false,
+          warnings: [`Minecraft Launcher Native Loader version metadata '${versionPrep.versionId ?? 'unknown'}' was not ready after preparation.`],
+        }
+
+    return {
+      ok: profilePrep.ok === true && profilePrep.profileCurrent === true && profilePrep.versionReady === true,
+      materialized,
+      validation,
+      minecraftRoot,
+      versionPrep,
+      profilePrep,
+      warnings: [...(versionPrep.warnings ?? []), ...(profilePrep.warnings ?? [])],
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      warnings: [error instanceof Error ? error.message : String(error)],
+    }
+  }
+}
+
 async function installZipPackArtifact(payload, profile, manifest) {
   const paths = getPaths()
   const installPath = normalizePath(payload.installPath ?? profile?.installPath ?? manifest.localInstallRoot)
@@ -8175,7 +8411,14 @@ async function installZipPackArtifact(payload, profile, manifest) {
   })
   const installPayload = await validateAshfallInstallPayload(installPath, manifest)
   for (const warning of installPayload.warnings) failed.push({ path: installPayload.folderName, reason: warning })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false && installPayload.ok
+  const nativeLoaderRuntime = await prepareNativeLoaderInstallRuntime(profile, manifest, installPath, operationId)
+  if (nativeLoaderRuntime.warnings?.length) {
+    runtime.warnings = [...(runtime.warnings ?? []), ...nativeLoaderRuntime.warnings]
+  }
+  if (!nativeLoaderRuntime.ok) {
+    failed.push({ path: '.echo/native-loader', reason: nativeLoaderRuntime.warnings?.[0] ?? 'Native Loader handoff preparation failed.' })
+  }
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && runtime.ok !== false && installPayload.ok && nativeLoaderRuntime.ok
   const report = {
     ok,
     installId,
@@ -8194,6 +8437,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge,
     runtime,
+    nativeLoaderRuntime,
     payload: installPayload,
     before,
     after,
@@ -8283,7 +8527,14 @@ async function repairZipPackArtifact(payload, profile, manifest) {
   const after = await verifyManifest({ manifest, installPath })
   const repairedPayload = await validateAshfallInstallPayload(installPath, manifest)
   warnings.push(...repairedPayload.warnings)
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0 && repairedPayload.ok
+  const nativeLoaderRuntime = await prepareNativeLoaderInstallRuntime(profile, manifest, installPath, payload.operationId)
+  if (nativeLoaderRuntime.warnings?.length) {
+    runtime.warnings = [...(runtime.warnings ?? []), ...nativeLoaderRuntime.warnings]
+  }
+  if (!nativeLoaderRuntime.ok) {
+    warnings.push(nativeLoaderRuntime.warnings?.[0] ?? 'Native Loader handoff preparation failed.')
+  }
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && warnings.length === 0 && repairedPayload.ok && nativeLoaderRuntime.ok
   const report = {
     ok,
     repairId,
@@ -8297,6 +8548,7 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     rollbackPlanPath,
     neoforge: { ok: true, version: manifest.loader?.version ?? 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' },
     runtime,
+    nativeLoaderRuntime,
     payload: repairedPayload,
     before,
     after,
@@ -8368,7 +8620,11 @@ async function repairRun(payload = {}) {
   }
 
   const after = await verifyManifest({ manifest, installPath })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0
+  const nativeLoaderRuntime = await prepareNativeLoaderInstallRuntime(profile, manifest, installPath, payload.operationId)
+  if (!nativeLoaderRuntime.ok) {
+    warnings.push(nativeLoaderRuntime.warnings?.[0] ?? 'Native Loader handoff preparation failed.')
+  }
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && nativeLoaderRuntime.ok
   const report = {
     ok,
     repairId,
@@ -8381,6 +8637,7 @@ async function repairRun(payload = {}) {
     backupRoot: repairBackupRoot,
     rollbackPlanPath,
     neoforge,
+    nativeLoaderRuntime,
     before,
     after,
   }
@@ -8543,7 +8800,11 @@ async function installRun(payload = {}) {
       })
     },
   })
-  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0
+  const nativeLoaderRuntime = await prepareNativeLoaderInstallRuntime(profile, manifest, installPath, operationId)
+  if (!nativeLoaderRuntime.ok) {
+    failed.push({ path: '.echo/native-loader', reason: nativeLoaderRuntime.warnings?.[0] ?? 'Native Loader handoff preparation failed.' })
+  }
+  const ok = after.missing.length === 0 && after.corrupt.length === 0 && failed.length === 0 && nativeLoaderRuntime.ok
   const report = {
     ok,
     installId,
@@ -8558,6 +8819,7 @@ async function installRun(payload = {}) {
     backupRoot,
     rollbackPlanPath,
     neoforge,
+    nativeLoaderRuntime,
     before,
     after,
   }
@@ -9048,6 +9310,24 @@ async function appPackState(payload = {}) {
     }
   }
 
+  let nativeLoaderRuntime = null
+  if (route.mode === 'native-loader-minecraft' && installedState?.valid && installPath) {
+    try {
+      nativeLoaderRuntime = await validateNativeLoaderLocalRuntime(installedState.manifest, installPath)
+    } catch (error) {
+      nativeLoaderRuntime = {
+        ok: false,
+        issues: [{
+          id: 'nativeModuleActivationFailed',
+          title: 'Native runtime validation failed',
+          detail: error instanceof Error ? error.message : String(error),
+          status: 'critical',
+          action: 'repair',
+        }],
+      }
+    }
+  }
+
   const packOs = await readPackOsStateForSettings(settings).catch((error) =>
     unknownPackOsState({
       generatedAt: isoNow(),
@@ -9099,6 +9379,25 @@ async function appPackState(payload = {}) {
   } else if ((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0) {
     blockers.push(packStateBlocker('fileVerification', 'Installed files need repair', `${verification.missing.length} missing and ${verification.corrupt.length} corrupt file${verification.missing.length + verification.corrupt.length === 1 ? '' : 's'} found.`, 'warning', 'repair'))
   }
+  if (nativeLoaderRuntime && !nativeLoaderRuntime.ok) {
+    for (const issue of nativeLoaderRuntime.issues ?? []) {
+      blockers.push(packStateBlocker(issue.id, issue.title, issue.detail, issue.status ?? 'warning', issue.action ?? 'repair'))
+    }
+  }
+  const nativeLoaderMetadataStale = Boolean(
+    route.mode === 'native-loader-minecraft' &&
+      localManifest.status === 'valid' &&
+      (minecraftLauncher.versionReady !== true || minecraftLauncher.versionSource === 'invalid' || minecraftLauncher.profileCurrent !== true),
+  )
+  if (nativeLoaderMetadataStale) {
+    blockers.push(packStateBlocker(
+      'nativeLoaderStale',
+      'Native Loader metadata is stale',
+      (minecraftLauncher.warnings ?? [])[0] ?? 'The existing Minecraft Launcher Native Loader profile or version metadata must be rewritten before Play.',
+      'warning',
+      'repair',
+    ))
+  }
   if (packOsBlocked) {
     blockers.push(packStateBlocker('packOsBlocked', 'PackOS blocks launch', packOsReasons[0] ?? `${profile.name} is blocked by PackOS policy.`, 'critical', 'diagnostics'))
   }
@@ -9108,6 +9407,7 @@ async function appPackState(payload = {}) {
 
   const installed = localManifest.status === 'valid'
   const needsFileRepair = Boolean((verification?.missing?.length ?? 0) > 0 || (verification?.corrupt?.length ?? 0) > 0)
+  const needsNativeRepair = Boolean(nativeLoaderRuntime && !nativeLoaderRuntime.ok) || nativeLoaderMetadataStale
   const currentVersion = localManifest.version ?? profile.version
   const currentVersionParts = currentVersion ? versionParts(currentVersion) : null
   const needsUpdate = Boolean(
@@ -9126,8 +9426,12 @@ async function appPackState(payload = {}) {
     primaryAction = catalog.ok
       ? packStateAction('install', `Install ${profile.name}`, { variant: 'primary' })
       : packStateAction('unavailable', 'Unavailable', { enabled: false, reason: catalog.warnings[0] ?? 'No approved release is available.' })
-  } else if (needsFileRepair) {
-    primaryAction = packStateAction('repair', `Repair ${profile.name}`, { reason: 'Missing or corrupt files can be restored from this pack manifest.' })
+  } else if (needsFileRepair || needsNativeRepair) {
+    primaryAction = packStateAction('repair', `Repair ${profile.name}`, {
+      reason: needsNativeRepair
+        ? 'Native Loader addons, handoff metadata, or Minecraft Launcher metadata must be rebuilt before Play.'
+        : 'Missing or corrupt files can be restored from this pack manifest.',
+    })
   } else if (needsUpdate) {
     primaryAction = packStateAction('update', `Update ${profile.name}`, { variant: 'primary', reason: `Approved ${release.version} is available.` })
   } else if (packOsBlocked || !minecraftLauncher.ok) {
@@ -9136,7 +9440,7 @@ async function appPackState(payload = {}) {
     primaryAction = packStateAction(route.mode === 'native-runtime' ? 'launch-standalone' : 'play', `Play ${profile.name}`, { variant: 'primary' })
   }
 
-  const playReady = installed && !needsFileRepair && !packOsBlocked && minecraftLauncher.ok
+  const playReady = installed && !needsFileRepair && !needsNativeRepair && !packOsBlocked && minecraftLauncher.ok
   return {
     ok: playReady,
     generatedAt: isoNow(),
@@ -9153,6 +9457,7 @@ async function appPackState(payload = {}) {
     localManifest,
     catalog,
     minecraftLauncher,
+    nativeLoaderRuntime,
     packOs,
     selectedPackOs,
     primaryAction,

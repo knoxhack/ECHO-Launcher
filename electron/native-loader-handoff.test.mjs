@@ -14,6 +14,7 @@ const {
   nativeBootstrapJvmArguments,
   nativeLauncherArgumentStatus,
   nativeModuleClasspathEntries,
+  validateNativeLoaderLocalRuntime,
 } = require('./native-loader-handoff.cjs')
 
 const tempRoots = []
@@ -185,6 +186,80 @@ describe('native-loader handoff helpers', () => {
     }, manifest)
     expect(status.ok).toBe(false)
     expect(status.errors.join('\n')).toContain('EchoNativeBootstrapMain')
+  })
+
+  it('marks native metadata with a missing handoff file as stale', async () => {
+    const root = await tempRoot()
+    const missingHandoff = path.join(root, '.echo', 'native-loader', 'module-activation-handoff.json')
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: 'a'.repeat(64),
+      size: 10,
+    }])
+    const jvm = [
+      '-Decho.native.packId=ashfall-native-edition',
+      '-Decho.native.packVersion=0.1.0',
+      '-Decho.native.addonsClasspath=true',
+      `-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`,
+      '-Decho.native.bootstrap.authorizedHandoff=startNativeClient',
+      `-Decho.native.gameDir=${root}`,
+      `-Decho.native.moduleClasspathFile=${missingHandoff}`,
+    ]
+    const game = [
+      '--echo-marker',
+      path.join(root, '.echo', 'native-loader', 'module-activation.json'),
+      '--echo-handoff-file',
+      missingHandoff,
+      '--echo-pack-id',
+      'ashfall-native-edition',
+      '--echo-real-main',
+      'net.minecraft.client.main.Main',
+      '--echo-handoff',
+    ]
+
+    const status = nativeLauncherArgumentStatus({ arguments: { jvm, game } }, manifest)
+    expect(status.ok).toBe(false)
+    expect(status.errors.join('\n')).toContain('Native Loader handoff file is missing')
+  })
+
+  it('validates local Native Loader runtime state after addon materialization', async () => {
+    const root = await tempRoot()
+    const addonPath = path.join(root, 'addons', 'echoadaptercore-1.0.0.echo-addon')
+    const bytes = await writeAddon(addonPath, {
+      id: 'echoadaptercore',
+      nativeEntrypoint: 'com.echo.AdapterCoreNativeModule',
+      jarName: 'echoadaptercore-1.0.0-runtime.jar',
+    })
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: sha256(bytes),
+      size: bytes.length,
+    }])
+
+    const before = await validateNativeLoaderLocalRuntime(manifest, root)
+    expect(before.ok).toBe(false)
+    expect(before.issues.map((issue) => issue.id)).toContain('nativeHandoffMissing')
+
+    await materializeNativeLoaderAddons(manifest, root)
+    const after = await validateNativeLoaderLocalRuntime(manifest, root)
+    expect(after.ok).toBe(true)
+    expect(after.missingAddons).toEqual([])
+  })
+
+  it('rejects local Native Loader runtime state when required addons are missing', async () => {
+    const root = await tempRoot()
+    const manifest = manifestFor('ashfall-native-edition', [{
+      path: 'addons/echoadaptercore-1.0.0.echo-addon',
+      moduleId: 'echoadaptercore',
+      sha256: 'a'.repeat(64),
+      size: 10,
+    }])
+
+    const state = await validateNativeLoaderLocalRuntime(manifest, root)
+    expect(state.ok).toBe(false)
+    expect(state.issues.map((issue) => issue.id)).toEqual(expect.arrayContaining(['nativeAddonsMissing', 'nativeHandoffMissing']))
   })
 })
 

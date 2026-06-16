@@ -85,6 +85,16 @@ function descriptorBootstrapProfile(descriptor) {
   return value || ''
 }
 
+function expectedNativeModules(manifest) {
+  const modules = new Set([
+    ...(Array.isArray(manifest?.modules) ? manifest.modules.map((item) => String(item).trim()).filter(Boolean) : []),
+    ...requiredNativeAddonFiles(manifest)
+      .map((file) => String(file.moduleId ?? path.posix.basename(String(file.path ?? ''), path.posix.extname(String(file.path ?? '')))).trim())
+      .filter(Boolean),
+  ])
+  return [...modules].sort((left, right) => left.localeCompare(right))
+}
+
 const CONTENT_GRAPH_PREFIX = '.echo/content-graph/'
 
 function contentGraphEntries(zip) {
@@ -355,10 +365,7 @@ function nativeLauncherArgumentStatus(document, manifest) {
   const jvm = stringArray(document?.arguments?.jvm)
   const game = stringArray(document?.arguments?.game)
   const errors = []
-  const expectedModules = new Set([
-    ...(Array.isArray(manifest?.modules) ? manifest.modules.map((item) => String(item)) : []),
-    ...requiredNativeAddonFiles(manifest).map((file) => String(file.moduleId ?? '').trim()).filter(Boolean),
-  ])
+  const expectedModules = new Set(expectedNativeModules(manifest))
   const jvmHas = (prefix) => jvm.some((arg) => arg === prefix || arg.startsWith(`${prefix}=`))
   const gameHas = (flag) => game.includes(flag)
   if (!jvm.includes(`-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`)) {
@@ -373,11 +380,18 @@ function nativeLauncherArgumentStatus(document, manifest) {
   if (!jvmHas('-Decho.native.moduleClasspath') && !jvmHas('-Decho.native.moduleClasspathFile')) {
     errors.push('Native Loader JVM args are missing -Decho.native.moduleClasspath or -Decho.native.moduleClasspathFile.')
   }
-  for (const flag of ['--echo-marker', '--echo-pack-id', '--echo-real-main', '--echo-handoff']) {
+  for (const flag of ['--echo-marker', '--echo-handoff-file', '--echo-pack-id', '--echo-real-main', '--echo-handoff']) {
     if (!gameHas(flag)) errors.push(`Native Loader game args are missing ${flag}.`)
   }
   const handoffFile = gameValue(game, '--echo-handoff-file')
+  const jvmHandoffFile = nativeModuleClasspathFile(document)
   if (handoffFile) {
+    if (!jvmHandoffFile) {
+      errors.push('Native Loader JVM args are missing -Decho.native.moduleClasspathFile for the handoff file.')
+    } else if (path.resolve(handoffFile) !== path.resolve(jvmHandoffFile)) {
+      errors.push('Native Loader game handoff file does not match -Decho.native.moduleClasspathFile.')
+    }
+    errors.push(...nativeHandoffPayloadErrors(handoffFile, manifest))
     return {
       ok: errors.length === 0,
       errors,
@@ -399,9 +413,59 @@ function nativeLauncherArgumentStatus(document, manifest) {
   }
 }
 
-function nativeModuleClasspathEntries(document) {
+function nativeModuleClasspathFile(document) {
   const jvm = stringArray(document?.arguments?.jvm)
-  const file = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspathFile='))?.slice('-Decho.native.moduleClasspathFile='.length) ?? ''
+  return jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspathFile='))?.slice('-Decho.native.moduleClasspathFile='.length).trim() ?? ''
+}
+
+function nativeHandoffPayloadErrors(handoffFile, manifest) {
+  const errors = []
+  if (!handoffFile) {
+    errors.push('Native Loader handoff file path is missing.')
+    return errors
+  }
+  if (!fssync.existsSync(handoffFile)) {
+    errors.push(`Native Loader handoff file is missing: ${handoffFile}.`)
+    return errors
+  }
+  let payload
+  try {
+    payload = JSON.parse(fssync.readFileSync(handoffFile, 'utf8'))
+  } catch (error) {
+    errors.push(`Native Loader handoff file is invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
+    return errors
+  }
+  if (payload?.schema !== 'echo.native.launcher_handoff.v1') {
+    errors.push(`Native Loader handoff schema is '${payload?.schema ?? 'missing'}', expected echo.native.launcher_handoff.v1.`)
+  }
+  const expectedPack = String(manifest?.pack ?? '').trim()
+  if (expectedPack && String(payload?.packId ?? '').trim() !== expectedPack) {
+    errors.push(`Native Loader handoff pack is '${payload?.packId ?? 'missing'}', expected '${expectedPack}'.`)
+  }
+  const classpathEntries = Array.isArray(payload?.classpathEntries)
+    ? payload.classpathEntries.map((item) => String(item).trim()).filter(Boolean)
+    : typeof payload?.moduleClasspath === 'string'
+      ? payload.moduleClasspath.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+      : []
+  if (classpathEntries.length === 0) {
+    errors.push('Native Loader handoff file does not list any module classpath entries.')
+  }
+  for (const entryPath of classpathEntries) {
+    if (!fssync.existsSync(entryPath)) errors.push(`Native Loader module classpath entry is missing: ${entryPath}.`)
+  }
+  const modules = new Set(Array.isArray(payload?.modules) ? payload.modules.map((item) => String(item).trim()).filter(Boolean) : [])
+  const entrypoints = payload?.nativeEntrypoints && typeof payload.nativeEntrypoints === 'object' && !Array.isArray(payload.nativeEntrypoints)
+    ? payload.nativeEntrypoints
+    : {}
+  for (const moduleId of expectedNativeModules(manifest)) {
+    if (!modules.has(moduleId)) errors.push(`Native Loader handoff file is missing module ${moduleId}.`)
+    if (!String(entrypoints[moduleId] ?? '').trim()) errors.push(`Native Loader handoff file is missing native entrypoint for ${moduleId}.`)
+  }
+  return errors
+}
+
+function nativeModuleClasspathEntries(document) {
+  const file = nativeModuleClasspathFile(document)
   if (file && fssync.existsSync(file)) {
     try {
       const data = JSON.parse(fssync.readFileSync(file, 'utf8'))
@@ -416,8 +480,105 @@ function nativeModuleClasspathEntries(document) {
       return text.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)
     }
   }
+  const jvm = stringArray(document?.arguments?.jvm)
   const value = jvm.find((arg) => arg.startsWith('-Decho.native.moduleClasspath='))?.slice('-Decho.native.moduleClasspath='.length) ?? ''
   return value.split(path.delimiter).map((item) => item.trim()).filter(Boolean)
+}
+
+async function validateNativeLoaderLocalRuntime(manifest, installPath) {
+  const issues = []
+  const addonFiles = requiredNativeAddonFiles(manifest)
+  if (addonFiles.length === 0) {
+    issues.push({
+      id: 'nativeAddonsMissing',
+      title: 'Native addons are not listed',
+      detail: `${manifest?.name ?? manifest?.pack ?? 'Native pack'} manifest does not list required addons/*.echo-addon files.`,
+      status: 'critical',
+      action: 'repair',
+    })
+  }
+
+  const missingAddons = []
+  const corruptAddons = []
+  for (const file of addonFiles) {
+    const sourcePath = String(file.path ?? '').replace(/\\/g, '/')
+    const absolutePath = safeJoin(installPath, sourcePath)
+    if (!fssync.existsSync(absolutePath)) {
+      missingAddons.push(sourcePath)
+      continue
+    }
+    const expectedSha256 = String(file.sha256 ?? '').toLowerCase()
+    if (expectedSha256) {
+      const actualSha256 = await sha256File(absolutePath)
+      if (actualSha256.toLowerCase() !== expectedSha256) {
+        corruptAddons.push({ path: sourcePath, expected: expectedSha256, actual: actualSha256.toLowerCase() })
+      }
+    }
+  }
+  if (missingAddons.length > 0) {
+    issues.push({
+      id: 'nativeAddonsMissing',
+      title: 'Native addons are missing',
+      detail: `${missingAddons.length} required Native addon file${missingAddons.length === 1 ? '' : 's'} missing. First missing: ${missingAddons.slice(0, 5).join(', ')}.`,
+      status: 'warning',
+      action: 'repair',
+    })
+  }
+  if (corruptAddons.length > 0) {
+    issues.push({
+      id: 'nativeAddonHashMismatch',
+      title: 'Native addon hash mismatch',
+      detail: `${corruptAddons.length} Native addon file${corruptAddons.length === 1 ? '' : 's'} failed SHA-256 verification. First corrupt: ${corruptAddons[0].path}.`,
+      status: 'critical',
+      action: 'repair',
+    })
+  }
+
+  const handoffPath = safeJoin(installPath, path.join('.echo', 'native-loader', 'module-activation-handoff.json'))
+  const markerPath = safeJoin(installPath, path.join('.echo', 'native-loader', 'module-activation.json'))
+  if (!fssync.existsSync(handoffPath)) {
+    issues.push({
+      id: 'nativeHandoffMissing',
+      title: 'Native handoff is missing',
+      detail: `Native Loader handoff file is missing: ${handoffPath}. Repair will rebuild the module classpath before Play.`,
+      status: 'warning',
+      action: 'repair',
+    })
+  } else {
+    const handoffErrors = nativeHandoffPayloadErrors(handoffPath, manifest)
+    if (handoffErrors.length > 0) {
+      issues.push({
+        id: 'nativeModuleActivationFailed',
+        title: 'Native module handoff is invalid',
+        detail: handoffErrors[0],
+        status: 'critical',
+        action: 'repair',
+      })
+    }
+  }
+
+  const activationReport = await readJsonSafe(markerPath)
+  const activationErrors = Array.isArray(activationReport?.errors) ? activationReport.errors.filter(Boolean) : []
+  if (activationErrors.length > 0) {
+    issues.push({
+      id: 'nativeModuleActivationFailed',
+      title: 'Native module activation failed',
+      detail: String(activationErrors[0]),
+      status: 'critical',
+      action: 'repair',
+    })
+  }
+
+  return {
+    ok: issues.length === 0,
+    handoffPath,
+    markerPath,
+    addonCount: addonFiles.length,
+    missingAddons,
+    corruptAddons,
+    activationReport,
+    issues,
+  }
 }
 
 function gameValue(game, flag) {
@@ -432,7 +593,10 @@ module.exports = {
   materializeNativeLoaderAddons,
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
+  nativeHandoffPayloadErrors,
   nativeLauncherArgumentStatus,
+  nativeModuleClasspathFile,
   nativeModuleClasspathEntries,
   requiredNativeAddonFiles,
+  validateNativeLoaderLocalRuntime,
 }

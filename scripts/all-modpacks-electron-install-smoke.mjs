@@ -49,6 +49,9 @@ Options:
   --release-index-root <path>
                            Build a temporary local file-url channel from this
                            Release Index checkout instead of using --channel-url.
+  --standalone-runtime-root <path>
+                           Runtime workspace/image used to verify standalone
+                           pack launch routes. Default: ../ECHO-Standalone-Runtime
   --pack <profileId>       Limit to one pack. May be provided multiple times.
   --repair-handoff-fixture Corrupt one installed pack file before Minecraft
                            handoff and require auto-repair evidence.
@@ -67,6 +70,9 @@ function parseArgs(argv) {
     out: path.resolve(root, '..', 'ECHO-Release-Index', 'release-readiness', 'all-modpacks-electron-install-smoke.json'),
     channelUrl: PUBLIC_CHANNEL_URL,
     releaseIndexRoot: null,
+    standaloneRuntimeRoot: process.env.ECHO_STANDALONE_RUNTIME_ROOT
+      ? path.resolve(process.env.ECHO_STANDALONE_RUNTIME_ROOT)
+      : path.resolve(root, '..', 'ECHO-Standalone-Runtime'),
     timeoutMs: 120_000,
     packTimeoutMs: 900_000,
     clean: false,
@@ -87,6 +93,7 @@ function parseArgs(argv) {
     else if (arg === '--out') args.out = path.resolve(next())
     else if (arg === '--channel-url') args.channelUrl = next()
     else if (arg === '--release-index-root') args.releaseIndexRoot = path.resolve(next())
+    else if (arg === '--standalone-runtime-root') args.standaloneRuntimeRoot = path.resolve(next())
     else if (arg === '--pack') args.packs.push(next())
     else if (arg === '--repair-handoff-fixture') args.repairHandoffFixture = true
     else if (arg === '--timeout-ms') args.timeoutMs = Number(next())
@@ -315,43 +322,122 @@ async function waitForPageTarget(port, timeoutMs) {
 }
 
 function connectCdp(webSocketUrl) {
-  const socket = new WebSocket(webSocketUrl)
+  let socket = null
+  let opened = null
+  let reconnecting = null
   let sequence = 0
   const pending = new Map()
 
-  socket.addEventListener('message', (event) => {
-    const payload = JSON.parse(String(event.data))
-    if (!payload.id || !pending.has(payload.id)) return
-    const { resolve, reject } = pending.get(payload.id)
-    pending.delete(payload.id)
-    if (payload.error) reject(new Error(payload.error.message ?? JSON.stringify(payload.error)))
-    else resolve(payload.result ?? {})
-  })
+  const openSocket = () => {
+    socket = new WebSocket(webSocketUrl)
+    opened = new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true })
+      socket.addEventListener('error', () => reject(new Error('CDP socket failed to open.')), { once: true })
+    })
+    socket.addEventListener('message', (event) => {
+      const payload = JSON.parse(String(event.data))
+      if (!payload.id || !pending.has(payload.id)) return
+      const { resolve, reject, timeout } = pending.get(payload.id)
+      clearTimeout(timeout)
+      pending.delete(payload.id)
+      if (payload.error) reject(new Error(payload.error.message ?? JSON.stringify(payload.error)))
+      else resolve(payload.result ?? {})
+    })
+    socket.addEventListener('close', () => {
+      for (const { reject, timeout } of pending.values()) {
+        clearTimeout(timeout)
+        reject(new Error('CDP socket closed.'))
+      }
+      pending.clear()
+    })
+  }
 
-  socket.addEventListener('close', () => {
-    for (const { reject } of pending.values()) reject(new Error('CDP socket closed.'))
-    pending.clear()
-  })
+  const ensureOpen = async () => {
+    if (socket?.readyState === WebSocket.OPEN) return
+    if (socket?.readyState === WebSocket.CONNECTING) {
+      await opened
+      return
+    }
+    if (!reconnecting) {
+      reconnecting = (async () => {
+        openSocket()
+        await opened
+      })().finally(() => {
+        reconnecting = null
+      })
+    }
+    await reconnecting
+  }
 
-  const opened = new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true })
-    socket.addEventListener('error', () => reject(new Error('CDP socket failed to open.')), { once: true })
-  })
+  openSocket()
+
+  const sendRaw = async (method, params = {}) => {
+    await ensureOpen()
+    const id = ++sequence
+    return new Promise((resolve, reject) => {
+      const methodTimeoutMs = Number.isFinite(params?.timeout)
+        ? Math.max(Number(params.timeout) + 5_000, 30_000)
+        : 30_000
+      const timeout = setTimeout(() => {
+        pending.delete(id)
+        reject(new Error(`CDP ${method} timed out.`))
+      }, methodTimeoutMs)
+      pending.set(id, { resolve, reject, timeout })
+      try {
+        socket.send(JSON.stringify({ id, method, params }))
+      } catch (error) {
+        clearTimeout(timeout)
+        pending.delete(id)
+        reject(error)
+      }
+    })
+  }
+
+  const enableRuntimeDomains = async () => {
+    await sendRaw('Runtime.enable')
+    await sendRaw('Page.enable')
+  }
 
   return {
     async open() {
       await opened
     },
-    send(method, params = {}) {
-      const id = ++sequence
-      return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject })
-        socket.send(JSON.stringify({ id, method, params }))
-      })
+    async enableRuntimeDomains() {
+      await enableRuntimeDomains()
+    },
+    async send(method, params = {}) {
+      try {
+        return await sendRaw(method, params)
+      } catch (error) {
+        if (!/CDP socket closed|WebSocket is not open|not opened|CLOSED/iu.test(error instanceof Error ? error.message : String(error))) {
+          throw error
+        }
+        await ensureOpen()
+        await enableRuntimeDomains()
+        return sendRaw(method, params)
+      }
     },
     close() {
-      socket.close()
+      for (const { reject, timeout } of pending.values()) {
+        clearTimeout(timeout)
+        reject(new Error('CDP socket closed.'))
+      }
+      pending.clear()
+      socket?.close()
     },
+  }
+}
+
+async function openPageCdp(debugPort, timeoutMs) {
+  const target = await waitForPageTarget(debugPort, timeoutMs)
+  const cdp = connectCdp(target.webSocketDebuggerUrl)
+  try {
+    await cdp.open()
+    await cdp.enableRuntimeDomains()
+    return cdp
+  } catch (error) {
+    cdp.close()
+    throw error
   }
 }
 
@@ -922,6 +1008,7 @@ async function run() {
       ECHO_LAUNCHER_MINECRAFT_ROOT: minecraftRoot,
       ECHO_LAUNCHER_SMOKE: 'all-modpacks-electron-install',
       ECHO_RELEASE_INDEX_ALLOW_LOCAL_URLS: '1',
+      ECHO_STANDALONE_RUNTIME_ROOT: args.standaloneRuntimeRoot,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: false,
@@ -950,6 +1037,7 @@ async function run() {
     generatedAt: new Date().toISOString(),
     channelUrl,
     releaseIndexRoot: args.releaseIndexRoot,
+    standaloneRuntimeRoot: args.standaloneRuntimeRoot,
     executable: args.exe,
     workRoot: args.workRoot,
     userDataDir,
@@ -972,13 +1060,10 @@ async function run() {
   try {
     report.phase = 'waiting-debug-target'
     await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
-    const target = await guardElectron('debug target bootstrap', waitForPageTarget(debugPort, args.timeoutMs))
+    await guardElectron('debug target bootstrap', waitForPageTarget(debugPort, args.timeoutMs))
     report.phase = 'opening-cdp'
     await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
-    cdp = connectCdp(target.webSocketDebuggerUrl)
-    await guardElectron('CDP open', cdp.open())
-    await guardElectron('CDP Runtime.enable', cdp.send('Runtime.enable'))
-    await guardElectron('CDP Page.enable', cdp.send('Page.enable'))
+    cdp = await guardElectron('CDP open', openPageCdp(debugPort, args.timeoutMs))
 
     report.phase = 'waiting-renderer'
     await writeJson(args.out, { ...report, stdout: trimLines(stdout), stderr: trimLines(stderr) })
@@ -1031,6 +1116,8 @@ async function run() {
         const installStartedAt = Date.now() - 1000
         const click = await clickVisibleButton(cdp, `Install ${pack.name}`)
         packResult.click = click
+        cdp.close()
+        cdp = null
         const installData = await guardElectron(`${pack.name} install report`, waitForInstallReport(logsDir, installStartedAt, pack, args.packTimeoutMs))
         const installPath = installData.report.installPath
         assert(installPath, `${pack.name} install report did not include installPath.`)
@@ -1041,9 +1128,12 @@ async function run() {
           : null
         const launchRoute = await guardElectron(
           `${pack.name} launch route`,
-          verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs, {
-            expectRepair: Boolean(repairFixture && repairFixture.skipped !== true),
-          }),
+          (async () => {
+            cdp = await openPageCdp(debugPort, args.timeoutMs)
+            return verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs, {
+              expectRepair: Boolean(repairFixture && repairFixture.skipped !== true),
+            })
+          })(),
         )
         if (repairFixture && repairFixture.skipped !== true) {
           const repairedSha256 = await sha256File(path.join(installPath, repairFixture.path))

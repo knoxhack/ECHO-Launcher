@@ -192,6 +192,17 @@ export interface NativePackStateBlocker {
   action: NativePackPrimaryActionKind | 'diagnostics'
 }
 
+export interface NativeLoaderRuntimeState {
+  ok: boolean
+  handoffPath?: string
+  markerPath?: string
+  addonCount?: number
+  missingAddons?: string[]
+  corruptAddons?: Array<{ path: string; expected: string; actual: string }>
+  activationReport?: unknown
+  issues?: NativePackStateBlocker[]
+}
+
 export interface InstalledContentGraphModuleSummary {
   evidenceSchemaVersion?: 'echo.content_graph.evidence.v1'
   source?: string
@@ -276,6 +287,7 @@ export interface NativePackState {
     ok: boolean
     warnings: string[]
   }
+  nativeLoaderRuntime?: NativeLoaderRuntimeState | null
   packOs?: PackOsLauncherState
   selectedPackOs?: PackOsLauncherState['selectedPack'] | null
   primaryAction: {
