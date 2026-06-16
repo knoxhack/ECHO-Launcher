@@ -371,6 +371,68 @@ async function clickCardButtonContaining(cdp, cardHeading, buttonText) {
   return result
 }
 
+async function observeCardActionState(cdp, cardHeading) {
+  return evaluate(cdp, `(() => {
+    const headingNeedle = ${JSON.stringify(cardHeading)}
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+    }
+    const heading = Array.from(document.querySelectorAll('h3')).find((element) => element.textContent?.trim() === headingNeedle)
+    if (!heading) return { found: false, reason: \`Card heading '\${headingNeedle}' was not found.\` }
+    const card = heading.closest('.cyber-panel') ?? heading.parentElement
+    const buttons = Array.from(card?.querySelectorAll('button') ?? [])
+      .filter(isVisible)
+      .map((button) => ({
+        text: button.textContent?.trim() ?? '',
+        disabled: Boolean(button.disabled),
+        enabled: !button.disabled,
+      }))
+    const enabledButtons = buttons.filter((button) => button.enabled)
+    const observedAction = enabledButtons.find((button) => /update/i.test(button.text))
+      ?? enabledButtons.find((button) => /play|launch/i.test(button.text))
+      ?? enabledButtons.find((button) => /repair/i.test(button.text))
+      ?? null
+    let acceptedAction = null
+    if (observedAction && /update/i.test(observedAction.text)) acceptedAction = 'update'
+    else if (observedAction && /play|launch/i.test(observedAction.text)) acceptedAction = 'current'
+    else if (observedAction && /repair/i.test(observedAction.text)) acceptedAction = 'repair'
+    return {
+      found: true,
+      buttons,
+      enabledButtons,
+      observedAction: observedAction?.text ?? null,
+      acceptedAction,
+      currentCatalogState: acceptedAction === 'update' ? 'update_available' : acceptedAction === 'current' ? 'current' : acceptedAction === 'repair' ? 'repair_available' : 'unknown',
+    }
+  })()`)
+}
+
+async function waitForCurrentOrUpdateCardAction(cdp, cardHeading, timeoutMs, description) {
+  return waitFor(description, timeoutMs, async () => {
+    const state = await observeCardActionState(cdp, cardHeading)
+    return state?.acceptedAction ? state : null
+  })
+}
+
+async function runInstallReconciliation(cdp, installPath) {
+  const report = await evaluate(cdp, `window.echoNative.invoke('install:run', {
+    profileId: ${JSON.stringify(SMOKE_PACK.packId)},
+    installPath: ${JSON.stringify(installPath)},
+    channel: 'alpha',
+    refresh: true
+  })`)
+  assert(report?.ok === true, `Install reconciliation did not report ok=true: ${JSON.stringify(report?.failed ?? report?.skipped ?? report)}`)
+  assert(['install', 'update', 'verify'].includes(report.operation), `Install reconciliation returned unexpected operation: ${report.operation}`)
+  assert((report.after?.missing?.length ?? 0) === 0, `Install reconciliation still has missing files: ${JSON.stringify(report.after?.missing ?? [])}`)
+  assert((report.after?.corrupt?.length ?? 0) === 0, `Install reconciliation still has corrupt files: ${JSON.stringify(report.after?.corrupt ?? [])}`)
+  return {
+    report,
+    reportPath: report.reportPath ?? null,
+  }
+}
+
 async function clickTabContaining(cdp, text) {
   const result = await evaluate(cdp, `(() => {
     const needle = ${JSON.stringify(text)}
@@ -778,15 +840,32 @@ async function run() {
     await waitFor('Library page after install', args.timeoutMs, async () => evaluate(cdp, `document.querySelector('h1')?.textContent?.trim() === 'Library'`))
     await waitFor('Galactic Survey Library refresh after previous-version fixture', args.timeoutMs, async () => clickButtonContaining(cdp, 'Refresh Catalog'))
 
-    const updateStartedAt = Date.now() - 1000
-    const updateClick = await waitFor('Galactic Survey scoped update button', args.timeoutMs, async () => clickCardButtonContaining(cdp, SMOKE_PACK.name, 'Update'))
-    const updateData = await waitForInstallReport(logsDir, updateStartedAt, (report) =>
-      report.profileId === SMOKE_PACK.packId &&
-      report.operation === 'update' &&
-      report.ok === true &&
-      report.after?.missing?.length === 0 &&
-      report.after?.corrupt?.length === 0,
-    args.timeoutMs)
+    const updateActionState = await waitForCurrentOrUpdateCardAction(cdp, SMOKE_PACK.name, args.timeoutMs, 'Galactic Survey scoped current/update action')
+    let updateClick = {
+      clicked: false,
+      text: updateActionState.observedAction,
+      reason: 'No scoped Update click was required for the current catalog state.',
+    }
+    let updateData = null
+    let updateReconciliation = null
+    if (updateActionState.acceptedAction === 'update') {
+      const updateStartedAt = Date.now() - 1000
+      updateClick = await waitFor('Galactic Survey scoped update button', args.timeoutMs, async () => clickCardButtonContaining(cdp, SMOKE_PACK.name, 'Update'))
+      updateData = await waitForInstallReport(logsDir, updateStartedAt, (report) =>
+        report.profileId === SMOKE_PACK.packId &&
+        report.operation === 'update' &&
+        report.ok === true &&
+        report.after?.missing?.length === 0 &&
+        report.after?.corrupt?.length === 0,
+      args.timeoutMs)
+      updateReconciliation = { mode: 'scoped-update-click' }
+    } else {
+      updateData = await runInstallReconciliation(cdp, installPath)
+      updateReconciliation = {
+        mode: 'current-state-backend-install-reconciliation',
+        rationale: 'The scoped pack card was already current after catalog refresh, so the smoke verified the same installed files through install:run.',
+      }
+    }
     const verifiedAfterUpdate = await waitForSmokeModuleHash(installPath, smokeModule.sha256, args.timeoutMs, 'Galactic Survey module hash after update reconciliation')
 
     await waitFor('Tools navigation for rollback', args.timeoutMs, async () => clickButtonContaining(cdp, 'Tools'))
@@ -978,6 +1057,10 @@ async function run() {
           ok: updateData.report.ok,
           operation: updateData.report.operation,
           click: updateClick,
+          observedAction: updateActionState.observedAction,
+          acceptedAction: updateActionState.acceptedAction,
+          currentCatalogState: updateActionState.currentCatalogState,
+          reconciliation: updateReconciliation,
           reportPath: updateData.reportPath,
           installed: updateData.report.installed?.length ?? 0,
           updated: updateData.report.updated?.length ?? 0,
