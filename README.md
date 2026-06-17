@@ -70,7 +70,9 @@ For visible UI proof captured through Computer Use, import the local screenshot/
 npm run assist:ashfall-computer-use-proof -- --lane native --claim hudVisible=<captured-screenshot.png> --action "Opened world and verified HUD" --strict
 ```
 
-The importer copies non-empty local proof files into the installed instance, writes `.echo/proofs/computer-use-session.json`, and updates `ashfall-lane-game-smoke-evidence.json`. It still does not prove gameplay by itself; the strict lane smoke is the acceptance gate.
+Add repeated `--verification-check "id|label|status|evidenceRef|note"` entries to preserve the exact visible checks from the session, for example `--verification-check "hudVisible|HUD visible|captured|hudVisible|Verified from imported screenshot"` or `--verification-check "terminalVisible|Terminal visible|not-attempted||Stopped before Terminal was opened"`. A `captured` check must reference an imported claim id, imported proof path, or imported artifact proof.
+
+The importer copies non-empty local proof files into the installed instance, writes `.echo/proofs/computer-use-session.json`, and updates `ashfall-lane-game-smoke-evidence.json` with claim proofs plus `verificationChecks`. It still does not prove gameplay by itself; the strict lane smoke is the acceptance gate.
 
 After filling real proof files, run `npm run test:e2e:ashfall-lane-game-smoke -- --instance-root <instance-root>` to generate the acceptance report. The smoke only accepts local non-empty proof files for true gameplay claims; install, handoff, or metadata-only evidence is not enough.
 

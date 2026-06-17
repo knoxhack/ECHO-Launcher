@@ -39,6 +39,10 @@ describe('Ashfall Computer Use proof importer', () => {
       `hudVisible=${screenshot}`,
       '--action',
       'Pressed F1 off, entered world, verified HUD is visible.',
+      '--verification-check',
+      'hudVisible|HUD visible|captured|hudVisible|Verified HUD from imported screenshot.',
+      '--verification-check',
+      'terminalVisible|Terminal visible|not-attempted||Terminal was not opened in this capture.',
       '--app-id',
       'test-game.exe',
       '--window-title',
@@ -56,6 +60,17 @@ describe('Ashfall Computer Use proof importer', () => {
     expect(evidence.proofs.hudVisible).toHaveLength(1)
     expect(evidence.proofs.hudVisible[0]).toMatch(/^proofs\/screenshots\/hudvisible-2026-06-17t14-00-00-000z\.png$/u)
     expect(evidence.computerUseSession).toBe('proofs/computer-use-session.json')
+    expect(evidence.verificationSummary).toEqual({
+      checkCount: 2,
+      capturedCount: 1,
+      blockedCount: 0,
+      notAttemptedCount: 1,
+    })
+    expect(evidence.verificationChecks[0]).toMatchObject({
+      id: 'hudVisible',
+      status: 'captured',
+      evidenceRef: 'hudVisible',
+    })
     expect(evidence.visibleProofs).toEqual([
       {
         claim: 'hudVisible',
@@ -72,6 +87,8 @@ describe('Ashfall Computer Use proof importer', () => {
     expect(session.appId).toBe('test-game.exe')
     expect(session.windowTitle).toBe('Ashfall Native Test Window')
     expect(session.actions).toContain('Pressed F1 off, entered world, verified HUD is visible.')
+    expect(session.verificationSummary.capturedCount).toBe(1)
+    expect(session.verificationChecks[0].id).toBe('hudVisible')
     expect(session.claimProofs[0].claim).toBe('hudVisible')
   })
 
@@ -94,5 +111,31 @@ describe('Ashfall Computer Use proof importer', () => {
     const evidence = await readJson(evidencePath)
     expect(evidence.claims.hudVisible).toBe(false)
     expect(evidence.proofs.hudVisible).toEqual([])
+  })
+
+  it('rejects captured verification checks that do not reference imported proof', async () => {
+    const instanceRoot = await createInstanceRoot()
+    const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'echo-ashfall-computer-use-sources-'))
+    const screenshot = path.join(sourceRoot, 'hud-visible.png')
+    await fs.writeFile(screenshot, 'captured png bytes')
+
+    await expect(runImport([
+      '--instance-root',
+      instanceRoot,
+      '--lane',
+      'native',
+      '--claim',
+      `hudVisible=${screenshot}`,
+      '--verification-check',
+      'terminalVisible|Terminal visible|captured|terminalVisible|No terminal proof was imported.',
+      '--strict',
+      '--json',
+    ])).rejects.toMatchObject({ code: 1 })
+
+    const evidencePath = path.join(instanceRoot, 'Ashfall Native Edition', '.echo', 'ashfall-lane-game-smoke-evidence.json')
+    const evidence = await readJson(evidencePath)
+    expect(evidence.claims.hudVisible).toBe(true)
+    expect(evidence.verificationSummary.capturedCount).toBe(1)
+    expect(evidence.verificationChecks[0].id).toBe('terminalVisible')
   })
 })

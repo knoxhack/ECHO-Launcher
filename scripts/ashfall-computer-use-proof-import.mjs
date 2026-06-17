@@ -8,6 +8,7 @@ const EVIDENCE_FILE_NAME = 'ashfall-lane-game-smoke-evidence.json'
 const SESSION_FILE_NAME = 'computer-use-session.json'
 const EVIDENCE_SCHEMA_VERSION = 'echo.ashfall.lane-game-smoke.evidence.v1'
 const SESSION_SCHEMA_VERSION = 'echo.ashfall.computer_use_gameplay_session.v1'
+const VERIFICATION_CHECK_STATUSES = new Set(['captured', 'blocked', 'not-attempted'])
 
 const ASHFALL_LANES = [
   {
@@ -87,6 +88,9 @@ Options:
   --log <path>            Runtime/client log copied into .echo/proofs/logs.
   --save <path>           Save snapshot ZIP copied into .echo/proofs/saves.
   --action <text>         Visible action taken by Computer Use. Repeatable.
+  --verification-check <v> UI/gameplay check as id|label|status|evidenceRef|note.
+                          Repeatable. Captured checks must reference an imported
+                          claim id, imported proof path, or artifact proof.
   --app-id <id>           Target app id from Computer Use.
   --window-title <title>  Target game/runtime window title.
   --captured-at <iso>     Capture timestamp. Default: now.
@@ -104,6 +108,7 @@ function parseArgs(argv) {
     logs: [],
     saves: [],
     actions: [],
+    verificationChecks: [],
     appId: '',
     windowTitle: '',
     capturedAt: new Date().toISOString(),
@@ -124,6 +129,7 @@ function parseArgs(argv) {
     else if (arg === '--log') args.logs.push(path.resolve(next()))
     else if (arg === '--save') args.saves.push(path.resolve(next()))
     else if (arg === '--action') args.actions.push(next())
+    else if (arg === '--verification-check') args.verificationChecks.push(parseVerificationCheck(next()))
     else if (arg === '--app-id') args.appId = next()
     else if (arg === '--window-title') args.windowTitle = next()
     else if (arg === '--captured-at') args.capturedAt = new Date(next()).toISOString()
@@ -151,6 +157,27 @@ function parseClaimSpec(spec, lane) {
   const source = path.resolve(spec.slice(equals + 1).trim())
   if (!lane.runtimeProofs.includes(claim)) throw new Error(`Unknown claim ${claim} for lane ${lane.lane}`)
   return { claim, source }
+}
+
+function parseVerificationCheck(spec) {
+  const [id, label, status, evidenceRef = '', note = ''] = spec.split('|')
+  if (!id || !label || !status) {
+    throw new Error(`Verification check must be formatted as id|label|status|evidenceRef|note: ${spec}`)
+  }
+  const normalizedStatus = status.trim().toLowerCase()
+  if (!VERIFICATION_CHECK_STATUSES.has(normalizedStatus)) {
+    throw new Error(`Verification check ${id} status must be captured, blocked, or not-attempted.`)
+  }
+  if (normalizedStatus === 'captured' && !evidenceRef.trim()) {
+    throw new Error(`Verification check ${id} captured status requires an evidenceRef.`)
+  }
+  return {
+    id: id.trim(),
+    label: label.trim(),
+    status: normalizedStatus,
+    evidenceRef: evidenceRef.trim() || null,
+    note: note.trim() || null,
+  }
 }
 
 async function readJsonIfExists(filePath) {
@@ -239,6 +266,48 @@ function normalizeEvidence(lane, existing, capturedAt) {
   }
 }
 
+function normalizeProofReference(value) {
+  return String(value ?? '').trim().replace(/\\/gu, '/')
+}
+
+function verificationCheckReferencesImportedProof(check, importedClaims, importedArtifacts) {
+  if (check.status !== 'captured') return true
+  const reference = normalizeProofReference(check.evidenceRef)
+  return importedClaims.some((entry) =>
+    normalizeProofReference(entry.claim) === reference
+      || normalizeProofReference(entry.proof) === reference
+      || normalizeProofReference(entry.source) === reference)
+    || importedArtifacts.some((entry) =>
+      normalizeProofReference(entry.kind) === reference
+        || normalizeProofReference(entry.proof) === reference
+        || normalizeProofReference(entry.source) === reference)
+}
+
+function normalizeVerificationChecks(checks, importedClaims, importedArtifacts, errors) {
+  const normalized = checks.map((check) => {
+    const entry = {
+      id: check.id,
+      label: check.label,
+      status: check.status,
+      evidenceRef: check.evidenceRef,
+      note: check.note,
+    }
+    if (check.status === 'captured' && !verificationCheckReferencesImportedProof(check, importedClaims, importedArtifacts)) {
+      errors.push(`Verification check ${check.id} captured evidenceRef ${check.evidenceRef} does not reference an imported claim or artifact proof.`)
+    }
+    return entry
+  })
+  return {
+    checks: normalized,
+    summary: {
+      checkCount: normalized.length,
+      capturedCount: normalized.filter((check) => check.status === 'captured').length,
+      blockedCount: normalized.filter((check) => check.status === 'blocked').length,
+      notAttemptedCount: normalized.filter((check) => check.status === 'not-attempted').length,
+    },
+  }
+}
+
 async function importLane(args) {
   const lane = selectedLane(args.lane)
   const instancePath = path.join(args.instanceRoot, lane.name)
@@ -313,6 +382,7 @@ async function importLane(args) {
     }
   }
 
+  const verification = normalizeVerificationChecks(args.verificationChecks, importedClaims, importedArtifacts, errors)
   const session = {
     schemaVersion: SESSION_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
@@ -323,6 +393,8 @@ async function importLane(args) {
     appId: args.appId || null,
     windowTitle: args.windowTitle || null,
     actions: args.actions,
+    verificationChecks: verification.checks,
+    verificationSummary: verification.summary,
     claimProofs: importedClaims,
     artifacts: importedArtifacts,
     notes: [
@@ -337,6 +409,8 @@ async function importLane(args) {
     proof: entry.proof,
     source: 'computer-use-window-screenshot',
   }))
+  evidence.verificationChecks = verification.checks
+  evidence.verificationSummary = verification.summary
   await writeJson(evidencePath, evidence)
 
   return {
@@ -348,6 +422,8 @@ async function importLane(args) {
     sessionPath,
     importedClaims,
     importedArtifacts,
+    verificationChecks: verification.checks,
+    verificationSummary: verification.summary,
     errors,
   }
 }
