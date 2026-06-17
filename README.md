@@ -64,6 +64,14 @@ The underlying IPC handlers are:
 
 The helper does not prove gameplay by itself. To mark a claim true, capture a real playthrough artifact first, place it under the instance `.echo/proofs/` folder, then run a claim update such as `npm run assist:ashfall-lane-game-capture -- --lane native --claim hudVisible=proofs/screenshots/hud-visible.png --strict`. Missing, empty, or URL proof references are rejected and leave the claim false.
 
+For visible UI proof captured through Computer Use, import the local screenshot/log/save files with:
+
+```text
+npm run assist:ashfall-computer-use-proof -- --lane native --claim hudVisible=<captured-screenshot.png> --action "Opened world and verified HUD" --strict
+```
+
+The importer copies non-empty local proof files into the installed instance, writes `.echo/proofs/computer-use-session.json`, and updates `ashfall-lane-game-smoke-evidence.json`. It still does not prove gameplay by itself; the strict lane smoke is the acceptance gate.
+
 After filling real proof files, run `npm run test:e2e:ashfall-lane-game-smoke -- --instance-root <instance-root>` to generate the acceptance report. The smoke only accepts local non-empty proof files for true gameplay claims; install, handoff, or metadata-only evidence is not enough.
 
 ## Docs Index
