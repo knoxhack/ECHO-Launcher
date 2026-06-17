@@ -657,7 +657,7 @@ function assertInstalledModuleSourceEvidence(selectedPack, installed, moduleEvid
       .some((source) => source.releaseSourceState === 'partial-hotfix-evidence')
     if (partialHotfixReleaseExists) {
       assert(partialSources.length > 0, `${selectedPack} did not expose the Ashfall partial hotfix module source.`)
-      assert(fullSources.length === 0, `${selectedPack} partial hotfix files were mislabeled as full release evidence.`)
+      assert(fullSources.length > 0, `${selectedPack} did not preserve the canonical full release module source alongside the partial hotfix.`)
     } else {
       assert(fullSources.length > 0, `${selectedPack} did not expose the canonical full release module source.`)
       assert(partialSources.length === 0, `${selectedPack} unexpectedly exposed a partial hotfix module source.`)
