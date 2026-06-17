@@ -58,6 +58,14 @@ The underlying IPC handlers are:
 
 `node scripts/galactic-survey-real-minecraft-handoff-smoke.mjs --allow-real-minecraft-root --clean` launches the packaged Windows directory build, installs Galactic Survey Native Edition from the downloaded public prerelease pack bytes, and prepares an ECHO-managed Galactic Survey Native Loader profile in the detected user `.minecraft` folder. Use `--minecraft-root <path>` for isolated verification. The report is written to the Release Index as `release-readiness/galactic-survey-real-minecraft-handoff-smoke.json`; it proves real-root handoff preparation only, not official launcher open/play.
 
+## Ashfall Gameplay Capture Assist
+
+`npm run assist:ashfall-lane-game-capture -- --lane native` prepares `.echo/ashfall-lane-game-smoke-evidence.json` and proof folders inside the installed Ashfall Native Edition instance. Repeat with `--lane neoforge`, `--lane standalone`, or `--lane all` for the other lanes.
+
+The helper does not prove gameplay by itself. To mark a claim true, capture a real playthrough artifact first, place it under the instance `.echo/proofs/` folder, then run a claim update such as `npm run assist:ashfall-lane-game-capture -- --lane native --claim hudVisible=proofs/screenshots/hud-visible.png --strict`. Missing, empty, or URL proof references are rejected and leave the claim false.
+
+After filling real proof files, run `npm run test:e2e:ashfall-lane-game-smoke -- --instance-root <instance-root>` to generate the acceptance report. The smoke only accepts local non-empty proof files for true gameplay claims; install, handoff, or metadata-only evidence is not enough.
+
 ## Docs Index
 
 - [docs/launcher-update-flow.md](docs/launcher-update-flow.md)
