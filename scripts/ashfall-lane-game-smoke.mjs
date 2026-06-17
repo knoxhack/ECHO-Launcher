@@ -68,6 +68,8 @@ const ASHFALL_LANES = [
 ]
 
 const DEFAULT_OUT = '../ECHO-Release-Index/release-readiness/ashfall-lane-game-smoke.json'
+const COMPUTER_USE_SESSION_SCHEMA = 'echo.ashfall.computer_use_gameplay_session.v1'
+const COMPUTER_USE_CHECK_STATUSES = new Set(['captured', 'blocked', 'not-attempted'])
 const EVIDENCE_FILE_NAMES = [
   'ashfall-lane-game-smoke-evidence.json',
   'ashfall-game-smoke-evidence.json',
@@ -329,6 +331,157 @@ async function verifyClaimProofFiles(evidenceRecord, instancePath, key) {
   }
 }
 
+function normalizeReference(value) {
+  return String(value ?? '').trim().replace(/\\/gu, '/')
+}
+
+function relativeProofPath(instancePath, absolutePath) {
+  return normalizeReference(path.relative(path.join(instancePath, '.echo'), absolutePath))
+}
+
+async function localProofFile(reference, evidencePath, instancePath) {
+  const absolutePath = resolveProofPath(reference, evidencePath, instancePath)
+  if (!absolutePath) return { ok: false, reference, reason: 'URL references are not accepted as local gameplay proof.' }
+  const stat = await fs.stat(absolutePath).catch(() => null)
+  if (!stat?.isFile()) return { ok: false, reference, path: absolutePath, reason: 'Proof file does not exist.' }
+  if (stat.size <= 0) return { ok: false, reference, path: absolutePath, reason: 'Proof file is empty.' }
+  return {
+    ok: true,
+    reference,
+    path: absolutePath,
+    relativePath: relativeProofPath(instancePath, absolutePath),
+    size: stat.size,
+    mtime: stat.mtime.toISOString(),
+  }
+}
+
+async function loadComputerUseSession(evidenceRecord, instancePath) {
+  const reference = evidenceRecord.evidence?.computerUseSession
+  if (!reference) {
+    return {
+      present: false,
+      path: null,
+      reference: null,
+      session: null,
+    }
+  }
+  const record = await localProofFile(reference, evidenceRecord.path, instancePath)
+  if (!record.ok) {
+    return {
+      present: false,
+      path: record.path ?? null,
+      reference,
+      session: null,
+      blockers: [`Computer Use session ${reference}: ${record.reason}`],
+    }
+  }
+  return {
+    present: true,
+    path: record.path,
+    reference,
+    session: await readJson(record.path),
+    blockers: [],
+  }
+}
+
+async function acceptedComputerUseRefs({ session, evidenceRecord, instancePath, claims, claimProofs }) {
+  const refs = new Set()
+  for (const [claim, proof] of Object.entries(claimProofs)) {
+    if (claims[claim] !== true || proof?.ok !== true) continue
+    refs.add(normalizeReference(claim))
+    for (const file of proof.files ?? []) {
+      refs.add(normalizeReference(file.reference))
+      refs.add(relativeProofPath(instancePath, file.path))
+    }
+  }
+
+  const artifactProofs = []
+  for (const artifact of Array.isArray(session?.artifacts) ? session.artifacts : []) {
+    const proofReference = artifact?.proof
+    if (!proofReference) continue
+    const record = await localProofFile(proofReference, evidenceRecord.path, instancePath)
+    artifactProofs.push({
+      kind: artifact.kind ?? null,
+      proof: proofReference,
+      ok: record.ok,
+      reason: record.reason ?? null,
+      path: record.path ?? null,
+      relativePath: record.relativePath ?? null,
+    })
+    if (!record.ok) continue
+    refs.add(normalizeReference(artifact.kind))
+    refs.add(normalizeReference(proofReference))
+    refs.add(record.relativePath)
+  }
+  return { refs, artifactProofs }
+}
+
+function verificationSummaryBlockers(checks, summary) {
+  if (!summary || typeof summary !== 'object') return ['Computer Use session verificationSummary is missing.']
+  const statuses = checks.map((check) => String(check?.status ?? '').trim().toLowerCase())
+  const expected = {
+    checkCount: checks.length,
+    capturedCount: statuses.filter((status) => status === 'captured').length,
+    blockedCount: statuses.filter((status) => status === 'blocked').length,
+    notAttemptedCount: statuses.filter((status) => status === 'not-attempted').length,
+  }
+  const blockers = []
+  for (const [key, value] of Object.entries(expected)) {
+    if (summary[key] !== value) blockers.push(`Computer Use session verificationSummary.${key} is ${summary[key] ?? 'missing'}, expected ${value}.`)
+  }
+  return blockers
+}
+
+async function validateComputerUseSession({ evidenceRecord, instancePath, lane, claims, claimProofs }) {
+  const record = await loadComputerUseSession(evidenceRecord, instancePath)
+  const blockers = [...(record.blockers ?? [])]
+  if (!record.present) return { ...record, blockers }
+
+  const session = record.session
+  if (session?.schemaVersion !== COMPUTER_USE_SESSION_SCHEMA) {
+    blockers.push(`Computer Use session schemaVersion is ${session?.schemaVersion ?? 'missing'}, expected ${COMPUTER_USE_SESSION_SCHEMA}.`)
+  }
+  if (session?.packId !== lane.packId) blockers.push(`Computer Use session packId is ${session?.packId ?? 'missing'}, expected ${lane.packId}.`)
+  if (session?.lane !== lane.lane) blockers.push(`Computer Use session lane is ${session?.lane ?? 'missing'}, expected ${lane.lane}.`)
+  if (!Array.isArray(session?.actions) || session.actions.length === 0) {
+    blockers.push('Computer Use session must list visible UI actions.')
+  }
+  if (!Array.isArray(session?.verificationChecks)) {
+    blockers.push('Computer Use session verificationChecks must be an array.')
+  }
+
+  const checks = Array.isArray(session?.verificationChecks) ? session.verificationChecks : []
+  const { refs, artifactProofs } = await acceptedComputerUseRefs({ session, evidenceRecord, instancePath, claims, claimProofs })
+  for (const artifact of artifactProofs) {
+    if (!artifact.ok) blockers.push(`Computer Use session artifact proof ${artifact.proof}: ${artifact.reason}`)
+  }
+  for (const [index, check] of checks.entries()) {
+    const prefix = `Computer Use session verificationChecks[${index}]`
+    if (!String(check?.id ?? '').trim()) blockers.push(`${prefix}.id is required.`)
+    if (!String(check?.label ?? '').trim()) blockers.push(`${prefix}.label is required.`)
+    const status = String(check?.status ?? '').trim().toLowerCase()
+    if (!COMPUTER_USE_CHECK_STATUSES.has(status)) blockers.push(`${prefix}.status must be captured, blocked, or not-attempted.`)
+    if (status === 'captured') {
+      const evidenceRef = normalizeReference(check.evidenceRef)
+      if (!evidenceRef) blockers.push(`${prefix}.evidenceRef is required when status is captured.`)
+      else if (!refs.has(evidenceRef)) blockers.push(`${prefix}.evidenceRef ${evidenceRef} must reference a validated local claim proof or imported artifact proof.`)
+    }
+  }
+  blockers.push(...verificationSummaryBlockers(checks, session?.verificationSummary))
+
+  return {
+    present: true,
+    path: record.path,
+    reference: record.reference,
+    schemaVersion: session?.schemaVersion ?? null,
+    capturedAt: session?.capturedAt ?? null,
+    actionCount: Array.isArray(session?.actions) ? session.actions.length : 0,
+    verificationSummary: session?.verificationSummary ?? null,
+    artifactProofs,
+    blockers,
+  }
+}
+
 function compactCrashSummary(text) {
   const lines = text.split(/\r?\n/u)
   const summary = []
@@ -422,6 +575,11 @@ async function auditLane(args, lane) {
     if (!claims[proof]) blockers.push(`Missing gameplay proof: ${proof}`)
   }
 
+  const computerUseSession = evidence
+    ? await validateComputerUseSession({ evidenceRecord, instancePath, lane, claims, claimProofs })
+    : { present: false, path: null, reference: null, blockers: [] }
+  blockers.push(...computerUseSession.blockers.map((blocker) => `Computer Use session: ${blocker}`))
+
   if (lane.lane !== 'native' && evidence && Object.hasOwn(evidence.claims ?? evidence, 'mainMenuNativeReplacement')) {
     warnings.push('mainMenuNativeReplacement evidence is ignored for non-Native lane.')
   }
@@ -460,6 +618,7 @@ async function auditLane(args, lane) {
       schemaVersion: evidence?.schemaVersion ?? null,
       capturedAt: evidence?.capturedAt ?? null,
     },
+    computerUseSession,
     claimProofs,
     claims,
     blockers,

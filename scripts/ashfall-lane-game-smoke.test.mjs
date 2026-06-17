@@ -111,4 +111,96 @@ describe('Ashfall lane gameplay smoke proof validation', () => {
       'Gameplay proof hudVisible is claimed true but does not reference at least one non-empty local proof file.',
     )
   })
+
+  it('validates imported Computer Use session checks against local proof files', async () => {
+    const instanceRoot = await createFixture()
+    const reportPath = path.join(instanceRoot, 'report.json')
+    const nativeInstance = path.join(instanceRoot, 'Ashfall Native Edition')
+    const evidencePath = path.join(nativeInstance, '.echo', 'ashfall-lane-game-smoke-evidence.json')
+    const proofPath = path.join(nativeInstance, '.echo', 'proofs', 'screenshots', 'hud-visible.png')
+    const sessionPath = path.join(nativeInstance, '.echo', 'proofs', 'computer-use-session.json')
+
+    await fs.mkdir(path.dirname(proofPath), { recursive: true })
+    await fs.writeFile(proofPath, 'captured hud pixels\n')
+    await writeJson(evidencePath, {
+      schemaVersion: 'echo.ashfall.lane-game-smoke.evidence.v1',
+      packId: 'ashfall-native-edition',
+      claims: {
+        hudVisible: true,
+      },
+      proofs: {
+        hudVisible: ['proofs/screenshots/hud-visible.png'],
+      },
+      computerUseSession: 'proofs/computer-use-session.json',
+    })
+    await writeJson(sessionPath, {
+      schemaVersion: 'echo.ashfall.computer_use_gameplay_session.v1',
+      packId: 'ashfall-native-edition',
+      lane: 'native',
+      actions: ['Opened inventory and verified the HUD remained visible.'],
+      verificationChecks: [
+        {
+          id: 'terminalVisible',
+          label: 'Terminal visible',
+          status: 'captured',
+          evidenceRef: 'terminalVisible',
+          note: 'No Terminal proof exists.',
+        },
+      ],
+      verificationSummary: {
+        checkCount: 1,
+        capturedCount: 1,
+        blockedCount: 0,
+        notAttemptedCount: 0,
+      },
+    })
+
+    const invalidReport = await runSmoke(instanceRoot, reportPath)
+    const invalidLane = invalidReport.lanes.find((lane) => lane.packId === 'ashfall-native-edition')
+    expect(invalidLane.computerUseSession.present).toBe(true)
+    expect(invalidLane.computerUseSession.blockers).toContain(
+      'Computer Use session verificationChecks[0].evidenceRef terminalVisible must reference a validated local claim proof or imported artifact proof.',
+    )
+    expect(invalidLane.blockers).toContain(
+      'Computer Use session: Computer Use session verificationChecks[0].evidenceRef terminalVisible must reference a validated local claim proof or imported artifact proof.',
+    )
+
+    await writeJson(sessionPath, {
+      schemaVersion: 'echo.ashfall.computer_use_gameplay_session.v1',
+      packId: 'ashfall-native-edition',
+      lane: 'native',
+      actions: ['Opened world and verified HUD visibility.'],
+      verificationChecks: [
+        {
+          id: 'hudVisible',
+          label: 'HUD visible',
+          status: 'captured',
+          evidenceRef: 'hudVisible',
+          note: 'HUD verified from imported screenshot.',
+        },
+        {
+          id: 'terminalVisible',
+          label: 'Terminal visible',
+          status: 'not-attempted',
+          evidenceRef: null,
+          note: 'Terminal was not opened during this narrow capture.',
+        },
+      ],
+      verificationSummary: {
+        checkCount: 2,
+        capturedCount: 1,
+        blockedCount: 0,
+        notAttemptedCount: 1,
+      },
+    })
+
+    const validReport = await runSmoke(instanceRoot, reportPath)
+    const validLane = validReport.lanes.find((lane) => lane.packId === 'ashfall-native-edition')
+    expect(validLane.computerUseSession.present).toBe(true)
+    expect(validLane.computerUseSession.blockers).toEqual([])
+    expect(validLane.computerUseSession.verificationSummary.capturedCount).toBe(1)
+    expect(validLane.blockers).not.toContain(
+      'Computer Use session: Computer Use session verificationChecks[0].evidenceRef terminalVisible must reference a validated local claim proof or imported artifact proof.',
+    )
+  })
 })

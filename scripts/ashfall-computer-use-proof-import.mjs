@@ -331,6 +331,9 @@ async function importLane(args) {
 
   const existingEvidence = await readJsonIfExists(evidencePath)
   const evidence = normalizeEvidence(lane, existingEvidence, args.capturedAt)
+  if (args.actions.length === 0) {
+    errors.push('At least one --action is required so the Computer Use session records visible UI steps.')
+  }
   await fs.mkdir(path.join(instancePath, '.echo', 'proofs', 'screenshots'), { recursive: true })
   await fs.mkdir(path.join(instancePath, '.echo', 'proofs', 'logs'), { recursive: true })
   await fs.mkdir(path.join(instancePath, '.echo', 'proofs', 'saves'), { recursive: true })
