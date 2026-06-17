@@ -6,7 +6,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { officialModpacksFromReleaseIndex } from '../../data/officialModpacks'
 import { isNativeAvailable, invokeNative } from '../../services/nativeBridge'
 import { useLauncherStore } from '../../stores/launcherStore'
@@ -24,6 +24,7 @@ import { StatusChip } from '../cyber/StatusChip'
 import { packActionIcons, usePackActions } from '../library/usePackActions'
 
 const actionIcons: Record<NativePackPrimaryActionKind, LucideIcon> = packActionIcons
+const PRIMARY_ACTION_SHORTCUT = 'Control+Enter'
 
 const routeIcons: Record<string, LucideIcon> = {
   'native-loader-minecraft': Terminal,
@@ -37,6 +38,12 @@ function packStatus(packState: NativePackState | null): { label: string; status:
   const blocker = packState.blockers[0]
   if (!blocker) return { label: 'Needs attention', status: 'warning', detail: 'Pack state is incomplete.' }
   return { label: blocker.title, status: blocker.status, detail: blocker.detail }
+}
+
+function editableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  return ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)
 }
 
 export function HomePage() {
@@ -68,10 +75,33 @@ export function HomePage() {
   const busy = busyPackId === selectedProfileId
   const disabled = busy || !action?.enabled || !isNativeAvailable()
 
+  const runSelectedPackAction = useCallback(async () => {
+    if (!packState || disabled) return
+    await runPackAction(packState, {
+      onProgress: setProgress,
+      onStage: setStage,
+      afterRefresh: async () => {
+        await refreshPackOs()
+      },
+    })
+  }, [disabled, packState, refreshPackOs, runPackAction])
+
   useEffect(() => {
     if (!selectedProfileId || !isNativeAvailable()) return
     void refreshPackState(selectedProfileId)
   }, [refreshPackState, selectedProfileId])
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.key !== 'Enter') return
+      if (editableTarget(event.target)) return
+      event.preventDefault()
+      void runSelectedPackAction()
+    }
+
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [runSelectedPackAction])
 
   const refreshSelectedState = async () => {
     const [nextProfiles, nextPackState] = await Promise.all([
@@ -86,17 +116,6 @@ export function HomePage() {
 
   const openSelectedDiagnostics = () => {
     openDiagnostics(selectedProfileId)
-  }
-
-  const runSelectedPackAction = async () => {
-    if (!packState) return
-    await runPackAction(packState, {
-      onProgress: setProgress,
-      onStage: setStage,
-      afterRefresh: async () => {
-        await refreshPackOs()
-      },
-    })
   }
 
   const refreshCatalog = async () => {
@@ -162,7 +181,11 @@ export function HomePage() {
                   <p className="mt-2 min-h-10 text-sm leading-5 text-slate-300">{action?.reason || status.detail}</p>
                 </div>
                 <CyberButton
+                  aria-keyshortcuts={PRIMARY_ACTION_SHORTCUT}
+                  aria-label={action?.label ?? 'Selected pack primary action'}
                   className="w-full"
+                  data-pack-id={selectedProfileId}
+                  data-testid={`home-primary-action-${selectedProfileId}`}
                   disabled={disabled}
                   icon={ActionIcon}
                   onClick={() => void runSelectedPackAction()}

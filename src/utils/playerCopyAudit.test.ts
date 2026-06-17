@@ -43,6 +43,8 @@ describe('player-facing copy audit', () => {
 
     expect(homeSource).toContain('Selected Pack')
     expect(homeSource).toContain('Primary Action')
+    expect(homeSource).toContain('aria-keyshortcuts={PRIMARY_ACTION_SHORTCUT}')
+    expect(homeSource).toContain('data-testid={`home-primary-action-${selectedProfileId}`}')
     expect(homeSource).toContain('Why not playable?')
     expect(homeSource.match(/Primary Action/g) ?? []).toHaveLength(1)
     expect(homeSource).not.toContain('Can I play?')
