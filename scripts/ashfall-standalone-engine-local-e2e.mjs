@@ -11,7 +11,8 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const PACK_ID = 'ashfall-standalone-engine-edition'
 const VERSION = '2.0.0-beta.2'
-const RELEASE_FOLDER = 'v2.0.0-ashfall-standalone-engine-edition-beta'
+const RELEASE_TAG = 'v2.0.0-ashfall-standalone-engine-edition-beta.4'
+const RELEASE_FOLDER = RELEASE_TAG
 const ZIP_NAME = `${PACK_ID}-${VERSION}.zip`
 const MANIFEST_NAME = `${PACK_ID}-beta-${VERSION}.pack.json`
 
@@ -282,6 +283,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     packId: PACK_ID,
     version: VERSION,
+    releaseTag: RELEASE_TAG,
     releaseRoot: args.releaseRoot,
     installRoot,
     zipRoot: root,
@@ -304,7 +306,7 @@ async function main() {
     },
     headless,
     warnings: [
-      'This is a local staged-asset smoke. Public GitHub release URLs and gameplay parity remain outside this proof.',
+      'This is a local staged-asset smoke against the beta.4 release payload. Public URL hash verification and gameplay parity remain separate proof gates.',
     ],
   }
   await writeJson(args.out, report)
