@@ -61,6 +61,9 @@ const {
   materializeNativeLoaderAddons,
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
+  nativeDevDirectAuditJvmArguments,
+  nativeDevDirectProductWorldJvmArguments,
+  nativeDevDirectQuickPlayJvmArguments,
   nativeLauncherArgumentStatus,
   nativeModuleClasspathFile,
   nativeModuleClasspathEntries,
@@ -102,12 +105,12 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
-const ECHO_NATIVE_LOADER_VERSION = '1.0.4'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.5'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.4/echo-native-loader-1.0.4.jar'
-const ECHO_NATIVE_LOADER_SHA1 = '6c82b842bb325994eca8ac243bb22d69b8a6baef'
-const ECHO_NATIVE_LOADER_SIZE = 1_834_113
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.5/echo-native-loader-1.0.5.jar'
+const ECHO_NATIVE_LOADER_SHA1 = '6419a2ebf3e44d0f2ff9e29cc8856f6f89c209b7'
+const ECHO_NATIVE_LOADER_SIZE = 1_892_985
 const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
@@ -1333,8 +1336,23 @@ async function repairStandalonePackInstallBeforeLaunch(payload = {}, profileId =
   const profiles = await profileList()
   const profile = selectLauncherProfile(profiles, { ...payload, profileId: selectedPack }, true)
   const installPath = normalizePath(payload.installPath ?? profile.installPath ?? defaultInstallPathForProfile(getPaths(), profile.id))
-  const installed = await readInstalledProfileManifest(installPath, profile.id)
-  if (!installed?.manifest) return null
+  const installedState = await readInstalledProfileManifestState(installPath, profile.id)
+  if (!installedState?.valid) {
+    return {
+      ok: false,
+      repaired: false,
+      profile,
+      installPath: installedState?.installPath ?? installPath,
+      manifestPath: installedState?.manifestPath ?? path.join(installPath, '.echo', 'installed-manifest.json'),
+      verification: null,
+      message: installedState?.message ?? 'No valid standalone edition manifest was found for this profile.',
+    }
+  }
+  const installed = {
+    installPath: installedState.installPath,
+    manifestPath: installedState.manifestPath,
+    manifest: installedState.manifest,
+  }
 
   let verification = await verifyManifest({
     profileId: profile.id,
@@ -1342,7 +1360,14 @@ async function repairStandalonePackInstallBeforeLaunch(payload = {}, profileId =
     installPath: installed.installPath,
   })
   if (!verificationNeedsRepair(verification)) {
-    return { ok: true, repaired: false, profile, installPath: installed.installPath, verification }
+    return {
+      ok: true,
+      repaired: false,
+      profile,
+      installPath: installed.installPath,
+      manifestPath: installed.manifestPath,
+      verification,
+    }
   }
 
   const repair = await installRun({
@@ -1365,16 +1390,65 @@ async function repairStandalonePackInstallBeforeLaunch(payload = {}, profileId =
     repaired: true,
     profile,
     installPath: installed.installPath,
+    manifestPath: installed.manifestPath,
     verification,
     repair,
   }
+}
+
+function standaloneRuntimeLaunchDevAccount(payload = {}) {
+  return String(
+    payload.devAccount ??
+      process.env.ECHO_DEV_STANDALONE_USERNAME ??
+      process.env.ECHO_DEV_MINECRAFT_USERNAME ??
+      'EchoDev',
+  ).trim()
+}
+
+function pushStandaloneRuntimeArg(args, key, value) {
+  if (value == null) return
+  const clean = String(value).trim()
+  if (!clean) return
+  args.push(key, clean)
+}
+
+function standaloneRuntimeLaunchArgs(state, payload = {}, packRepair = null) {
+  const args = ['--live', state.runtimeRoot]
+  const requestedProfileId = String(payload.profileId ?? '').trim()
+  const launchProfileId = packRepair?.profile?.id ?? normalizeOfficialPackId(requestedProfileId) ?? requestedProfileId
+  const installPath = payload.installPath
+    ? normalizePath(payload.installPath)
+    : packRepair?.installPath
+  const packManifest = payload.packManifest ?? payload.manifestPath ?? packRepair?.manifestPath ??
+    (installPath ? path.join(installPath, '.echo', 'installed-manifest.json') : undefined)
+  pushStandaloneRuntimeArg(args, '--profileId', launchProfileId)
+  pushStandaloneRuntimeArg(args, '--installPath', installPath)
+  pushStandaloneRuntimeArg(args, '--packManifest', packManifest)
+  pushStandaloneRuntimeArg(args, '--devAccount', standaloneRuntimeLaunchDevAccount(payload))
+  if (standaloneRuntimeQuickPlayNewWorld(payload, launchProfileId)) args.push('--quickPlayNewWorld')
+  return args
+}
+
+function standaloneRuntimeQuickPlayNewWorld(payload = {}, profileId = '') {
+  const requested = payload.quickPlayNewWorld
+    ?? payload.quickPlaySingleplayer
+    ?? payload.quickplaySingleplayer
+    ?? payload.quickPlaySave
+  if (requested === true) return true
+  if (typeof requested === 'string') {
+    const normalized = requested.trim().toLowerCase()
+    if (normalized && normalized !== 'false' && normalized !== '0' && normalized !== 'none') return true
+  }
+  return normalizeOfficialPackId(profileId) === 'ashfall-standalone-edition'
 }
 
 async function standaloneRuntimeLaunch(payload = {}) {
   const profileId = String(payload?.profileId ?? CANONICAL_PROFILE_ID)
   const packRepair = await repairStandalonePackInstallBeforeLaunch(payload, profileId)
   if (packRepair && !packRepair.ok) {
-    const message = `Standalone pack files failed verification after repair. ${summarizeVerificationProblem(packRepair.verification)}`
+    const message = packRepair.message
+      ? `Standalone runtime launch blocked. ${packRepair.message}`
+      : `Standalone pack files failed verification after repair. ${summarizeVerificationProblem(packRepair.verification)}`
     await appendLauncherLog('WARN', `Standalone runtime launch blocked for ${profileId}: ${message}`)
     return {
       ok: false,
@@ -1403,20 +1477,58 @@ async function standaloneRuntimeLaunch(payload = {}) {
       packRepair,
     }
   }
-  const args = ['--live', state.runtimeRoot]
-  const child = spawn(state.executablePath, args, {
-    cwd: state.runtimeRoot,
-    detached: true,
-    stdio: 'ignore',
-  })
+  const args = standaloneRuntimeLaunchArgs(state, payload, packRepair)
+  const installPath = payload.installPath
+    ? normalizePath(payload.installPath)
+    : packRepair?.installPath
+  let logPath = ''
+  let logFd = null
+  let stdio = 'ignore'
+  if (installPath) {
+    const logsDir = path.join(installPath, 'logs')
+    await ensureDir(logsDir)
+    logPath = path.join(logsDir, `echo-standalone-runtime-${nowStamp()}.log`)
+    await fs.writeFile(
+      logPath,
+      [
+        `[${isoNow()}] ECHO Launcher initialized Standalone runtime launch.`,
+        `[${isoNow()}] Profile: ${profileId}`,
+        `[${isoNow()}] Game directory: ${installPath}`,
+        `[${isoNow()}] Runtime root: ${state.runtimeRoot}`,
+        `[${isoNow()}] Executable: ${state.executablePath}`,
+        `[${isoNow()}] Args: ${args.join(' ')}`,
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    logFd = fssync.openSync(logPath, 'a')
+    stdio = ['ignore', logFd, logFd]
+  }
+  let child
+  try {
+    child = spawn(state.executablePath, args, {
+      cwd: state.runtimeRoot,
+      detached: true,
+      stdio,
+    })
+  } finally {
+    if (logFd !== null) {
+      try {
+        fssync.closeSync(logFd)
+      } catch {
+        // Best effort: the detached child owns its stdio handle after spawn.
+      }
+    }
+  }
   child.unref()
   revealStandaloneRuntimeWindow(child.pid)
-  await appendLauncherLog('INFO', `Standalone runtime launched for ${profileId}: pid=${child.pid ?? 'unknown'} path=${state.executablePath} args=${args.join(' ')}`)
+  await appendLauncherLog('INFO', `Standalone runtime launched for ${profileId}: pid=${child.pid ?? 'unknown'} path=${state.executablePath} args=${args.join(' ')}${logPath ? ` log=${logPath}` : ''}`)
   return {
     ok: true,
     profileId,
     pid: child.pid,
     executablePath: state.executablePath,
+    logPath,
     message: `Standalone runtime launched for ${profileId}.`,
     warnings: [
       ...(packRepair?.repaired ? [`Repaired ${packRepair.repair?.installed?.length ?? 0} standalone pack file${(packRepair.repair?.installed?.length ?? 0) === 1 ? '' : 's'} before launch.`] : []),
@@ -4367,6 +4479,219 @@ function nativeClassifierKey(library) {
   return template.replace('${arch}', arch)
 }
 
+function minecraftRuleOsName() {
+  if (process.platform === 'win32') return 'windows'
+  if (process.platform === 'darwin') return 'osx'
+  return 'linux'
+}
+
+function minecraftRuleMatches(rule = {}, features = {}) {
+  const osRule = rule.os
+  if (osRule?.name && osRule.name !== minecraftRuleOsName()) return false
+  if (osRule?.arch && osRule.arch !== os.arch()) return false
+  const ruleFeatures = rule.features && typeof rule.features === 'object' ? rule.features : {}
+  for (const [key, value] of Object.entries(ruleFeatures)) {
+    if (Boolean(features[key]) !== Boolean(value)) return false
+  }
+  return true
+}
+
+function minecraftArgumentAllowed(argument, features = {}) {
+  if (!argument || typeof argument !== 'object' || Array.isArray(argument) || !Array.isArray(argument.rules)) return true
+  let matched = false
+  let allowed = false
+  for (const rule of argument.rules) {
+    if (!minecraftRuleMatches(rule, features)) continue
+    matched = true
+    allowed = rule.action === 'allow'
+  }
+  return matched ? allowed : false
+}
+
+function minecraftArgumentValues(argumentsList = [], features = {}) {
+  const values = []
+  for (const argument of argumentsList ?? []) {
+    if (!minecraftArgumentAllowed(argument, features)) continue
+    const value = argument && typeof argument === 'object' && !Array.isArray(argument) && Object.prototype.hasOwnProperty.call(argument, 'value')
+      ? argument.value
+      : argument
+    if (Array.isArray(value)) values.push(...value.map((item) => String(item)))
+    else values.push(String(value))
+  }
+  return values
+}
+
+function substituteMinecraftArgument(argument, replacements) {
+  let value = String(argument)
+  for (const [key, replacement] of Object.entries(replacements)) {
+    value = value.split(key).join(String(replacement))
+  }
+  return value
+}
+
+async function readMinecraftVersionChain(minecraftRoot, versionId, seen = new Set()) {
+  const id = String(versionId ?? '').trim()
+  if (!id) throw new Error('Minecraft version id is required for direct launch.')
+  if (seen.has(id)) throw new Error(`Minecraft version inheritance cycle detected at '${id}'.`)
+  seen.add(id)
+  const metadataPath = path.join(minecraftRoot, 'versions', id, `${id}.json`)
+  const document = await readJson(metadataPath, null)
+  if (!document || typeof document !== 'object') {
+    throw new Error(`Minecraft version metadata is missing or invalid: ${metadataPath}`)
+  }
+  const parents = document.inheritsFrom
+    ? await readMinecraftVersionChain(minecraftRoot, document.inheritsFrom, seen)
+    : []
+  return [...parents, document]
+}
+
+function mergeMinecraftVersionChain(chain) {
+  const ordered = Array.isArray(chain) ? chain : []
+  const selected = [...ordered].reverse()
+  return {
+    id: selected.find((document) => document?.id)?.id,
+    mainClass: selected.find((document) => document?.mainClass)?.mainClass,
+    assetIndex: selected.find((document) => document?.assetIndex)?.assetIndex,
+    arguments: {
+      jvm: ordered.flatMap((document) => Array.isArray(document?.arguments?.jvm) ? document.arguments.jvm : []),
+      game: ordered.flatMap((document) => Array.isArray(document?.arguments?.game) ? document.arguments.game : []),
+    },
+    libraries: ordered.flatMap((document) => Array.isArray(document?.libraries) ? document.libraries : []),
+  }
+}
+
+function minecraftLibraryArtifactPath(minecraftRoot, library) {
+  const relativePath = String(library?.downloads?.artifact?.path ?? artifactPathFromMavenCoordinate(library?.name) ?? '').replace(/\\/g, '/')
+  return relativePath ? path.join(minecraftRoot, 'libraries', relativePath) : ''
+}
+
+async function ensureMinecraftDirectAssetObjects(minecraftRoot, assetIndex) {
+  if (!assetIndex?.id || !assetIndex?.url) return { checked: 0, downloaded: 0 }
+  const indexPath = path.join(minecraftRoot, 'assets', 'indexes', `${assetIndex.id}.json`)
+  await downloadSha1Artifact({
+    kind: 'asset-index',
+    path: `assets/indexes/${assetIndex.id}.json`,
+    absolutePath: indexPath,
+    url: assetIndex.url,
+    sha1: assetIndex.sha1,
+    size: assetIndex.size,
+  })
+  const document = await readJson(indexPath, null)
+  const objects = document?.objects && typeof document.objects === 'object' ? Object.values(document.objects) : []
+  let downloaded = 0
+  for (const asset of objects) {
+    const hash = String(asset?.hash ?? '').trim()
+    if (!hash) continue
+    const relativePath = `assets/objects/${hash.slice(0, 2)}/${hash}`
+    const result = await downloadSha1Artifact({
+      kind: 'asset',
+      path: relativePath,
+      absolutePath: path.join(minecraftRoot, relativePath),
+      url: `https://resources.download.minecraft.net/${hash.slice(0, 2)}/${hash}`,
+      sha1: hash,
+      size: asset.size,
+    })
+    if (result.status === 'downloaded') downloaded += 1
+  }
+  return { checked: objects.length, downloaded }
+}
+
+async function extractMinecraftNativeArtifact(nativeJarPath, nativesDir) {
+  await ensureDir(nativesDir)
+  const zip = new AdmZip(nativeJarPath)
+  for (const entry of zip.getEntries()) {
+    const entryName = entry.entryName.replace(/\\/g, '/')
+    if (entry.isDirectory || entryName.startsWith('META-INF/')) continue
+    const destination = safeJoin(nativesDir, entryName)
+    await ensureDir(path.dirname(destination))
+    await fs.writeFile(destination, entry.getData())
+  }
+}
+
+async function ensureMinecraftDirectRuntimeArtifacts(minecraftRoot, chain, merged, versionId, nativesDir, options = {}) {
+  const classpath = []
+  const seenClasspath = new Set()
+  const downloads = []
+  const clientJars = []
+
+  const addClasspath = (entryPath) => {
+    if (!entryPath) return
+    const key = process.platform === 'win32' ? entryPath.toLowerCase() : entryPath
+    if (seenClasspath.has(key)) return
+    seenClasspath.add(key)
+    classpath.push(entryPath)
+  }
+
+  for (const document of chain) {
+    if (document?.downloads?.client?.url) {
+      const clientPath = path.join(minecraftRoot, 'versions', document.id, `${document.id}.jar`)
+      clientJars.push(clientPath)
+      const result = await downloadSha1Artifact({
+        kind: 'minecraft-client',
+        path: `versions/${document.id}/${document.id}.jar`,
+        absolutePath: clientPath,
+        url: document.downloads.client.url,
+        sha1: document.downloads.client.sha1,
+        size: document.downloads.client.size,
+      })
+      if (result.status === 'downloaded') downloads.push(`versions/${document.id}/${document.id}.jar`)
+    }
+  }
+
+  for (const library of merged.libraries) {
+    if (!minecraftLibraryAllowed(library)) continue
+    const artifact = library?.downloads?.artifact
+    const libraryPath = minecraftLibraryArtifactPath(minecraftRoot, library)
+    if (libraryPath) {
+      if (artifact?.url) {
+        const result = await downloadSha1Artifact({
+          kind: 'minecraft-library',
+          path: String(artifact.path ?? artifactPathFromMavenCoordinate(library.name)).replace(/\\/g, '/'),
+          absolutePath: libraryPath,
+          url: artifact.url,
+          sha1: artifact.sha1,
+          size: artifact.size,
+        })
+        if (result.status === 'downloaded') downloads.push(path.relative(minecraftRoot, libraryPath).replace(/\\/g, '/'))
+      } else if (!(await exists(libraryPath))) {
+        throw new Error(`Minecraft direct-launch library is missing and has no download metadata: ${library.name}`)
+      }
+      addClasspath(libraryPath)
+    }
+
+    const classifierKey = nativeClassifierKey(library)
+    const nativeArtifact = classifierKey ? library.downloads?.classifiers?.[classifierKey] : null
+    if (nativeArtifact?.path && nativeArtifact?.url) {
+      const nativePath = path.join(minecraftRoot, 'libraries', String(nativeArtifact.path).replace(/\\/g, '/'))
+      const result = await downloadSha1Artifact({
+        kind: 'minecraft-native',
+        path: String(nativeArtifact.path).replace(/\\/g, '/'),
+        absolutePath: nativePath,
+        url: nativeArtifact.url,
+        sha1: nativeArtifact.sha1,
+        size: nativeArtifact.size,
+      })
+      if (result.status === 'downloaded') downloads.push(String(nativeArtifact.path).replace(/\\/g, '/'))
+      await extractMinecraftNativeArtifact(nativePath, nativesDir)
+    }
+  }
+
+  const versionJar = path.join(minecraftRoot, 'versions', versionId, `${versionId}.jar`)
+  if (await exists(versionJar)) {
+    addClasspath(versionJar)
+  } else if (options.allowInheritedClientJar && clientJars.length > 0) {
+    const inheritedClientJar = clientJars[clientJars.length - 1]
+    if (!(await exists(inheritedClientJar))) {
+      throw new Error(`Minecraft direct-launch inherited client jar is missing: ${inheritedClientJar}`)
+    }
+    addClasspath(inheritedClientJar)
+  } else {
+    throw new Error(`Minecraft direct-launch version jar is missing: ${versionJar}`)
+  }
+  const assets = await ensureMinecraftDirectAssetObjects(minecraftRoot, merged.assetIndex)
+  return { classpath, downloads, assets }
+}
+
 function runtimeArtifactFromDownload(download, baseRoot, kind, extra = {}) {
   if (!download?.url || !download.path) return null
   return {
@@ -4682,6 +5007,16 @@ async function resolveInstallManifest(payload, profile) {
   const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(selectedPack)
   const fetched = await releaseFetchManifest({ channel, version: payload.version, refresh: payload.refresh ?? true, pack: selectedPack })
   return assertManifestMatchesSelectedPack(fetched.manifest, selectedPack)
+}
+
+async function resolveRepairManifest(payload, profile) {
+  if (payload.manifest || payload.manifestPath) return resolveInstallManifest(payload, profile)
+  const selectedPack = normalizeOfficialPackId(payload.profileId ?? payload.pack ?? profile?.id)
+  const installPath = normalizePath(payload.installPath ?? profile?.installPath ?? '')
+  const installed = installPath && selectedPack
+    ? await readInstalledProfileManifest(installPath, selectedPack).catch(() => null)
+    : null
+  return installed?.manifest ?? resolveInstallManifest(payload, profile)
 }
 
 function legacyZipAssetForEntry(entry) {
@@ -5178,14 +5513,17 @@ async function resolveProfileAndManifest(payload = {}) {
   const profiles = await profileList()
   const profile = selectLauncherProfile(profiles, payload, true)
   if (!profile) throw new Error('No launcher profile is available.')
+  const payloadInstallPath = payload.installPath ? normalizePath(payload.installPath) : ''
+  const manifestPath = payload.manifestPath
+    ?? (payloadInstallPath ? path.join(payloadInstallPath, '.echo', 'installed-manifest.json') : profile.manifestPath)
   const manifest = payload.manifest
     ? validateSelectedPackManifest(payload.manifest, profile.id)
     : await manifestLoad({
         ...payload,
-        manifestPath: payload.manifestPath ?? profile.manifestPath,
+        manifestPath,
         pack: profile.id,
       })
-  const installPath = normalizePath(payload.installPath ?? profile.installPath ?? manifest.localInstallRoot)
+  const installPath = normalizePath(payloadInstallPath || profile.installPath || manifest.localInstallRoot)
   return { profile, manifest, installPath }
 }
 
@@ -5482,13 +5820,26 @@ function echoNativeLoaderDownloadArtifact() {
 
 function allowLocalNativeLoaderFallback() {
   const value = String(process.env.ECHO_ALLOW_LOCAL_NATIVE_LOADER ?? '').trim().toLowerCase()
-  return value === '1' || value === 'true' || value === 'yes'
+  return value === '1' || value === 'true' || value === 'yes' || !app.isPackaged
 }
 
 function nativeLoaderLocalCandidatePaths() {
   const configured = String(process.env.ECHO_NATIVE_LOADER_LOCAL_JAR ?? '').trim()
-  if (!allowLocalNativeLoaderFallback() || !configured) return []
-  return [path.resolve(configured)]
+  if (!allowLocalNativeLoaderFallback()) return []
+  const candidates = []
+  if (configured) candidates.push(path.resolve(configured))
+  if (!app.isPackaged) {
+    candidates.push(path.resolve(
+      __dirname,
+      '..',
+      '..',
+      'ECHO-Native-Platform',
+      'build',
+      'native-loader-client-library',
+      `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`,
+    ))
+  }
+  return candidates
 }
 
 async function verifiedNativeLoaderLocalCandidate(candidatePath, artifact) {
@@ -5563,6 +5914,54 @@ function nativePackJvmArguments(manifest, nativeRuntime = null) {
   )
 }
 
+const ECHO_NATIVE_DYNAMIC_JVM_PREFIXES = [
+  '-Decho.native.packId=',
+  '-Decho.native.packVersion=',
+  '-Decho.native.addonsClasspath=',
+  '-Decho.native.loader=',
+  '-Decho.native.windowedClient=',
+  '-Decho.native.runtime.mode=',
+  '-Decho.native.minecraftMainClass=',
+  '-Decho.native.bootstrap.authorizedHandoff=',
+  '-Decho.native.gameDir=',
+  '-Decho.native.moduleClasspath=',
+  '-Decho.native.moduleClasspathFile=',
+  '-Decho.native.moduleIds=',
+  '-Decho.native.bootstrap.profileClass=',
+]
+
+const ECHO_NATIVE_DYNAMIC_GAME_VALUE_FLAGS = new Set([
+  '--echo-marker',
+  '--echo-handoff-file',
+  '--echo-pack-id',
+  '--echo-real-main',
+  '--echo-module',
+  '--echo-native-entrypoint',
+])
+
+const ECHO_NATIVE_DYNAMIC_GAME_FLAGS = new Set([
+  '--echo-handoff',
+])
+
+function isEchoNativeDynamicJvmArgument(value) {
+  const text = String(value ?? '')
+  return ECHO_NATIVE_DYNAMIC_JVM_PREFIXES.some((prefix) => text.startsWith(prefix))
+}
+
+function stripEchoNativeDynamicGameArguments(values = []) {
+  const cleaned = []
+  for (let index = 0; index < values.length; index += 1) {
+    const value = String(values[index] ?? '')
+    if (ECHO_NATIVE_DYNAMIC_GAME_VALUE_FLAGS.has(value)) {
+      index += 1
+      continue
+    }
+    if (ECHO_NATIVE_DYNAMIC_GAME_FLAGS.has(value)) continue
+    cleaned.push(values[index])
+  }
+  return cleaned
+}
+
 function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId = nativeLoaderMinecraftVersionId(manifest), packLibraries = [], nativeRuntime = null) {
   const source = versionJson && typeof versionJson === 'object' && !Array.isArray(versionJson) ? versionJson : {}
   const libraries = Array.isArray(source.libraries) ? source.libraries : []
@@ -5578,8 +5977,14 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
   const sourceArguments = source.arguments && typeof source.arguments === 'object' && !Array.isArray(source.arguments)
     ? source.arguments
     : { game: [], jvm: [] }
+  const sourceJvmArguments = Array.isArray(sourceArguments.jvm)
+    ? sourceArguments.jvm.filter((value) => !isEchoNativeDynamicJvmArgument(value))
+    : []
+  const sourceGameArguments = Array.isArray(sourceArguments.game)
+    ? stripEchoNativeDynamicGameArguments(sourceArguments.game)
+    : []
   const jvmArguments = [
-    ...(Array.isArray(sourceArguments.jvm) ? sourceArguments.jvm : []),
+    ...sourceJvmArguments,
     ...nativePackJvmArguments(manifest, nativeRuntime),
   ].filter((value, index, values) => value && values.indexOf(value) === index)
   const gameArguments = [
@@ -5590,7 +5995,7 @@ function normalizeEchoNativeLoaderVersionJson(versionJson, manifest, versionId =
       },
       nativeRuntime,
     ),
-    ...(Array.isArray(sourceArguments.game) ? sourceArguments.game : []),
+    ...sourceGameArguments,
   ].filter(Boolean)
   return stripNullishLauncherFields({
     ...source,
@@ -6299,7 +6704,8 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
   if (initial.source === 'invalid' && !initial.metadataPath) {
     throw new Error(initial.reason ?? 'Minecraft Launcher runtime metadata is invalid.')
   }
-  if (initial.ready) return { ...initial, created: baseVersion.created || runtimeArtifacts.created, warnings }
+  const refreshNativeMetadata = normalizedMode === 'native-loader-minecraft'
+  if (initial.ready && !refreshNativeMetadata) return { ...initial, created: baseVersion.created || runtimeArtifacts.created, warnings }
 
   const metadata = buildEchoManagedVersionManifest(
     manifest,
@@ -6316,6 +6722,8 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
   const manifestName = manifest?.name ?? profile?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
   if (initial.source === 'invalid') {
     warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was invalid (${initial.reason}). ECHO rewrote it from the verified ${manifestName} manifest.`)
+  } else if (initial.ready && refreshNativeMetadata) {
+    warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was refreshed with the current Native Loader handoff for ${manifestName}.`)
   } else {
     warnings.push(`Minecraft Launcher ${runtimeLabel} version metadata '${initial.versionId}' was missing. ECHO wrote it from the verified ${manifestName} manifest.`)
   }
@@ -7886,6 +8294,285 @@ async function nativeLoaderLaunchAshfall(payload = {}) {
   }
 }
 
+function ashfallNeoForgeDevDirectLaunchEnabled(profile, manifest, runtimeMode = 'neoforge-minecraft') {
+  const packId = normalizeOfficialPackId(manifest?.pack ?? profile?.id)
+  const devOverride = process.env.ECHO_LAUNCHER_ENABLE_DEV_DIRECT_LAUNCH === '1'
+  return Boolean(
+    (devOverride || !app.isPackaged) &&
+      packId === 'ashfall-neoforge-edition' &&
+      normalizeMinecraftRuntimeMode(runtimeMode, profile) === 'neoforge-minecraft',
+  )
+}
+
+function ashfallNativeDevDirectLaunchEnabled(profile, manifest, runtimeMode = 'native-loader-minecraft') {
+  const packId = normalizeOfficialPackId(manifest?.pack ?? profile?.id)
+  const devOverride = process.env.ECHO_LAUNCHER_ENABLE_DEV_DIRECT_LAUNCH === '1'
+  return Boolean(
+    (devOverride || !app.isPackaged) &&
+      packId === 'ashfall-native-edition' &&
+      normalizeMinecraftRuntimeMode(runtimeMode, profile) === 'native-loader-minecraft',
+  )
+}
+
+function ashfallDevDirectLaunchEnabled(profile, manifest, runtimeMode) {
+  return (
+    ashfallNativeDevDirectLaunchEnabled(profile, manifest, runtimeMode) ||
+    ashfallNeoForgeDevDirectLaunchEnabled(profile, manifest, runtimeMode)
+  )
+}
+
+function ashfallDevDirectRuntimeName(runtimeMode) {
+  return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' ? 'Native Loader' : 'NeoForge'
+}
+
+function ashfallDevDirectOperationPrefix(runtimeMode) {
+  return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' ? 'native-loader-dev-direct' : 'neoforge-dev-direct'
+}
+
+function ashfallDevDirectLogSlug(runtimeMode) {
+  return normalizeMinecraftRuntimeMode(runtimeMode) === 'native-loader-minecraft' ? 'native-loader' : 'neoforge'
+}
+
+function offlineDevUuid(username) {
+  return crypto.createHash('md5').update(`OfflinePlayer:${username}`).digest('hex')
+}
+
+function minecraftDirectLaunchFeatures(quickPlay = null) {
+  const quickPlayMode = String(quickPlay?.type ?? '').toLowerCase()
+  return {
+    has_custom_resolution: true,
+    is_demo_user: false,
+    has_quick_plays_support: Boolean(quickPlay),
+    is_quick_play_singleplayer: quickPlayMode === 'singleplayer',
+    is_quick_play_multiplayer: quickPlayMode === 'multiplayer',
+    is_quick_play_realms: quickPlayMode === 'realms',
+  }
+}
+
+function minecraftQuickPlaySingleplayerPath(installPath) {
+  return path.join(installPath, '.echo', 'dev-launch', 'quickplay', 'singleplayer.json')
+}
+
+async function latestMinecraftQuickPlayHistorySaveName(installPath, savesRoot) {
+  const quickPlayPath = minecraftQuickPlaySingleplayerPath(installPath)
+  const entries = await readJson(quickPlayPath, [])
+  if (!Array.isArray(entries)) return null
+  const candidates = []
+  for (const entry of entries) {
+    const type = String(entry?.type ?? '').trim().toLowerCase()
+    const saveName = String(entry?.id ?? entry?.name ?? entry?.singleplayer ?? '').trim()
+    const lastPlayedTime = Date.parse(String(entry?.lastPlayedTime ?? ''))
+    if (type !== 'singleplayer' || !saveName || !Number.isFinite(lastPlayedTime)) continue
+    const savePath = safeJoin(savesRoot, saveName)
+    const levelDat = path.join(savePath, 'level.dat')
+    if (!(await exists(levelDat))) continue
+    candidates.push({ name: saveName, modified: lastPlayedTime })
+  }
+  candidates.sort((left, right) => right.modified - left.modified || left.name.localeCompare(right.name))
+  return candidates[0]?.name ?? null
+}
+
+async function latestMinecraftSingleplayerSaveName(installPath) {
+  const savesRoot = path.join(installPath, 'saves')
+  const historySaveName = await latestMinecraftQuickPlayHistorySaveName(installPath, savesRoot)
+  if (historySaveName) return historySaveName
+  const entries = await fs.readdir(savesRoot, { withFileTypes: true }).catch(() => [])
+  const candidates = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const savePath = path.join(savesRoot, entry.name)
+    const levelDat = path.join(savePath, 'level.dat')
+    if (!(await exists(levelDat))) continue
+    const [saveStats, levelStats] = await Promise.all([
+      fs.stat(savePath).catch(() => null),
+      fs.stat(levelDat).catch(() => null),
+    ])
+    candidates.push({
+      name: entry.name,
+      modified: Math.max(saveStats?.mtimeMs ?? 0, levelStats?.mtimeMs ?? 0),
+    })
+  }
+  candidates.sort((left, right) => right.modified - left.modified || left.name.localeCompare(right.name))
+  return candidates[0]?.name ?? null
+}
+
+async function resolveMinecraftQuickPlay(installPath, payload = {}) {
+  const requested = payload.quickPlaySingleplayer
+    ?? payload.quickplaySingleplayer
+    ?? payload.quickPlaySave
+    ?? process.env.ECHO_DEV_QUICKPLAY_SINGLEPLAYER
+  if (requested == null || requested === false || requested === '') return null
+
+  const requestedText = requested === true ? 'latest' : String(requested).trim()
+  const requestedMode = requestedText.toLowerCase()
+  const latestIfPresent = requestedMode === 'latest-if-present'
+  const saveName = !requestedText || requestedMode === 'latest' || latestIfPresent
+    ? await latestMinecraftSingleplayerSaveName(installPath)
+    : requestedText
+  if (!saveName) {
+    if (latestIfPresent) return null
+    throw new Error('Quick-play singleplayer launch requested, but no Minecraft save exists for this Ashfall instance.')
+  }
+
+  const savesRoot = path.join(installPath, 'saves')
+  const savePath = safeJoin(savesRoot, saveName)
+  const levelDat = path.join(savePath, 'level.dat')
+  if (!(await exists(levelDat))) {
+    throw new Error(`Quick-play save '${saveName}' is missing level.dat.`)
+  }
+
+  const quickPlayPath = minecraftQuickPlaySingleplayerPath(installPath)
+  const entry = {
+    type: 'singleplayer',
+    id: saveName,
+    name: saveName,
+    gamemode: 'creative',
+    source: 'ECHO Launcher dev-direct quick play',
+  }
+  const levelDatStats = await fs.stat(levelDat).catch(() => null)
+  if (levelDatStats) {
+    entry.levelDatLastModified = levelDatStats.mtime.toISOString()
+  }
+  await writeJson(quickPlayPath, [entry])
+  return {
+    type: 'singleplayer',
+    path: quickPlayPath,
+    singleplayer: saveName,
+  }
+}
+
+function minecraftDirectLaunchCommandPreview(javaPath, jvmArgs, mainClass, gameArgs) {
+  const previewArgs = [...jvmArgs, mainClass, ...gameArgs]
+  const preview = [javaPath, ...previewArgs].map((item) => {
+    const value = String(item)
+    return /\s/u.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value
+  })
+  const joined = preview.join(' ')
+  return joined.length > 1200 ? `${joined.slice(0, 1200)} ...` : joined
+}
+
+async function buildAshfallDevDirectLaunchPlan(payload = {}) {
+  const { profile, manifest, installPath } = await resolveProfileAndManifest(payload)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
+  if (!ashfallDevDirectLaunchEnabled(profile, manifest, runtimeMode)) {
+    throw new Error(nativeLaunchRemovedMessage())
+  }
+
+  const runtimeName = ashfallDevDirectRuntimeName(runtimeMode)
+  const operationId = payload.operationId ?? createOperationId(ashfallDevDirectOperationPrefix(runtimeMode))
+  const ramGb = Math.max(2, Number(payload.ramGb ?? profile.ramGb ?? Math.ceil((manifest.ramMb ?? 6144) / 1024)) || 6)
+  const [java, verification, modsValidation] = await Promise.all([
+    javaDetect(),
+    verifyManifest({ profileId: profile.id, installPath, manifest }),
+    validateAshfallInstanceMods(installPath, manifest, runtimeMode),
+  ])
+  if (!java.preferred?.valid) {
+    throw new Error(`Java 25+ is required for Ashfall ${runtimeName} dev direct launch.`)
+  }
+  if ((verification.missing?.length ?? 0) > 0 || (verification.corrupt?.length ?? 0) > 0) {
+    throw new Error(`Ashfall ${runtimeName} install verification failed: ${verification.missing.length} missing and ${verification.corrupt.length} corrupt files.`)
+  }
+  if (!modsValidation.ok) {
+    throw new Error(modsValidation.warnings.join(' '))
+  }
+
+  const minecraftRoot = await detectMinecraftRoot({ createIfMissing: true })
+  const versionPrep = await ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, profile, operationId, runtimeMode, installPath)
+  const versionId = versionPrep.versionId ?? minecraftLauncherVersionId(manifest, runtimeMode)
+  const chain = await readMinecraftVersionChain(minecraftRoot, versionId)
+  const merged = mergeMinecraftVersionChain(chain)
+  if (!merged.mainClass) throw new Error(`Minecraft direct-launch metadata '${versionId}' does not declare a mainClass.`)
+
+  const launchStamp = nowStamp()
+  const nativesDir = path.join(installPath, '.echo', 'dev-launch', 'natives', launchStamp)
+  const logPath = path.join(installPath, 'logs', `echo-dev-direct-${ashfallDevDirectLogSlug(runtimeMode)}-${launchStamp}.log`)
+  await ensureDir(path.dirname(logPath))
+  const runtime = await ensureMinecraftDirectRuntimeArtifacts(minecraftRoot, chain, merged, versionId, nativesDir, {
+    allowInheritedClientJar: runtimeMode === 'native-loader-minecraft',
+  })
+  const quickPlay = await resolveMinecraftQuickPlay(installPath, payload)
+  const username = String(process.env.ECHO_DEV_MINECRAFT_USERNAME || 'EchoDev').replace(/[^a-z0-9_]/gi, '').slice(0, 16) || 'EchoDev'
+  const accessToken = process.env.ECHO_DEV_MINECRAFT_ACCESS_TOKEN || '0'
+  const uuid = process.env.ECHO_DEV_MINECRAFT_UUID || offlineDevUuid(username)
+  const classpath = runtime.classpath.join(path.delimiter)
+  const replacements = {
+    '${natives_directory}': nativesDir,
+    '${launcher_name}': 'ECHO-Launcher-DevDirect',
+    '${launcher_version}': app.getVersion?.() ?? 'dev',
+    '${classpath}': classpath,
+    '${classpath_separator}': path.delimiter,
+    '${library_directory}': path.join(minecraftRoot, 'libraries'),
+    '${auth_player_name}': username,
+    '${version_name}': versionId,
+    '${game_directory}': installPath,
+    '${assets_root}': path.join(minecraftRoot, 'assets'),
+    '${assets_index_name}': merged.assetIndex?.id ?? minecraftVersionFromManifest(manifest),
+    '${auth_uuid}': uuid,
+    '${auth_access_token}': accessToken,
+    '${clientid}': process.env.ECHO_DEV_MINECRAFT_CLIENT_ID || 'echo-dev-direct',
+    '${auth_xuid}': process.env.ECHO_DEV_MINECRAFT_XUID || '0',
+    '${version_type}': 'release',
+    '${resolution_width}': String(process.env.ECHO_DEV_MINECRAFT_WIDTH || 1280),
+    '${resolution_height}': String(process.env.ECHO_DEV_MINECRAFT_HEIGHT || 720),
+    '${quickPlayPath}': quickPlay?.path ?? '',
+    '${quickPlaySingleplayer}': quickPlay?.singleplayer ?? '',
+    '${quickPlayMultiplayer}': '',
+    '${quickPlayRealms}': '',
+  }
+  const features = minecraftDirectLaunchFeatures(quickPlay)
+  const jvmArgs = [
+    `-Xmx${ramGb}G`,
+    '-Xms1G',
+    ...minecraftArgumentValues(merged.arguments.jvm, features).map((argument) => substituteMinecraftArgument(argument, replacements)),
+    ...nativeDevDirectQuickPlayJvmArguments(runtimeMode, quickPlay),
+    ...nativeDevDirectProductWorldJvmArguments(runtimeMode),
+    ...nativeDevDirectAuditJvmArguments(runtimeMode, payload),
+  ]
+  if (!jvmArgs.includes('-cp') && !jvmArgs.includes('-classpath')) {
+    jvmArgs.push('-cp', classpath)
+  }
+  const gameArgs = minecraftArgumentValues(merged.arguments.game, features).map((argument) => substituteMinecraftArgument(argument, replacements))
+  return {
+    profileId: profile.id,
+    installPath,
+    javaPath: java.preferred.path,
+    mainClass: merged.mainClass,
+    classpath: runtime.classpath,
+    jvmArgs,
+    gameArgs,
+    commandPreview: accessToken !== '0'
+      ? minecraftDirectLaunchCommandPreview(java.preferred.path, jvmArgs, merged.mainClass, gameArgs).replace(accessToken, '<redacted>')
+      : minecraftDirectLaunchCommandPreview(java.preferred.path, jvmArgs, merged.mainClass, gameArgs),
+    logPath,
+    createdAt: isoNow(),
+    runtimeMode,
+    runtimeLabel: minecraftRuntimeLabel(runtimeMode),
+    minecraftRoot,
+    versionId,
+    versionMetadataPath: versionPrep.metadataPath,
+    nativesDir,
+    quickPlay,
+    devAccount: {
+      username,
+      uuid,
+      offline: accessToken === '0',
+    },
+    warnings: [
+      ...(versionPrep.warnings ?? []),
+      ...(runtime.downloads.length > 0 ? [`Downloaded ${runtime.downloads.length} missing Minecraft/${runtimeName} runtime artifact${runtime.downloads.length === 1 ? '' : 's'} for dev direct launch.`] : []),
+      ...(runtime.assets.downloaded > 0 ? [`Downloaded ${runtime.assets.downloaded} missing Minecraft asset object${runtime.assets.downloaded === 1 ? '' : 's'} for dev direct launch.`] : []),
+    ],
+  }
+}
+
+async function buildAshfallNeoForgeDevDirectLaunchPlan(payload = {}) {
+  return buildAshfallDevDirectLaunchPlan({ ...payload, runtimeMode: 'neoforge-minecraft' })
+}
+
+async function buildAshfallNativeDevDirectLaunchPlan(payload = {}) {
+  return buildAshfallDevDirectLaunchPlan({ ...payload, runtimeMode: 'native-loader-minecraft' })
+}
+
 async function packExport(payload = {}) {
   const paths = getPaths()
   const { profile, manifest, installPath } = await resolveProfileAndManifest({
@@ -7921,12 +8608,66 @@ function nativeLaunchRemovedMessage() {
   return 'Native launch was removed. Use Minecraft Launcher Handoff so the official launcher handles Microsoft login and play.'
 }
 
-async function launchBuildCommand() {
+async function launchBuildCommand(payload = {}) {
+  const { profile, manifest } = await resolveProfileAndManifest(payload)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
+  if (ashfallDevDirectLaunchEnabled(profile, manifest, runtimeMode)) {
+    return buildAshfallDevDirectLaunchPlan({ ...payload, runtimeMode })
+  }
   throw new Error(nativeLaunchRemovedMessage())
 }
 
 async function launchPreflight(payload = {}) {
   const { profile, manifest, installPath } = await resolveProfileAndManifest(payload)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
+  if (ashfallDevDirectLaunchEnabled(profile, manifest, runtimeMode)) {
+    const runtimeName = ashfallDevDirectRuntimeName(runtimeMode)
+    const nativeMode = runtimeMode === 'native-loader-minecraft'
+    const [java, verification, modsValidation] = await Promise.all([
+      javaDetect(),
+      verifyManifest({ profileId: profile.id, installPath, manifest }),
+      validateAshfallInstanceMods(installPath, manifest, runtimeMode),
+    ])
+    const blockers = []
+    if (!java.preferred?.valid) {
+      blockers.push({
+        id: 'java-runtime',
+        severity: 'critical',
+        message: `Java 25+ is required for Ashfall ${runtimeName} dev direct launch.`,
+        action: 'Install Java 25+ or point ECHO to a compatible Java runtime.',
+      })
+    }
+    if ((verification.missing?.length ?? 0) > 0 || (verification.corrupt?.length ?? 0) > 0) {
+      blockers.push({
+        id: 'manifest-verification',
+        severity: 'critical',
+        message: `Ashfall ${runtimeName} install verification failed: ${verification.missing.length} missing and ${verification.corrupt.length} corrupt files.`,
+        action: `Run Repair before launching the dev-direct ${runtimeName} lane.`,
+      })
+    }
+    if (!modsValidation.ok) {
+      blockers.push({
+        id: nativeMode ? 'native-loader-addons' : 'neoforge-mods',
+        severity: 'critical',
+        message: modsValidation.warnings.join(' '),
+        action: `Run Install or Repair so every required ${nativeMode ? 'Native Loader addon' : 'NeoForge mod jar'} is present.`,
+      })
+    }
+    return {
+      ok: blockers.length === 0,
+      profileId: profile.id,
+      installPath,
+      checkedAt: isoNow(),
+      java: java.preferred,
+      verification,
+      runtimeVerification: undefined,
+      accountLinked: true,
+      sessionReady: true,
+      neoforgeReady: nativeMode || blockers.every((blocker) => blocker.id !== 'neoforge-mods'),
+      ramGb: Number(payload.ramGb ?? profile.ramGb ?? 8),
+      blockers,
+    }
+  }
   const [java, verification, runtimeVerification] = await Promise.all([
     javaDetect(),
     verifyManifest({ manifest, installPath }),
@@ -7957,7 +8698,140 @@ async function launchPreflight(payload = {}) {
 }
 
 async function launchStart(payload = {}) {
-  const profileId = payload.profileId ?? CANONICAL_PROFILE_ID
+  const { profile, manifest } = await resolveProfileAndManifest(payload)
+  const runtimeMode = normalizeMinecraftRuntimeMode(payload.runtimeMode, profile)
+  const profileId = profile.id ?? payload.profileId ?? CANONICAL_PROFILE_ID
+  if (ashfallDevDirectLaunchEnabled(profile, manifest, runtimeMode)) {
+    const runtimeName = ashfallDevDirectRuntimeName(runtimeMode)
+    if (activeLaunch?.process && !activeLaunch.exitedAt) {
+      activeLaunch.message = `${activeLaunch.profileId ?? 'Minecraft'} is already running.`
+      return launchState()
+    }
+
+    const operationId = payload.operationId ?? createOperationId(ashfallDevDirectOperationPrefix(runtimeMode))
+    updateOperationStatus(operationId, {
+      kind: 'launch',
+      status: 'running',
+      phaseId: 'prepare',
+      label: `Preparing Ashfall ${runtimeName} dev launch`,
+      progress: 12,
+      message: `Resolving Minecraft and ${runtimeName} runtime metadata.`,
+    })
+
+    try {
+      const plan = await buildAshfallDevDirectLaunchPlan({ ...payload, profileId, operationId, runtimeMode })
+      updateOperationStatus(operationId, {
+        kind: 'launch',
+        status: 'running',
+        phaseId: 'java',
+        label: `Starting Ashfall ${runtimeName}`,
+        progress: 86,
+        message: `Starting ${profile.name} directly as ${plan.devAccount.username}.`,
+      })
+      await fs.writeFile(
+        plan.logPath,
+        [
+          `[${isoNow()}] ECHO Launcher dev-direct Ashfall ${runtimeName} launch`,
+          `profile=${plan.profileId}`,
+          `version=${plan.versionId}`,
+          `minecraftRoot=${plan.minecraftRoot}`,
+          `installPath=${plan.installPath}`,
+          `devAccount=${plan.devAccount.username} offline=${plan.devAccount.offline}`,
+          `classpathEntries=${plan.classpath.length}`,
+          `commandPreview=${plan.commandPreview}`,
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+      const logFd = fssync.openSync(plan.logPath, 'a')
+      let logClosed = false
+      const closeLog = () => {
+        if (logClosed) return
+        logClosed = true
+        try {
+          fssync.closeSync(logFd)
+        } catch {
+          // Best effort cleanup after the child exits.
+        }
+      }
+      const processArgs = [...plan.jvmArgs, plan.mainClass, ...plan.gameArgs]
+      const child = spawn(plan.javaPath, processArgs, {
+        cwd: plan.installPath,
+        stdio: ['ignore', logFd, logFd],
+        windowsHide: false,
+      })
+      activeLaunch = {
+        process: child,
+        profileId: plan.profileId,
+        startedAt: isoNow(),
+        exitedAt: undefined,
+        exitCode: null,
+        logPath: plan.logPath,
+        status: 'starting',
+        message: `${profile.name} dev-direct launch is starting as ${plan.devAccount.username}.`,
+      }
+      child.on('spawn', () => {
+        if (!activeLaunch || activeLaunch.process !== child) return
+        activeLaunch.status = 'running'
+        activeLaunch.message = `${profile.name} is running through ECHO dev-direct ${runtimeName} launch.`
+        updateOperationStatus(operationId, {
+          kind: 'launch',
+          status: 'completed',
+          phaseId: 'java',
+          label: `Ashfall ${runtimeName} running`,
+          progress: 100,
+          message: activeLaunch.message,
+        })
+        appendLauncherLog('INFO', `${profile.name} dev-direct ${runtimeName} launch started with PID ${child.pid}. Log: ${plan.logPath}`).catch(() => undefined)
+      })
+      child.on('error', (error) => {
+        closeLog()
+        if (!activeLaunch || activeLaunch.process !== child) return
+        activeLaunch.status = 'failed'
+        activeLaunch.exitedAt = isoNow()
+        activeLaunch.exitCode = null
+        activeLaunch.message = error instanceof Error ? error.message : String(error)
+        updateOperationStatus(operationId, {
+          kind: 'launch',
+          status: 'failed',
+          phaseId: 'java',
+          label: `Ashfall ${runtimeName} failed`,
+          progress: 96,
+          message: activeLaunch.message,
+        })
+      })
+      child.on('exit', (code, signal) => {
+        closeLog()
+        if (!activeLaunch || activeLaunch.process !== child) return
+        activeLaunch.exitedAt = isoNow()
+        activeLaunch.exitCode = code
+        activeLaunch.status = code === 0 ? 'exited' : 'failed'
+        activeLaunch.message = `${profile.name} exited${code === null ? '' : ` with code ${code}`}${signal ? ` (${signal})` : ''}.`
+        appendLauncherLog(code === 0 ? 'INFO' : 'ERROR', `${profile.name} dev-direct ${runtimeName} process exited. code=${code} signal=${signal ?? ''} log=${plan.logPath}`).catch(() => undefined)
+      })
+      return launchState()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      activeLaunch = {
+        status: 'preflight_failed',
+        message,
+        profileId,
+        logPath: '',
+        exitCode: null,
+        exitedAt: isoNow(),
+      }
+      updateOperationStatus(operationId, {
+        kind: 'launch',
+        status: 'failed',
+        phaseId: 'prepare',
+        label: `Ashfall ${runtimeName} dev launch blocked`,
+        progress: 96,
+        message,
+      })
+      await appendLauncherLog('ERROR', `${profile.name} dev-direct ${runtimeName} launch blocked: ${message}`)
+      return launchState()
+    }
+  }
   activeLaunch = {
     status: 'preflight_failed',
     message: nativeLaunchRemovedMessage(),
@@ -8562,7 +9436,7 @@ async function repairRun(payload = {}) {
   const paths = getPaths()
   const profiles = await profileList()
   const profile = selectLauncherProfile(profiles, payload, true)
-  const manifest = await resolveInstallManifest(payload, profile)
+  const manifest = await resolveRepairManifest(payload, profile)
   if (manifest.artifactMode === 'zip') {
     return repairZipPackArtifact(payload, profile, manifest)
   }

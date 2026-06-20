@@ -88,6 +88,8 @@ Options:
   --log <path>            Runtime/client log copied into .echo/proofs/logs.
   --save <path>           Save snapshot ZIP copied into .echo/proofs/saves.
   --action <text>         Visible action taken by Computer Use. Repeatable.
+  --proof-source <value>  Source label for imported claim proof files.
+                          Default: computer-use-window-screenshot.
   --verification-check <v> UI/gameplay check as id|label|status|evidenceRef|note.
                           Repeatable. Captured checks must reference an imported
                           claim id, imported proof path, or artifact proof.
@@ -108,6 +110,7 @@ function parseArgs(argv) {
     logs: [],
     saves: [],
     actions: [],
+    proofSource: 'computer-use-window-screenshot',
     verificationChecks: [],
     appId: '',
     windowTitle: '',
@@ -129,6 +132,7 @@ function parseArgs(argv) {
     else if (arg === '--log') args.logs.push(path.resolve(next()))
     else if (arg === '--save') args.saves.push(path.resolve(next()))
     else if (arg === '--action') args.actions.push(next())
+    else if (arg === '--proof-source') args.proofSource = next().trim()
     else if (arg === '--verification-check') args.verificationChecks.push(parseVerificationCheck(next()))
     else if (arg === '--app-id') args.appId = next()
     else if (arg === '--window-title') args.windowTitle = next()
@@ -141,6 +145,7 @@ function parseArgs(argv) {
   if (args.help) return args
   if (!args.lane) throw new Error('--lane is required.')
   if (!Number.isFinite(Date.parse(args.capturedAt))) throw new Error('--captured-at must be an ISO timestamp.')
+  if (!args.proofSource) throw new Error('--proof-source must not be empty.')
   return args
 }
 
@@ -182,7 +187,8 @@ function parseVerificationCheck(spec) {
 
 async function readJsonIfExists(filePath) {
   try {
-    return JSON.parse(await fs.readFile(filePath, 'utf8'))
+    const text = await fs.readFile(filePath, 'utf8')
+    return JSON.parse(text.replace(/^\uFEFF/u, ''))
   } catch (error) {
     if (error?.code === 'ENOENT') return null
     throw error
@@ -396,6 +402,7 @@ async function importLane(args) {
     appId: args.appId || null,
     windowTitle: args.windowTitle || null,
     actions: args.actions,
+    proofSource: args.proofSource,
     verificationChecks: verification.checks,
     verificationSummary: verification.summary,
     claimProofs: importedClaims,
@@ -410,7 +417,7 @@ async function importLane(args) {
   evidence.visibleProofs = importedClaims.map((entry) => ({
     claim: entry.claim,
     proof: entry.proof,
-    source: 'computer-use-window-screenshot',
+    source: args.proofSource,
   }))
   evidence.verificationChecks = verification.checks
   evidence.verificationSummary = verification.summary

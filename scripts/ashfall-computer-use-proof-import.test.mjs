@@ -166,4 +166,43 @@ describe('Ashfall Computer Use proof importer', () => {
     const session = await readJson(path.join(instanceRoot, 'Ashfall Native Edition', '.echo', 'proofs', 'computer-use-session.json'))
     expect(session.actions).toEqual([])
   })
+
+  it('records a custom proof source for game-native screenshots triggered by Computer Use', async () => {
+    const instanceRoot = await createInstanceRoot()
+    const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'echo-ashfall-computer-use-sources-'))
+    const screenshot = path.join(sourceRoot, 'hud-f2.png')
+    await fs.writeFile(screenshot, 'minecraft screenshot bytes')
+
+    await runImport([
+      '--instance-root',
+      instanceRoot,
+      '--lane',
+      'native',
+      '--claim',
+      `hudVisible=${screenshot}`,
+      '--action',
+      'Activated the game window with Computer Use and pressed F2 to save the HUD screenshot.',
+      '--proof-source',
+      'computer-use-game-native-screenshot',
+      '--verification-check',
+      'hudVisible|HUD visible|captured|hudVisible|Verified HUD from game-native screenshot triggered by Computer Use.',
+      '--captured-at',
+      '2026-06-17T14:10:00.000Z',
+      '--strict',
+      '--json',
+    ])
+
+    const evidencePath = path.join(instanceRoot, 'Ashfall Native Edition', '.echo', 'ashfall-lane-game-smoke-evidence.json')
+    const evidence = await readJson(evidencePath)
+    expect(evidence.visibleProofs).toEqual([
+      {
+        claim: 'hudVisible',
+        proof: evidence.proofs.hudVisible[0],
+        source: 'computer-use-game-native-screenshot',
+      },
+    ])
+
+    const session = await readJson(path.join(instanceRoot, 'Ashfall Native Edition', '.echo', 'proofs', 'computer-use-session.json'))
+    expect(session.proofSource).toBe('computer-use-game-native-screenshot')
+  })
 })

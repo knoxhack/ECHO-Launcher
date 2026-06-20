@@ -2,7 +2,7 @@ import type { PackManifest } from './manifests'
 import type { LauncherProfile } from './profiles'
 import type { CanonicalReleaseIndexCatalog, EchoProtocolAction, LauncherDesktopSettings, MobileBridgeDeviceRole, MobileBridgeState, ReleaseEntry, ReleaseFetchResult, ReleaseIndex } from './releases'
 import type { AccountState } from './auth'
-import type { LaunchPreflightReport, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from './launch'
+import type { LaunchPreflightReport, LaunchRequest, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from './launch'
 import type { AssetValidationReport, WorldCompatibilityReport } from './diagnostics'
 import type { PackOsLauncherState } from './packos'
 import type { HealthStatus } from './launcher'
@@ -663,6 +663,7 @@ export type {
   AccountState,
   AssetValidationReport,
   LaunchPreflightReport,
+  LaunchRequest,
   LaunchProcessState,
   MinecraftLauncherDependencyStatus,
   MinecraftLauncherHandoffResult,

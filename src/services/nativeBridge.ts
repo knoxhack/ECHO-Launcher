@@ -16,6 +16,7 @@ import type {
   AccountState,
   AssetValidationReport,
   LaunchPreflightReport,
+  LaunchRequest,
   LaunchProcessState,
   MinecraftLauncherHandoffResult,
   MinecraftLauncherDependencyStatus,
@@ -123,9 +124,9 @@ type NativeCommandMap = {
     payload: { profileId?: string; installPath?: string; ramGb?: number; version?: string; refreshRelease?: boolean; operationId?: string; updatePolicy?: 'allow' | 'skip'; runtimeMode?: MinecraftRuntimeModeId; prepareOnly?: boolean } | undefined
     result: NativeHandoffPreparationResult
   }
-  'launch:preflight': { payload: { profileId: string; installPath?: string; ramGb?: number }; result: LaunchPreflightReport }
-  'launch:build-command': { payload: { profileId: string; installPath?: string; ramGb?: number }; result: MinecraftLaunchPlan }
-  'launch:start': { payload: { profileId: string; installPath?: string; ramGb?: number }; result: LaunchProcessState }
+  'launch:preflight': { payload: LaunchRequest; result: LaunchPreflightReport }
+  'launch:build-command': { payload: LaunchRequest; result: MinecraftLaunchPlan }
+  'launch:start': { payload: LaunchRequest; result: LaunchProcessState }
   'launch:stop': { payload: undefined; result: LaunchProcessState }
   'launch:read-log': { payload: undefined; result: { state: LaunchProcessState; log: string } }
   'launcher-update:get-state': { payload: undefined; result: NativeLauncherUpdateState }

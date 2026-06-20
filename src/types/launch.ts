@@ -23,6 +23,20 @@ export interface LaunchPreflightReport {
   blockers: LaunchBlocker[]
 }
 
+export interface LaunchRequest {
+  profileId: string
+  installPath?: string
+  ramGb?: number
+  runtimeMode?: MinecraftRuntimeModeId
+  operationId?: string
+  quickPlaySingleplayer?: string | boolean
+  quickplaySingleplayer?: string | boolean
+  quickPlaySave?: string | boolean
+  nativeAuditRuntimeActions?: boolean
+  nativeAuditLiveInteractions?: boolean
+  enableNativeAuditMutations?: boolean
+}
+
 export interface MinecraftLaunchPlan {
   profileId: string
   installPath: string

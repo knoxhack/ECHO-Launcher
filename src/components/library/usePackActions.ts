@@ -37,6 +37,30 @@ interface PackActionOptions {
   afterRefresh?: (profileId: string) => Promise<void> | void
 }
 
+const DEFAULT_DEV_MODE = Boolean(import.meta.env.DEV)
+
+export function shouldUseAshfallNativeDevDirectLaunch(packState: NativePackState, devMode = DEFAULT_DEV_MODE): boolean {
+  return Boolean(
+    devMode &&
+      packState.profile.id === 'ashfall-native-edition' &&
+      packState.primaryAction.kind === 'play' &&
+      packState.route.mode === 'native-loader-minecraft',
+  )
+}
+
+export function shouldUseAshfallNeoForgeDevDirectLaunch(packState: NativePackState, devMode = DEFAULT_DEV_MODE): boolean {
+  return Boolean(
+    devMode &&
+      packState.profile.id === 'ashfall-neoforge-edition' &&
+      packState.primaryAction.kind === 'play' &&
+      packState.route.mode === 'neoforge-minecraft',
+  )
+}
+
+export function ashfallDevDirectQuickPlaySingleplayer(packState: NativePackState, devMode = DEFAULT_DEV_MODE): string | false {
+  return shouldUseAshfallNativeDevDirectLaunch(packState, devMode) ? false : 'latest-if-present'
+}
+
 export function usePackActions() {
   const addToast = useLauncherStore((state) => state.addToast)
   const setActivePage = useLauncherStore((state) => state.setActivePage)
@@ -130,12 +154,35 @@ export function usePackActions() {
           )
         } else if (primaryAction.kind === 'launch-standalone') {
           options.onStage?.(`Launching ${profile.name}`)
-          const result = await launchStandaloneRuntime({ profileId: profile.id })
+          const result = await launchStandaloneRuntime({
+            profileId: profile.id,
+            installPath: packState.install.installPath ?? profile.installPath,
+            manifestPath: packState.install.manifestPath,
+            quickPlayNewWorld: profile.id === 'ashfall-standalone-edition',
+          })
           options.onProgress?.(result?.ok ? 100 : 96)
           addToast(
             result?.ok ? `${profile.name} launched` : 'Standalone launch failed',
             result?.message ?? 'Standalone launch did not return a result.',
             result?.ok ? 'success' : 'danger',
+          )
+        } else if (shouldUseAshfallNativeDevDirectLaunch(packState) || shouldUseAshfallNeoForgeDevDirectLaunch(packState)) {
+          const nativeDevDirect = shouldUseAshfallNativeDevDirectLaunch(packState)
+          const runtimeLabel = nativeDevDirect ? 'Native Loader' : 'NeoForge'
+          const runtimeMode = runtimeLabel === 'Native Loader' ? 'native-loader-minecraft' : 'neoforge-minecraft'
+          options.onStage?.(`Launching ${profile.name}`)
+          const result = await launchService.start(profile.id, profile.installPath, ramGb, {
+            runtimeMode,
+            quickPlaySingleplayer: ashfallDevDirectQuickPlaySingleplayer(packState),
+            nativeAuditRuntimeActions: true,
+            nativeAuditLiveInteractions: true,
+          })
+          const launched = result.active || result.status === 'running' || result.status === 'starting'
+          options.onProgress?.(launched ? 100 : 96)
+          addToast(
+            launched ? `${profile.name} launched` : `${runtimeLabel} dev launch blocked`,
+            result.message,
+            launched ? 'success' : 'danger',
           )
         } else {
           const operationId = launchService.createOperationId('handoff')

@@ -162,7 +162,8 @@ async function exists(filePath) {
 }
 
 async function readJson(filePath) {
-  return JSON.parse(await fs.readFile(filePath, 'utf8'))
+  const text = await fs.readFile(filePath, 'utf8')
+  return JSON.parse(text.replace(/^\uFEFF/u, ''))
 }
 
 async function writeJson(filePath, value) {
@@ -208,6 +209,18 @@ async function newestFile(files) {
     if (!newest || stat.mtimeMs > newest.mtimeMs) newest = { path: filePath, mtimeMs: stat.mtimeMs, mtime: stat.mtime.toISOString() }
   }
   return newest
+}
+
+async function readRuntimeLogText(files, minimumMtimeMs = 0) {
+  const logs = []
+  for (const filePath of files) {
+    const stat = await fs.stat(filePath).catch(() => null)
+    if (!stat || stat.mtimeMs < minimumMtimeMs) continue
+    const text = await readTextIfExists(filePath)
+    if (text) logs.push({ mtimeMs: stat.mtimeMs, text })
+  }
+  logs.sort((left, right) => left.mtimeMs - right.mtimeMs)
+  return logs.map((log) => log.text).join('\n')
 }
 
 function normalizeRelative(filePath) {
@@ -521,6 +534,7 @@ async function auditLane(args, lane) {
   const warnings = []
   const manifestPath = path.join(instancePath, '.echo', 'installed-manifest.json')
   const manifest = await exists(manifestPath) ? await readJson(manifestPath) : null
+  const manifestStat = manifest ? await fs.stat(manifestPath).catch(() => null) : null
   if (!manifest) blockers.push(`Missing installed manifest: ${manifestPath}`)
   if (manifest && manifest.pack && manifest.pack !== lane.packId) blockers.push(`Installed manifest pack is ${manifest.pack}, expected ${lane.packId}.`)
 
@@ -538,13 +552,14 @@ async function auditLane(args, lane) {
 
   const logFiles = await listFiles(path.join(instancePath, 'logs'), (filePath, name) => /\.log$/iu.test(name) || /\.txt$/iu.test(name))
   const newestLog = await newestFile(logFiles)
-  const logText = newestLog ? await readTextIfExists(newestLog.path) : ''
+  const newestLogText = newestLog ? await readTextIfExists(newestLog.path) : ''
+  const logText = await readRuntimeLogText(logFiles, manifestStat?.mtimeMs ?? 0) || newestLogText
   if (!newestLog) blockers.push('No runtime log file found under the instance logs directory.')
 
   const crashFiles = await listFiles(path.join(instancePath, 'crash-reports'), (filePath, name) => /\.txt$/iu.test(name))
   const newestCrash = await newestFile(crashFiles)
   const crashText = newestCrash ? await readTextIfExists(newestCrash.path) : ''
-  const hasCrashAfterInstall = Boolean(newestCrash && (!manifest || newestCrash.mtimeMs >= (await fs.stat(manifestPath).catch(() => ({ mtimeMs: 0 }))).mtimeMs))
+  const hasCrashAfterInstall = Boolean(newestCrash && (!manifestStat || newestCrash.mtimeMs >= manifestStat.mtimeMs))
   if (hasCrashAfterInstall) blockers.push(`Crash report exists after install: ${newestCrash.path}`)
 
   const screenshots = await listFiles(path.join(instancePath, 'screenshots'), (filePath, name) => /\.(png|jpg|jpeg|webp)$/iu.test(name))

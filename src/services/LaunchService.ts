@@ -1,9 +1,10 @@
-import type { LaunchPreflightReport, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from '../types/launch'
+import type { LaunchPreflightReport, LaunchRequest, LaunchProcessState, MinecraftLauncherDependencyStatus, MinecraftLauncherHandoffResult, MinecraftLauncherProfileStatus, MinecraftLaunchPlan } from '../types/launch'
 import type { NativeHandoffPreparationResult, NativeLoaderAshfallLaunchResult, NativeLoaderAshfallStatus, NativeOperationStatus } from '../types/native'
 import type { MinecraftRuntimeModeId } from '../types/standaloneRuntime'
 import { invokeNative, requireNative } from './nativeBridge'
 
 export type HandoffUpdatePolicy = 'allow' | 'skip'
+type LaunchRequestOptions = Omit<LaunchRequest, 'profileId' | 'installPath' | 'ramGb'>
 
 export class LaunchService {
   createOperationId(prefix = 'handoff'): string {
@@ -11,19 +12,23 @@ export class LaunchService {
     return `${prefix}-${random}`
   }
 
-  async preflight(profileId: string, installPath?: string, ramGb?: number): Promise<LaunchPreflightReport> {
-    requireNative()
-    return invokeNative('launch:preflight', { profileId, installPath, ramGb })
+  private launchRequest(profileId: string, installPath?: string, ramGb?: number, options: LaunchRequestOptions = {}): LaunchRequest {
+    return { ...options, profileId, installPath, ramGb }
   }
 
-  async buildCommand(profileId: string, installPath?: string, ramGb?: number): Promise<MinecraftLaunchPlan> {
+  async preflight(profileId: string, installPath?: string, ramGb?: number, options: LaunchRequestOptions = {}): Promise<LaunchPreflightReport> {
     requireNative()
-    return invokeNative('launch:build-command', { profileId, installPath, ramGb })
+    return invokeNative('launch:preflight', this.launchRequest(profileId, installPath, ramGb, options))
   }
 
-  async start(profileId: string, installPath?: string, ramGb?: number): Promise<LaunchProcessState> {
+  async buildCommand(profileId: string, installPath?: string, ramGb?: number, options: LaunchRequestOptions = {}): Promise<MinecraftLaunchPlan> {
     requireNative()
-    return invokeNative('launch:start', { profileId, installPath, ramGb })
+    return invokeNative('launch:build-command', this.launchRequest(profileId, installPath, ramGb, options))
+  }
+
+  async start(profileId: string, installPath?: string, ramGb?: number, options: LaunchRequestOptions = {}): Promise<LaunchProcessState> {
+    requireNative()
+    return invokeNative('launch:start', this.launchRequest(profileId, installPath, ramGb, options))
   }
 
   async stop(): Promise<LaunchProcessState> {

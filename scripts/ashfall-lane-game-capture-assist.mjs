@@ -137,7 +137,8 @@ async function exists(filePath) {
 
 async function readJsonIfExists(filePath) {
   try {
-    return JSON.parse(await fs.readFile(filePath, 'utf8'))
+    const text = await fs.readFile(filePath, 'utf8')
+    return JSON.parse(text.replace(/^\uFEFF/u, ''))
   } catch (error) {
     if (error?.code === 'ENOENT') return null
     throw error

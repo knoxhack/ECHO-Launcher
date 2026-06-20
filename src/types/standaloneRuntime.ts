@@ -52,7 +52,11 @@ export interface StandaloneRuntimeLaunchPayload {
   runtimeRoot?: string
   profileId?: string
   installPath?: string
+  manifestPath?: string
+  packManifest?: string
+  devAccount?: string
   operationId?: string
+  quickPlayNewWorld?: boolean
 }
 
 export interface StandalonePackRepairBeforeLaunchResult {
@@ -60,7 +64,9 @@ export interface StandalonePackRepairBeforeLaunchResult {
   repaired: boolean
   profile: LauncherProfile
   installPath: string
-  verification: NativeVerifyResult
+  manifestPath?: string
+  verification: NativeVerifyResult | null
+  message?: string
   repair?: NativeInstallResult
 }
 
@@ -69,6 +75,7 @@ export interface StandaloneRuntimeLaunchResult {
   profileId: string
   pid?: number
   executablePath?: string
+  logPath?: string
   message: string
   warnings: string[]
   state: StandaloneRuntimeState | null

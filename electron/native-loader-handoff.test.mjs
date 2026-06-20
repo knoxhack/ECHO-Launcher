@@ -13,6 +13,15 @@ const {
   nativeHandoffPayloadErrors,
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
+  nativeDevDirectAuditJvmArguments,
+  nativeDevDirectProductWorldJvmArguments,
+  nativeDevDirectQuickPlayJvmArguments,
+  ECHO_NATIVE_DEV_DIRECT_AUTO_CONFIRM_EXPERIMENTAL_WORLD_JVM_ARGUMENT,
+  ECHO_NATIVE_DEV_DIRECT_QUICKPLAY_SINGLEPLAYER_PROPERTY,
+  ECHO_NATIVE_PRODUCT_WORLD_AUTO_OPEN_JVM_ARGUMENT,
+  ECHO_NATIVE_PRODUCT_WORLD_FOLDER,
+  ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT,
+  ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT,
   nativeLauncherArgumentStatus,
   nativeModuleClasspathEntries,
   validateNativeLoaderLocalRuntime,
@@ -82,8 +91,12 @@ describe('native-loader handoff helpers', () => {
     const game = nativeBootstrapGameArguments(manifest, runtime)
     expect(jvm).toContain(`-Decho.native.minecraftMainClass=${ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS}`)
     expect(jvm).toContain('-Decho.native.bootstrap.authorizedHandoff=startNativeClient')
+    expect(jvm).toContain('-Decho.native.loader=true')
+    expect(jvm).toContain('-Decho.native.windowedClient=true')
+    expect(jvm).toContain('-Decho.native.runtime.mode=windowed-native-client')
     expect(jvm.some((arg) => arg.startsWith('-Decho.native.moduleClasspath='))).toBe(false)
     expect(jvm).toContain(`-Decho.native.moduleClasspathFile=${runtime.handoffPath}`)
+    expect(jvm).toContain('-Decho.native.moduleIds=echoadaptercore,echoworldcore')
     expect(game).toEqual(expect.arrayContaining([
       '--echo-marker',
       runtime.markerPath,
@@ -101,6 +114,54 @@ describe('native-loader handoff helpers', () => {
 
     const status = nativeLauncherArgumentStatus({ arguments: { jvm, game } }, manifest)
     expect(status).toEqual({ ok: true, errors: [] })
+  })
+
+  it('adds experimental world auto-confirm for native and NeoForge dev-direct singleplayer quick play', () => {
+    const quickPlay = { type: 'singleplayer', singleplayer: 'New World (4)' }
+    const expected = [
+      ECHO_NATIVE_DEV_DIRECT_AUTO_CONFIRM_EXPERIMENTAL_WORLD_JVM_ARGUMENT,
+      `-D${ECHO_NATIVE_DEV_DIRECT_QUICKPLAY_SINGLEPLAYER_PROPERTY}=New World (4)`,
+    ]
+    expect(nativeDevDirectQuickPlayJvmArguments('native-loader-minecraft', quickPlay)).toEqual(expected)
+    expect(nativeDevDirectQuickPlayJvmArguments('neoforge-minecraft', quickPlay)).toEqual(expected)
+    expect(nativeDevDirectQuickPlayJvmArguments('native-loader-minecraft', { type: 'multiplayer', singleplayer: '' })).toEqual([])
+    expect(nativeDevDirectQuickPlayJvmArguments('native-loader-minecraft', null)).toEqual([])
+  })
+
+  it('adds Ashfall product-world auto-open only for native dev-direct launches', () => {
+    expect(nativeDevDirectProductWorldJvmArguments('native-loader-minecraft')).toEqual([
+      ECHO_NATIVE_PRODUCT_WORLD_AUTO_OPEN_JVM_ARGUMENT,
+      `-Decho.native.productWorldFolder=${ECHO_NATIVE_PRODUCT_WORLD_FOLDER}`,
+      '-Decho.native.productWorldName=ECHO Native Ashfall',
+      '-Decho.native.productWorldDatapack=echo-native-ashfall-datapack.zip',
+    ])
+    expect(nativeDevDirectProductWorldJvmArguments('neoforge-minecraft')).toEqual([])
+  })
+
+  it('adds native audit mutation flags only for native dev-direct audit launches', () => {
+    expect(nativeDevDirectAuditJvmArguments('native-loader-minecraft', {
+      nativeAuditRuntimeActions: true,
+    })).toEqual([
+      ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT,
+    ])
+    expect(nativeDevDirectAuditJvmArguments('native-loader-minecraft', {
+      enableNativeAuditMutations: true,
+      nativeAuditLiveInteractions: true,
+    })).toEqual([
+      ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT,
+      ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT,
+    ])
+    expect(nativeDevDirectAuditJvmArguments('native-loader-minecraft', {
+      nativeAuditLiveInteractions: true,
+    })).toEqual([
+      ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT,
+      ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT,
+    ])
+    expect(nativeDevDirectAuditJvmArguments('neoforge-minecraft', {
+      nativeAuditRuntimeActions: true,
+      nativeAuditLiveInteractions: true,
+    })).toEqual([])
+    expect(nativeDevDirectAuditJvmArguments('native-loader-minecraft', {})).toEqual([])
   })
 
   it('extracts embedded .echo/content-graph artifacts and writes an install aggregate', async () => {

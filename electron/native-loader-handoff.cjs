@@ -7,6 +7,20 @@ const AdmZip = require('adm-zip')
 const ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS = 'dev.echo.nativeplatform.bootstrap.EchoNativeBootstrapMain'
 const ECHO_NATIVE_REAL_MINECRAFT_MAIN_CLASS = 'net.minecraft.client.main.Main'
 const ECHO_NATIVE_AUTHORIZED_HANDOFF = 'startNativeClient'
+const ECHO_NATIVE_LOADER_ACTIVE_JVM_ARGUMENT = '-Decho.native.loader=true'
+const ECHO_NATIVE_WINDOWED_CLIENT_JVM_ARGUMENT = '-Decho.native.windowedClient=true'
+const ECHO_NATIVE_RUNTIME_MODE_JVM_ARGUMENT = '-Decho.native.runtime.mode=windowed-native-client'
+const ECHO_NATIVE_DEV_DIRECT_AUTO_CONFIRM_EXPERIMENTAL_WORLD_JVM_ARGUMENT = '-Decho.native.devDirectAutoConfirmExperimentalWorld=true'
+const ECHO_NATIVE_DEV_DIRECT_QUICKPLAY_SINGLEPLAYER_PROPERTY = 'echo.native.devDirectQuickPlaySingleplayer'
+const ECHO_NATIVE_PRODUCT_WORLD_AUTO_OPEN_JVM_ARGUMENT = '-Decho.native.productWorldAutoOpen=true'
+const ECHO_NATIVE_PRODUCT_WORLD_FOLDER_PROPERTY = 'echo.native.productWorldFolder'
+const ECHO_NATIVE_PRODUCT_WORLD_NAME_PROPERTY = 'echo.native.productWorldName'
+const ECHO_NATIVE_PRODUCT_WORLD_DATAPACK_PROPERTY = 'echo.native.productWorldDatapack'
+const ECHO_NATIVE_PRODUCT_WORLD_FOLDER = 'echo_native_ashfall_wasteland'
+const ECHO_NATIVE_PRODUCT_WORLD_NAME = 'ECHO Native Ashfall'
+const ECHO_NATIVE_PRODUCT_WORLD_DATAPACK = 'echo-native-ashfall-datapack.zip'
+const ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT = '-Decho.native.playableRuntimeActions=true'
+const ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT = '-Decho.native.liveInteractionProbeActions=true'
 
 function safeFileName(input) {
   return String(input ?? 'item')
@@ -326,6 +340,9 @@ function nativeBootstrapJvmArguments(manifest, runtime = null) {
     `-Decho.native.packId=${String(manifest?.pack ?? '')}`,
     `-Decho.native.packVersion=${String(manifest?.version ?? '')}`,
     '-Decho.native.addonsClasspath=true',
+    ECHO_NATIVE_LOADER_ACTIVE_JVM_ARGUMENT,
+    ECHO_NATIVE_WINDOWED_CLIENT_JVM_ARGUMENT,
+    ECHO_NATIVE_RUNTIME_MODE_JVM_ARGUMENT,
   ]
   if (runtime) {
     args.push(
@@ -334,6 +351,10 @@ function nativeBootstrapJvmArguments(manifest, runtime = null) {
       `-Decho.native.gameDir=${runtime.gameDir}`,
       `-Decho.native.moduleClasspathFile=${runtime.moduleClasspathFile}`,
     )
+    const moduleIds = Array.isArray(runtime.modules) ? runtime.modules.map((moduleId) => String(moduleId)).filter(Boolean) : []
+    if (moduleIds.length > 0) {
+      args.push(`-Decho.native.moduleIds=${moduleIds.join(',')}`)
+    }
     if (runtime.bootstrapProfileClass) {
       args.push(`-Decho.native.bootstrap.profileClass=${runtime.bootstrapProfileClass}`)
     }
@@ -357,6 +378,51 @@ function nativeBootstrapGameArguments(manifest, runtime = null) {
   return args
 }
 
+function nativeDevDirectQuickPlayJvmArguments(runtimeMode, quickPlay = null) {
+  const mode = String(runtimeMode ?? '').trim().toLowerCase()
+  const type = String(quickPlay?.type ?? '').trim().toLowerCase()
+  const singleplayer = String(quickPlay?.singleplayer ?? '').trim()
+  const supportsDevDirectWorldOpen = mode === 'native-loader-minecraft' || mode === 'neoforge-minecraft'
+  if (!supportsDevDirectWorldOpen || type !== 'singleplayer' || !singleplayer) {
+    return []
+  }
+  return [
+    ECHO_NATIVE_DEV_DIRECT_AUTO_CONFIRM_EXPERIMENTAL_WORLD_JVM_ARGUMENT,
+    `-D${ECHO_NATIVE_DEV_DIRECT_QUICKPLAY_SINGLEPLAYER_PROPERTY}=${singleplayer}`,
+  ]
+}
+
+function nativeDevDirectProductWorldJvmArguments(runtimeMode) {
+  const mode = String(runtimeMode ?? '').trim().toLowerCase()
+  if (mode !== 'native-loader-minecraft') {
+    return []
+  }
+  return [
+    ECHO_NATIVE_PRODUCT_WORLD_AUTO_OPEN_JVM_ARGUMENT,
+    `-D${ECHO_NATIVE_PRODUCT_WORLD_FOLDER_PROPERTY}=${ECHO_NATIVE_PRODUCT_WORLD_FOLDER}`,
+    `-D${ECHO_NATIVE_PRODUCT_WORLD_NAME_PROPERTY}=${ECHO_NATIVE_PRODUCT_WORLD_NAME}`,
+    `-D${ECHO_NATIVE_PRODUCT_WORLD_DATAPACK_PROPERTY}=${ECHO_NATIVE_PRODUCT_WORLD_DATAPACK}`,
+  ]
+}
+
+function nativeDevDirectAuditJvmArguments(runtimeMode, options = {}) {
+  const mode = String(runtimeMode ?? '').trim().toLowerCase()
+  if (mode !== 'native-loader-minecraft') {
+    return []
+  }
+  const runtimeActions = options?.nativeAuditRuntimeActions === true ||
+    options?.enableNativeAuditMutations === true ||
+    options?.nativeAuditLiveInteractions === true
+  if (!runtimeActions) {
+    return []
+  }
+  const args = [ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT]
+  if (options?.nativeAuditLiveInteractions === true) {
+    args.push(ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT)
+  }
+  return args
+}
+
 function stringArray(value) {
   return Array.isArray(value) ? value.map((item) => String(item)) : []
 }
@@ -373,6 +439,13 @@ function nativeLauncherArgumentStatus(document, manifest) {
   }
   if (!jvm.includes(`-Decho.native.bootstrap.authorizedHandoff=${ECHO_NATIVE_AUTHORIZED_HANDOFF}`)) {
     errors.push('Native Loader JVM args are missing authorized bootstrap handoff.')
+  }
+  for (const flag of [
+    ECHO_NATIVE_LOADER_ACTIVE_JVM_ARGUMENT,
+    ECHO_NATIVE_WINDOWED_CLIENT_JVM_ARGUMENT,
+    ECHO_NATIVE_RUNTIME_MODE_JVM_ARGUMENT,
+  ]) {
+    if (!jvm.includes(flag)) errors.push(`Native Loader JVM args are missing ${flag}.`)
   }
   for (const prefix of ['-Decho.native.gameDir', '-Decho.native.packId', '-Decho.native.packVersion']) {
     if (!jvmHas(prefix)) errors.push(`Native Loader JVM args are missing ${prefix}.`)
@@ -601,9 +674,18 @@ module.exports = {
   ECHO_NATIVE_BOOTSTRAP_MAIN_CLASS,
   ECHO_NATIVE_REAL_MINECRAFT_MAIN_CLASS,
   ECHO_NATIVE_AUTHORIZED_HANDOFF,
+  ECHO_NATIVE_DEV_DIRECT_AUTO_CONFIRM_EXPERIMENTAL_WORLD_JVM_ARGUMENT,
+  ECHO_NATIVE_DEV_DIRECT_QUICKPLAY_SINGLEPLAYER_PROPERTY,
+  ECHO_NATIVE_PRODUCT_WORLD_AUTO_OPEN_JVM_ARGUMENT,
+  ECHO_NATIVE_PRODUCT_WORLD_FOLDER,
+  ECHO_NATIVE_PLAYABLE_RUNTIME_ACTIONS_JVM_ARGUMENT,
+  ECHO_NATIVE_LIVE_INTERACTION_PROBE_ACTIONS_JVM_ARGUMENT,
   materializeNativeLoaderAddons,
   nativeBootstrapGameArguments,
   nativeBootstrapJvmArguments,
+  nativeDevDirectAuditJvmArguments,
+  nativeDevDirectProductWorldJvmArguments,
+  nativeDevDirectQuickPlayJvmArguments,
   nativeHandoffPayloadErrors,
   nativeLauncherArgumentStatus,
   nativeModuleClasspathFile,
