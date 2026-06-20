@@ -4696,6 +4696,9 @@ async function resolveInstallableManifest(manifest, entry, payload = {}) {
     const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
     return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
   }
+  if (manifest.artifactMode === 'zip') {
+    return resolveManifestAssets(manifest, entry)
+  }
   if (Array.isArray(requirements) && requirements.length > 0) {
     return resolveManifestAssets(resolveModuleRequirements(manifest, []), entry)
   }
@@ -6070,7 +6073,9 @@ function cleanupConflictingMinecraftLauncherProfiles(document, profileId, versio
 }
 
 function manifestMinecraftRuntimeFilePaths(manifest, runtimeMode) {
-  const normalizedMode = normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
+  const normalizedMode = runtimeMode === 'native-runtime' || runtimeMode === 'standalone-engine'
+    ? runtimeMode
+    : normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack)
   const pattern = normalizedMode === 'native-loader-minecraft' ? /^addons\/.+\.echo-addon$/iu : /^mods\/.+\.jar$/iu
   return (manifest.files ?? [])
     .filter((file) => file.required !== false)
@@ -6080,6 +6085,8 @@ function manifestMinecraftRuntimeFilePaths(manifest, runtimeMode) {
 
 function ashfallPayloadRuntimeMode(manifest) {
   const packId = normalizeOfficialPackId(manifest?.pack)
+  if (packId?.endsWith('-standalone-engine-edition')) return 'standalone-engine'
+  if (packId?.endsWith('-standalone-edition')) return 'native-runtime'
   return packId?.endsWith('-native-edition') ? 'native-loader-minecraft' : 'neoforge-minecraft'
 }
 
@@ -6087,7 +6094,8 @@ async function validateAshfallInstallPayload(installPath, manifest) {
   const runtimeMode = ashfallPayloadRuntimeMode(manifest)
   const native = runtimeMode === 'native-loader-minecraft'
   const folderName = native ? 'addons' : 'mods'
-  const itemLabel = native ? 'Native addon file' : 'mod jar'
+  const standalone = runtimeMode === 'native-runtime' || runtimeMode === 'standalone-engine'
+  const itemLabel = native ? 'Native addon file' : standalone ? 'standalone module jar' : 'mod jar'
   const expectedFiles = manifestMinecraftRuntimeFilePaths(manifest, runtimeMode)
   const missingFiles = []
   let presentCount = 0

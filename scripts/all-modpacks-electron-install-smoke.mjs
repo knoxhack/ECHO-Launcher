@@ -866,6 +866,60 @@ async function seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecr
   }
 }
 
+function standaloneEngineCheck(state, id) {
+  return (state?.checks ?? []).find((check) => check.id === id) ?? null
+}
+
+function summarizeStandaloneEngineState(state) {
+  const checkIds = ['install-root', 'pack-manifest', 'java-21', 'engine-jar', 'content-graph-evidence', 'file-verification']
+  return {
+    ok: Boolean(state?.ok),
+    runtimeRoot: state?.runtimeRoot ?? null,
+    executablePath: state?.executablePath ?? null,
+    manifestPath: state?.manifestPath ?? null,
+    contentGraphEvidencePath: state?.contentGraphEvidencePath ?? null,
+    lastLaunchLogPath: state?.lastLaunchLogPath ?? null,
+    javaVersion: state?.javaVersion ?? null,
+    supportBundle: state?.supportBundle ?? null,
+    repairPlan: (state?.repairPlan ?? []).map((action) => ({
+      id: action.id,
+      title: action.title,
+      automated: Boolean(action.automated),
+      recommended: Boolean(action.recommended),
+      detail: action.detail,
+    })),
+    checks: checkIds.map((id) => {
+      const check = standaloneEngineCheck(state, id)
+      return check ? {
+        id: check.id,
+        label: check.label,
+        status: check.status,
+        detail: check.detail,
+        path: check.path ?? null,
+      } : {
+        id,
+        label: id,
+        status: 'missing',
+        detail: 'Check was not returned by standalone-engine:get-state.',
+        path: null,
+      }
+    }),
+  }
+}
+
+function assertStandaloneEngineReadyState(pack, state, label) {
+  assert(state?.ok === true, `${pack.name} ${label} state is not ready: ${(state?.warnings ?? []).join(' ') || 'unknown reason'}`)
+  for (const id of ['install-root', 'pack-manifest', 'java-21', 'engine-jar', 'content-graph-evidence', 'file-verification']) {
+    const check = standaloneEngineCheck(state, id)
+    assert(check, `${pack.name} ${label} state did not report ${id}.`)
+    assert(check.status === 'healthy', `${pack.name} ${label} ${id} check is ${check.status}: ${check.detail}`)
+  }
+  const contentGraph = standaloneEngineCheck(state, 'content-graph-evidence')
+  assert(/PASS/i.test(String(contentGraph?.detail ?? '')), `${pack.name} ${label} content graph check does not mention PASS: ${contentGraph?.detail ?? 'missing'}`)
+  assert((state.repairPlan ?? []).length === 0, `${pack.name} ${label} still exposes repair actions: ${JSON.stringify(state.repairPlan)}`)
+  assert(state.supportBundle?.available === true, `${pack.name} ${label} support bundle is not available.`)
+}
+
 async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs, options = {}) {
   const runtimeMode = runtimeModeForPack(pack)
   if (runtimeMode === 'standalone-engine') {
@@ -874,10 +928,14 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
       installPath: ${JSON.stringify(installPath)}
     })`, { timeoutMs })
     assert(state?.ok === true, `${pack.name} standalone engine is not ready: ${(state?.warnings ?? []).join(' ') || state?.runtimeRoot || 'unknown reason'}`)
+    assertStandaloneEngineReadyState(pack, state, 'pre-launch')
     assert(state?.runtimeRoot === installPath, `${pack.name} standalone engine runtimeRoot mismatch: ${state?.runtimeRoot ?? 'missing'}`)
     assert(state?.executablePath && await exists(state.executablePath), `${pack.name} engine JAR is missing: ${state?.executablePath ?? 'missing'}`)
     assert(state?.manifestPath && await exists(state.manifestPath), `${pack.name} pack manifest is missing: ${state?.manifestPath ?? 'missing'}`)
     assert(state?.contentGraphEvidencePath && await exists(state.contentGraphEvidencePath), `${pack.name} content graph evidence is missing: ${state?.contentGraphEvidencePath ?? 'missing'}`)
+    const readyPackState = await evaluate(cdp, `window.echoNative.invoke('app:get-pack-state', { profileId: ${JSON.stringify(pack.profileId)} })`, { timeoutMs })
+    assert(readyPackState?.primaryAction?.kind === 'launch-standalone', `${pack.name} ready card action is ${readyPackState?.primaryAction?.kind ?? 'missing'}, expected launch-standalone.`)
+    assert(readyPackState?.primaryAction?.enabled === true, `${pack.name} ready card action is not enabled: ${JSON.stringify(readyPackState?.primaryAction ?? null)}`)
     const launch = await evaluate(cdp, `window.echoNative.invoke('standalone-engine:launch', {
       profileId: ${JSON.stringify(pack.profileId)},
       installPath: ${JSON.stringify(installPath)},
@@ -885,6 +943,8 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
     })`, { timeoutMs })
     assert(launch?.ok === true, `${pack.name} standalone engine headless launch failed: ${launch?.message ?? launch?.error ?? JSON.stringify(launch)}`)
     assert(launch?.logPath && await exists(launch.logPath), `${pack.name} standalone engine launch log is missing: ${launch?.logPath ?? 'missing'}`)
+    assertStandaloneEngineReadyState(pack, launch.state, 'post-launch')
+    assert(launch.state?.lastLaunchLogPath === launch.logPath, `${pack.name} post-launch state did not expose last launch log ${launch.logPath}.`)
     return {
       kind: 'standalone-engine',
       ok: true,
@@ -892,8 +952,18 @@ async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutM
       executablePath: state.executablePath,
       manifestPath: state.manifestPath,
       contentGraphEvidencePath: state.contentGraphEvidencePath,
+      contentGraphStatus: standaloneEngineCheck(state, 'content-graph-evidence')?.detail ?? null,
+      fileVerification: standaloneEngineCheck(state, 'file-verification')?.detail ?? null,
       javaVersion: state.javaVersion ?? null,
       launchLogPath: launch.logPath,
+      readyCardAction: readyPackState.primaryAction,
+      repairButtonState: {
+        label: 'No Repair Needed',
+        disabled: true,
+        detail: 'Java, engine JAR, manifest, content graph evidence, and required files are ready.',
+      },
+      preLaunchState: summarizeStandaloneEngineState(state),
+      postLaunchState: summarizeStandaloneEngineState(launch.state),
       warnings: state.warnings ?? [],
     }
   }
