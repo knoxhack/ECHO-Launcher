@@ -11,9 +11,9 @@ export const RELEASE_METADATA_ASSET = 'echo-release.json'
 export const ECHO_PACK_EXTENSION = '.echo-pack.zip'
 export const DEFAULT_ASHFALL_PACK_ID = 'ashfall-neoforge-edition'
 export const DEFAULT_ASHFALL_PACK_NAME = 'Ashfall NeoForge Edition'
-export const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.5/echo-native-loader-1.0.5.jar'
-export const ECHO_NATIVE_LOADER_SHA1 = 'dd70965788343769bb1cf02f0a13142527821cab'
-export const ECHO_NATIVE_LOADER_SIZE = 1_840_324
+export const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.6/echo-native-loader-1.0.6.jar'
+export const ECHO_NATIVE_LOADER_SHA1 = '62947bc53ad7a13f6d803d384fb8b25ff9d2ffe5'
+export const ECHO_NATIVE_LOADER_SIZE = 1_896_229
 
 export const INCLUDE_DIRS = ['mods', 'config', 'defaultconfigs', 'datapacks', 'resourcepacks', 'shaderpacks']
 
@@ -488,7 +488,7 @@ export function buildPackManifest({
 }
 
 export function nativeLoaderManifestFromInstance(instance) {
-  const version = String(process.env.ECHO_NATIVE_LOADER_VERSION || '1.0.5').trim()
+  const version = String(process.env.ECHO_NATIVE_LOADER_VERSION || '1.0.6').trim()
   const versionId = String(process.env.ECHO_NATIVE_LOADER_VERSION_ID || `echo-native-loader-${version}`).trim()
   const libraryName = process.env.ECHO_NATIVE_LOADER_LIBRARY || `com.echo:native-loader:${version}`
   const artifactPath = `com/echo/native-loader/${version}/native-loader-${version}.jar`
