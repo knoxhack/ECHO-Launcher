@@ -3738,6 +3738,8 @@ function requestHeaders(extra = {}) {
   return {
     'User-Agent': 'ECHO-Launcher/2.0',
     Accept: 'application/vnd.github+json, application/json, */*',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
     ...extra,
   }
 }
@@ -3830,9 +3832,15 @@ function normalizeLauncherChannelPack(value, fallbackChannel) {
     name: String(value.name ?? id),
     channel: String(value.channel ?? fallbackChannel ?? CANONICAL_CHANNEL),
   }
-  for (const field of ['loader', 'moduleArtifactFamily', 'manifestUrl', 'catalogEntryUrl', 'repoUrl', 'catalogStatus', 'diagnostic']) {
+  for (const field of ['loader', 'moduleArtifactFamily', 'manifestUrl', 'catalogEntryUrl', 'repoUrl', 'catalogStatus', 'diagnostic', 'version', 'releaseTag', 'artifactUrl', 'artifactSha256', 'packManifestUrl', 'packManifestSha256', 'commitSha']) {
     if (value[field] !== undefined && value[field] !== null && value[field] !== '') {
       pack[field] = String(value[field])
+    }
+  }
+  for (const field of ['artifactSize', 'packManifestSize']) {
+    if (value[field] !== undefined && value[field] !== null && value[field] !== '') {
+      const size = Number(value[field])
+      if (Number.isFinite(size)) pack[field] = size
     }
   }
   return pack
@@ -3926,6 +3934,57 @@ async function releaseIndexProduct(payload = {}) {
   return { entry: null, warnings }
 }
 
+function githubReleasePageFromAssetUrl(assetUrl, releaseTag) {
+  const match = String(assetUrl ?? '').match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/[^/]+\//iu)
+  if (!match) return undefined
+  return `https://github.com/${match[1]}/${match[2]}/releases/tag/${encodeURIComponent(releaseTag)}`
+}
+
+function releaseEntryFromLauncherChannelPack(pack, fetchedAt) {
+  if (!pack?.id || !pack.version || !pack.releaseTag || !pack.packManifestUrl || !pack.packManifestSha256) return null
+  if (!pack.artifactUrl || !pack.artifactSha256) return null
+  const releasePageUrl = githubReleasePageFromAssetUrl(pack.packManifestUrl, pack.releaseTag)
+    ?? githubReleasePageFromAssetUrl(pack.artifactUrl, pack.releaseTag)
+  return {
+    id: `release-index-channel:${pack.id}:${pack.version}`,
+    pack: normalizeOfficialPackId(pack.id) ?? pack.id,
+    version: pack.version,
+    channel: pack.channel ?? CANONICAL_CHANNEL,
+    tagName: pack.releaseTag,
+    name: `${pack.id} ${pack.version}`,
+    draft: false,
+    prerelease: pack.channel !== 'stable',
+    publishedAt: fetchedAt ?? new Date().toISOString(),
+    releasePageUrl,
+    releaseNotes: [`Resolved through launcher channel pack metadata for ${pack.id}.`],
+    manifestAssetName: path.basename(new URL(pack.packManifestUrl).pathname),
+    manifestUrl: pack.packManifestUrl,
+    manifestSha256: pack.packManifestSha256,
+    metadataUrl: undefined,
+    trust: 'verified-metadata',
+    assets: [
+      {
+        name: path.basename(new URL(pack.artifactUrl).pathname),
+        url: pack.artifactUrl,
+        browser_download_url: pack.artifactUrl,
+        size: pack.artifactSize ?? 0,
+        sha256: pack.artifactSha256,
+        releaseTag: pack.releaseTag,
+        releasePageUrl,
+      },
+      {
+        name: path.basename(new URL(pack.packManifestUrl).pathname),
+        url: pack.packManifestUrl,
+        browser_download_url: pack.packManifestUrl,
+        size: pack.packManifestSize ?? 0,
+        sha256: pack.packManifestSha256,
+        releaseTag: pack.releaseTag,
+        releasePageUrl,
+      },
+    ],
+  }
+}
+
 
 async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
   if (!settings.releaseIndex?.enabled) return index
@@ -3983,10 +4042,17 @@ async function mergeCanonicalReleaseEntries(index, settings, payload = {}) {
 
 async function canonicalOnlyReleaseIndex(config, settings, payload = {}, extraWarnings = []) {
   const catalog = await releaseIndexCatalog({ refresh: payload.refresh })
-  const releases = catalog.entries
+  const canonicalReleases = catalog.entries
     .map((entry) => releaseEntryFromCanonicalModpack(entry, catalog.fetchedAt))
     .filter(Boolean)
-    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+  const channelPackReleases = (catalog.packs ?? [])
+    .map((pack) => releaseEntryFromLauncherChannelPack(pack, catalog.fetchedAt))
+    .filter(Boolean)
+  const byKey = new Map()
+  for (const entry of [...canonicalReleases, ...channelPackReleases]) {
+    byKey.set(`${normalizeOfficialPackId(entry.pack) ?? entry.pack}:${entry.channel}:${entry.version}`, entry)
+  }
+  const releases = [...byKey.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
   const nonInstallableModpacks = catalog.entries.filter((entry) => entry.kind === 'modpack' && !isInstallableModpackEntry(entry))
   return {
     cacheVersion: RELEASE_CACHE_VERSION,
