@@ -823,6 +823,49 @@ async function repairStandaloneEngineFixture(cdp, pack, installPath, repairFixtu
   }
 }
 
+async function verifyStandaloneEngineUpdateFlow(cdp, pack, installPath, logsDir, timeoutMs) {
+  const updateStartedAt = Date.now() - 1000
+  const update = await evaluate(cdp, `window.echoNative.invoke('install:run', {
+    profileId: ${JSON.stringify(pack.profileId)},
+    pack: ${JSON.stringify(pack.profileId)},
+    installPath: ${JSON.stringify(installPath)},
+    installRuntime: false,
+    refresh: true
+  })`, { timeoutMs })
+  assert(update?.ok === true, `${pack.name} standalone-engine update flow failed: ${update?.message ?? update?.error ?? JSON.stringify(update)}`)
+  assert(update.operation === 'update', `${pack.name} standalone-engine update flow reported ${update.operation ?? 'missing'}, expected update.`)
+  assert(update.installPath === installPath, `${pack.name} standalone-engine update installPath mismatch: ${update.installPath ?? 'missing'}`)
+  assert(update.payload?.runtimeMode === 'standalone-engine', `${pack.name} standalone-engine update payload mode is ${update.payload?.runtimeMode ?? 'missing'}.`)
+  assert(update.payload?.presentCount === update.payload?.expectedCount, `${pack.name} standalone-engine update payload count mismatch: ${JSON.stringify(update.payload ?? null)}`)
+  assert((update.before?.missing?.length ?? 1) === 0, `${pack.name} standalone-engine update started with missing files.`)
+  assert((update.before?.corrupt?.length ?? 1) === 0, `${pack.name} standalone-engine update started with corrupt files.`)
+  assert((update.after?.missing?.length ?? 1) === 0, `${pack.name} standalone-engine update ended with missing files.`)
+  assert((update.after?.corrupt?.length ?? 1) === 0, `${pack.name} standalone-engine update ended with corrupt files.`)
+  assert((update.installed ?? []).length === 0, `${pack.name} standalone-engine no-op update unexpectedly installed files: ${JSON.stringify(update.installed)}`)
+  assert((update.updated ?? []).length === 0, `${pack.name} standalone-engine no-op update unexpectedly updated files: ${JSON.stringify(update.updated)}`)
+  assert((update.verified ?? []).length >= 24, `${pack.name} standalone-engine no-op update verified only ${(update.verified ?? []).length} files.`)
+  const reportData = update.reportPath ? { reportPath: update.reportPath, report: update } : await waitForInstallReport(logsDir, updateStartedAt, pack, timeoutMs)
+  return {
+    ok: true,
+    reportPath: reportData.reportPath,
+    operation: update.operation,
+    installed: update.installed ?? [],
+    updated: update.updated ?? [],
+    verified: update.verified ?? [],
+    payload: update.payload ?? null,
+    before: {
+      missing: update.before?.missing ?? [],
+      corrupt: update.before?.corrupt ?? [],
+      valid: update.before?.valid?.length ?? null,
+    },
+    after: {
+      missing: update.after?.missing ?? [],
+      corrupt: update.after?.corrupt ?? [],
+      valid: update.after?.valid?.length ?? null,
+    },
+  }
+}
+
 function runtimeModeForPack(pack) {
   if (pack.profileId.endsWith('-standalone-engine-edition')) return 'standalone-engine'
   if (pack.profileId.endsWith('-standalone-edition')) return 'native-runtime'
@@ -1362,6 +1405,7 @@ async function run() {
           ? await corruptInstalledFileForHandoffRepair(installPath, pack, installed)
           : null
         let standaloneRepair = null
+        let standaloneUpdate = null
         const launchRoute = await guardElectron(
           `${pack.name} launch route`,
           (async () => {
@@ -1369,6 +1413,9 @@ async function run() {
             const runtimeMode = runtimeModeForPack(pack)
             if (runtimeMode === 'standalone-engine' && repairFixture && repairFixture.skipped !== true) {
               standaloneRepair = await repairStandaloneEngineFixture(cdp, pack, installPath, repairFixture, logsDir, args.packTimeoutMs)
+            }
+            if (runtimeMode === 'standalone-engine') {
+              standaloneUpdate = await verifyStandaloneEngineUpdateFlow(cdp, pack, installPath, logsDir, args.packTimeoutMs)
             }
             return verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs, {
               expectRepair: Boolean(repairFixture && repairFixture.skipped !== true && runtimeMode !== 'standalone-engine'),
@@ -1394,6 +1441,7 @@ async function run() {
           moduleReleaseSources: installed.moduleReleaseSources,
           repairFixture,
           standaloneRepair,
+          standaloneUpdate,
           launchRoute,
         })
         console.log(`${pack.name}: installed ${installed.fileCount} file(s); module sources ${installed.moduleReleaseSources.map((source) => `${source.fileCount} ${source.releaseSourceState} from ${source.releaseTag}`).join(', ')}`)
