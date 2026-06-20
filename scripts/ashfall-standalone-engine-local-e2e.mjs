@@ -11,8 +11,7 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const PACK_ID = 'ashfall-standalone-engine-edition'
 const VERSION = '2.0.0-beta.2'
-const RELEASE_TAG = 'v2.0.0-ashfall-standalone-engine-edition-beta.4'
-const RELEASE_FOLDER = RELEASE_TAG
+const RELEASE_FOLDER_PREFIX = 'v2.0.0-ashfall-standalone-engine-edition-beta'
 const ZIP_NAME = `${PACK_ID}-${VERSION}.zip`
 const MANIFEST_NAME = `${PACK_ID}-beta-${VERSION}.pack.json`
 
@@ -25,7 +24,7 @@ ZIP, then runs the packaged engine with --headless-smoke.
 
 Options:
   --release-root <path>       Staged release asset folder.
-                              Default: ../ECHO-Ashfall-Standalone-Engine-Edition/release-assets/${RELEASE_FOLDER}
+                              Default: latest ../ECHO-Ashfall-Standalone-Engine-Edition/release-assets/${RELEASE_FOLDER_PREFIX}*
   --work-root <path>          Temporary install root.
                               Default: OS temp echo-standalone-engine-local-e2e
   --out <path>                Evidence report path.
@@ -39,7 +38,7 @@ Options:
 function parseArgs(argv) {
   const root = process.cwd()
   const args = {
-    releaseRoot: path.resolve(root, '..', 'ECHO-Ashfall-Standalone-Engine-Edition', 'release-assets', RELEASE_FOLDER),
+    releaseRoot: null,
     workRoot: path.join(os.tmpdir(), 'echo-standalone-engine-local-e2e'),
     out: path.resolve(root, '..', 'ECHO-Release-Index', 'release-readiness', 'ashfall-standalone-engine-local-e2e.json'),
     java: 'java',
@@ -67,6 +66,26 @@ function parseArgs(argv) {
     throw new Error('--launch-timeout-ms must be at least 10000.')
   }
   return args
+}
+
+function releaseFolderRank(folderName) {
+  if (folderName === RELEASE_FOLDER_PREFIX) return 0
+  if (!folderName.startsWith(`${RELEASE_FOLDER_PREFIX}.`)) return -1
+  const suffix = folderName.slice(RELEASE_FOLDER_PREFIX.length + 1)
+  if (!/^\d+$/u.test(suffix)) return -1
+  return Number(suffix)
+}
+
+async function resolveDefaultReleaseRoot(root) {
+  const releaseAssetsRoot = path.resolve(root, '..', 'ECHO-Ashfall-Standalone-Engine-Edition', 'release-assets')
+  const entries = await fs.readdir(releaseAssetsRoot, { withFileTypes: true })
+  const candidates = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ name: entry.name, rank: releaseFolderRank(entry.name) }))
+    .filter((entry) => entry.rank >= 0)
+    .sort((left, right) => right.rank - left.rank)
+  assert(candidates.length > 0, `No staged release folder matching ${RELEASE_FOLDER_PREFIX}* under ${releaseAssetsRoot}.`)
+  return path.join(releaseAssetsRoot, candidates[0].name)
 }
 
 function assert(condition, message) {
@@ -247,6 +266,7 @@ async function main() {
     console.log(usage())
     return
   }
+  if (!args.releaseRoot) args.releaseRoot = await resolveDefaultReleaseRoot(process.cwd())
   const zipPathOnDisk = path.join(args.releaseRoot, ZIP_NAME)
   const manifestPath = path.join(args.releaseRoot, MANIFEST_NAME)
   const releasePath = path.join(args.releaseRoot, 'echo-release.json')
@@ -266,6 +286,9 @@ async function main() {
   assert(String(manifest.artifactSha256).toLowerCase() === await sha256File(zipPathOnDisk), 'Manifest artifactSha256 does not match staged ZIP.')
   assert(Number(manifest.artifactSize) === (await fs.stat(zipPathOnDisk)).size, 'Manifest artifactSize does not match staged ZIP.')
   assert(release.validation === 'warning' || release.warningGated === true || release.validation?.status === 'warning' || release.status === 'warning', 'echo-release.json must remain warning-gated.')
+  const releaseTag = release.releaseTag ?? audit.releaseTag ?? path.basename(args.releaseRoot)
+  assert(releaseTag.startsWith(RELEASE_FOLDER_PREFIX), `Release tag is ${releaseTag}, expected ${RELEASE_FOLDER_PREFIX}*.`)
+  if (audit.releaseTag) assert(audit.releaseTag === releaseTag, `release-audit.json releaseTag ${audit.releaseTag} does not match ${releaseTag}.`)
   const gameplayParity = (audit.checks ?? []).find((check) => check?.id === 'gameplay-parity')
   assert(gameplayParity?.status === 'NOT_CLAIMED', 'release-audit.json must not claim gameplay parity.')
 
@@ -283,7 +306,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     packId: PACK_ID,
     version: VERSION,
-    releaseTag: RELEASE_TAG,
+    releaseTag,
     releaseRoot: args.releaseRoot,
     installRoot,
     zipRoot: root,
@@ -306,7 +329,7 @@ async function main() {
     },
     headless,
     warnings: [
-      'This is a local staged-asset smoke against the beta.4 release payload. Public URL hash verification and gameplay parity remain separate proof gates.',
+      'This is a local staged-asset smoke. Public URL hash verification and gameplay parity remain separate proof gates.',
     ],
   }
   await writeJson(args.out, report)
