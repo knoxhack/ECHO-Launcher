@@ -1,5 +1,6 @@
 import type {
   LauncherRuntimeModeId,
+  StandaloneRuntimeCheck,
   StandaloneRuntimeLaunchButtonState,
   StandaloneRuntimeModeCard,
   StandaloneRuntimeRepairButtonState,
@@ -11,6 +12,12 @@ export interface RuntimeModeCardOptions {
   minecraftReady?: boolean
   nativeLoaderReady?: boolean
   nativeLoaderDisabledReason?: string
+}
+
+export interface RuntimeEvidenceFact {
+  label: string
+  value: string
+  status: HealthStatus
 }
 
 const modeCopy: Record<LauncherRuntimeModeId, Omit<StandaloneRuntimeModeCard, 'id' | 'status' | 'disabledReason'>> = {
@@ -158,6 +165,79 @@ function firstBlockingRequiredCheck(state: StandaloneRuntimeState | null) {
       check.severity === 'required' &&
       (check.status === 'missing' || check.status === 'critical' || check.status === 'failed' || check.status === 'warning'),
   )
+}
+
+function checkById(state: StandaloneRuntimeState | null, id: string): StandaloneRuntimeCheck | null {
+  return (state?.checks ?? []).find((check) => check.id === id) ?? null
+}
+
+function checkStatus(check: StandaloneRuntimeCheck | null, fallback: HealthStatus = 'missing'): HealthStatus {
+  return check?.status ?? fallback
+}
+
+export function buildStandaloneEngineEvidenceFacts(
+  state: StandaloneRuntimeState | null,
+  repairButton: StandaloneRuntimeRepairButtonState,
+): RuntimeEvidenceFact[] {
+  const installRoot = checkById(state, 'install-root')
+  const engineJar = checkById(state, 'engine-jar')
+  const java = checkById(state, 'java-21')
+  const manifest = checkById(state, 'pack-manifest')
+  const contentGraph = checkById(state, 'content-graph-evidence')
+  const fileVerification = checkById(state, 'file-verification')
+
+  return [
+    {
+      label: 'Install root',
+      value: state?.runtimeRoot ?? installRoot?.detail ?? 'Standalone Engine install root has not been resolved.',
+      status: checkStatus(installRoot, state?.runtimeRoot ? 'healthy' : 'missing'),
+    },
+    {
+      label: 'Engine JAR',
+      value: state?.executablePath ?? engineJar?.detail ?? 'echo-standalone-engine-*.jar has not been verified.',
+      status: checkStatus(engineJar, state?.executablePath ? 'healthy' : 'missing'),
+    },
+    {
+      label: 'Java',
+      value: state?.javaVersion ?? java?.detail ?? 'Java 21+ has not been verified.',
+      status: checkStatus(java, state?.javaVersion ? 'healthy' : 'missing'),
+    },
+    {
+      label: 'Pack manifest',
+      value: state?.manifestPath ?? manifest?.detail ?? 'pack.json or .echo/installed-manifest.json has not been verified.',
+      status: checkStatus(manifest, state?.manifestPath ? 'healthy' : 'missing'),
+    },
+    {
+      label: 'Content graph status',
+      value: contentGraph?.detail ?? 'content-graph-evidence.json has not been verified.',
+      status: checkStatus(contentGraph),
+    },
+    {
+      label: 'Content graph evidence',
+      value: state?.contentGraphEvidencePath ?? contentGraph?.path ?? 'content-graph-evidence.json has not been located.',
+      status: checkStatus(contentGraph, state?.contentGraphEvidencePath ? 'healthy' : 'missing'),
+    },
+    {
+      label: 'File verification',
+      value: fileVerification?.detail ?? 'Required file verification has not run.',
+      status: checkStatus(fileVerification),
+    },
+    {
+      label: 'Last launch log',
+      value: state?.lastLaunchLogPath ?? 'No Standalone Engine launch log recorded yet.',
+      status: state?.lastLaunchLogPath ? 'healthy' : 'operational',
+    },
+    {
+      label: 'Repair button',
+      value: repairButton.detail ? `${repairButton.label}: ${repairButton.detail}` : repairButton.label,
+      status: repairButton.status,
+    },
+    {
+      label: 'Support bundle',
+      value: state?.supportBundle.available ? `${state.supportBundle.entries} report entries` : 'Unavailable',
+      status: state?.supportBundle.available ? 'healthy' : 'missing',
+    },
+  ]
 }
 
 export function buildRuntimeRepairButtonState(input: {

@@ -21,9 +21,10 @@ import { useProfileStore } from '../../stores/profileStore'
 import { useReadinessStore } from '../../stores/readinessStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useStandaloneRuntimeStore } from '../../stores/standaloneRuntimeStore'
+import type { HealthStatus } from '../../types/launcher'
 import type { NativeRepairResult } from '../../types/native'
 import type { StandaloneRuntimeModeId } from '../../types/standaloneRuntime'
-import { buildRuntimeLaunchButtonState, buildRuntimeModeCards, buildRuntimeRepairButtonState, runtimeSummaryStatus } from '../../utils/standaloneRuntimeShell'
+import { buildRuntimeLaunchButtonState, buildRuntimeModeCards, buildRuntimeRepairButtonState, buildStandaloneEngineEvidenceFacts, runtimeSummaryStatus } from '../../utils/standaloneRuntimeShell'
 import { cn } from '../../utils/cn'
 import { CyberButton } from '../cyber/CyberButton'
 import { GlassCard } from '../cyber/GlassCard'
@@ -94,6 +95,10 @@ export function StandaloneRuntimePage() {
         repairing,
       }),
     [nativeAvailable, repairing, selectedMode, state],
+  )
+  const standaloneEngineEvidenceFacts = useMemo(
+    () => selectedMode === 'standalone-engine' ? buildStandaloneEngineEvidenceFacts(state, repairButton) : [],
+    [repairButton, selectedMode, state],
   )
   const overallStatus = runtimeSummaryStatus(state)
 
@@ -271,16 +276,24 @@ export function StandaloneRuntimePage() {
               <ShieldCheck className="h-6 w-6 text-cyan-soft" />
             </div>
             <div className="space-y-3 text-sm">
-              <RuntimeFact label={selectedMode === 'standalone-engine' ? 'Install root' : 'Runtime root'} value={state?.runtimeRoot ?? 'Unresolved'} />
-              <RuntimeFact label={selectedMode === 'standalone-engine' ? 'Engine JAR' : 'Executable'} value={state?.executablePath ?? 'Missing'} />
-              {state?.javaVersion ? <RuntimeFact label="Java" value={state.javaVersion} /> : null}
-              {state?.manifestPath ? <RuntimeFact label="Pack manifest" value={state.manifestPath} /> : null}
-              {contentGraphCheck ? <RuntimeFact label="Content graph status" value={contentGraphCheck.detail} /> : null}
-              {state?.contentGraphEvidencePath ? <RuntimeFact label="Content graph evidence" value={state.contentGraphEvidencePath} /> : null}
-              {fileVerificationCheck ? <RuntimeFact label="File verification" value={fileVerificationCheck.detail} /> : null}
-              {state?.lastLaunchLogPath ? <RuntimeFact label="Last launch log" value={state.lastLaunchLogPath} /> : null}
-              <RuntimeFact label="Repair button" value={repairButton.detail ? `${repairButton.label}: ${repairButton.detail}` : repairButton.label} />
-              <RuntimeFact label="Support bundle" value={state?.supportBundle.available ? `${state.supportBundle.entries} report entries` : 'Unavailable'} />
+              {selectedMode === 'standalone-engine' ? (
+                standaloneEngineEvidenceFacts.map((fact) => (
+                  <RuntimeFact key={fact.label} label={fact.label} status={fact.status} value={fact.value} />
+                ))
+              ) : (
+                <>
+                  <RuntimeFact label="Runtime root" value={state?.runtimeRoot ?? 'Unresolved'} />
+                  <RuntimeFact label="Executable" value={state?.executablePath ?? 'Missing'} />
+                  {state?.javaVersion ? <RuntimeFact label="Java" value={state.javaVersion} /> : null}
+                  {state?.manifestPath ? <RuntimeFact label="Pack manifest" value={state.manifestPath} /> : null}
+                  {contentGraphCheck ? <RuntimeFact label="Content graph status" value={contentGraphCheck.detail} /> : null}
+                  {state?.contentGraphEvidencePath ? <RuntimeFact label="Content graph evidence" value={state.contentGraphEvidencePath} /> : null}
+                  {fileVerificationCheck ? <RuntimeFact label="File verification" value={fileVerificationCheck.detail} /> : null}
+                  {state?.lastLaunchLogPath ? <RuntimeFact label="Last launch log" value={state.lastLaunchLogPath} /> : null}
+                  <RuntimeFact label="Repair button" value={repairButton.detail ? `${repairButton.label}: ${repairButton.detail}` : repairButton.label} />
+                  <RuntimeFact label="Support bundle" value={state?.supportBundle.available ? `${state.supportBundle.entries} report entries` : 'Unavailable'} />
+                </>
+              )}
               {lastLaunch ? <RuntimeFact label="Last launch" value={lastLaunch.message} /> : null}
               {error ? (
                 <div className="rounded-lg border border-danger-echo/40 bg-danger-echo/10 p-3 text-red-100">
@@ -367,10 +380,13 @@ export function StandaloneRuntimePage() {
   )
 }
 
-function RuntimeFact({ label, value }: { label: string; value: string }) {
+function RuntimeFact({ label, value, status }: { label: string; value: string; status?: HealthStatus }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+        {status ? <StatusChip compact status={status} /> : null}
+      </div>
       <p className="mt-1 break-words text-sm leading-6 text-slate-200">{value}</p>
     </div>
   )

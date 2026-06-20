@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StandaloneRuntimeState } from '../types/standaloneRuntime'
-import { buildRuntimeLaunchButtonState, buildRuntimeModeCards, buildRuntimeRepairButtonState, runtimeSummaryStatus } from './standaloneRuntimeShell'
+import { buildRuntimeLaunchButtonState, buildRuntimeModeCards, buildRuntimeRepairButtonState, buildStandaloneEngineEvidenceFacts, runtimeSummaryStatus } from './standaloneRuntimeShell'
 
 const readyRuntime: StandaloneRuntimeState = {
   ok: true,
@@ -57,6 +57,60 @@ const corruptEngineRuntime: StandaloneRuntimeState = {
     },
   ],
   warnings: ['17 valid, 0 missing, 1 corrupt required file(s).'],
+}
+
+const readyEngineRuntime: StandaloneRuntimeState = {
+  ...corruptEngineRuntime,
+  ok: true,
+  lastLaunchLogPath: 'C:\\Echo\\Ashfall Standalone Engine Edition\\logs\\echo-standalone-engine.log',
+  checks: [
+    {
+      id: 'install-root',
+      label: 'Install root',
+      status: 'healthy',
+      detail: 'Resolved C:\\Echo\\Ashfall Standalone Engine Edition.',
+      severity: 'required',
+    },
+    {
+      id: 'engine-jar',
+      label: 'Engine JAR',
+      status: 'healthy',
+      detail: 'Engine JAR is ready.',
+      severity: 'required',
+    },
+    {
+      id: 'java-21',
+      label: 'Java 21+',
+      status: 'healthy',
+      detail: 'Java 21.0.8 at C:\\Java\\bin\\java.exe.',
+      severity: 'required',
+    },
+    {
+      id: 'pack-manifest',
+      label: 'Pack manifest',
+      status: 'healthy',
+      detail: 'Manifest found.',
+      severity: 'required',
+    },
+    {
+      id: 'content-graph-evidence',
+      label: 'Content graph evidence',
+      status: 'healthy',
+      detail: 'Content graph evidence reports PASS for 18 module(s).',
+      path: 'C:\\Echo\\Ashfall Standalone Engine Edition\\content-graph-evidence.json',
+      severity: 'required',
+    },
+    {
+      id: 'file-verification',
+      label: 'File verification',
+      status: 'healthy',
+      detail: '24 valid, 0 missing, 0 corrupt required file(s).',
+      severity: 'required',
+    },
+  ],
+  repairPlan: [],
+  supportBundle: { available: true, entries: 3 },
+  warnings: [],
 }
 
 describe('standalone runtime shell', () => {
@@ -223,5 +277,86 @@ describe('standalone runtime shell', () => {
     expect(state.disabled).toBe(true)
     expect(state.label).toBe('Manual Repair Needed')
     expect(state.detail).toContain('File verification')
+  })
+
+  it('builds complete ready Standalone Engine evidence facts', () => {
+    const repairButton = buildRuntimeRepairButtonState({
+      mode: 'standalone-engine',
+      state: readyEngineRuntime,
+      nativeAvailable: true,
+    })
+    const facts = buildStandaloneEngineEvidenceFacts(readyEngineRuntime, repairButton)
+
+    expect(facts.map((fact) => fact.label)).toEqual([
+      'Install root',
+      'Engine JAR',
+      'Java',
+      'Pack manifest',
+      'Content graph status',
+      'Content graph evidence',
+      'File verification',
+      'Last launch log',
+      'Repair button',
+      'Support bundle',
+    ])
+    expect(facts.find((fact) => fact.label === 'Content graph status')).toMatchObject({
+      status: 'healthy',
+      value: 'Content graph evidence reports PASS for 18 module(s).',
+    })
+    expect(facts.find((fact) => fact.label === 'Last launch log')).toMatchObject({
+      status: 'healthy',
+      value: 'C:\\Echo\\Ashfall Standalone Engine Edition\\logs\\echo-standalone-engine.log',
+    })
+    expect(facts.find((fact) => fact.label === 'Repair button')).toMatchObject({
+      status: 'healthy',
+      value: 'No Repair Needed: Java, engine JAR, manifest, content graph evidence, and required files are ready.',
+    })
+  })
+
+  it('keeps missing Standalone Engine evidence visible when launch is blocked', () => {
+    const blockedRuntime: StandaloneRuntimeState = {
+      ...corruptEngineRuntime,
+      manifestPath: undefined,
+      contentGraphEvidencePath: undefined,
+      lastLaunchLogPath: undefined,
+      supportBundle: { available: false, entries: 0 },
+      checks: [
+        ...corruptEngineRuntime.checks,
+        {
+          id: 'pack-manifest',
+          label: 'Pack manifest',
+          status: 'missing',
+          detail: 'pack.json or .echo/installed-manifest.json is missing.',
+          severity: 'required',
+        },
+        {
+          id: 'content-graph-evidence',
+          label: 'Content graph evidence',
+          status: 'missing',
+          detail: 'content-graph-evidence.json is missing.',
+          severity: 'required',
+        },
+      ],
+    }
+    const repairButton = buildRuntimeRepairButtonState({
+      mode: 'standalone-engine',
+      state: blockedRuntime,
+      nativeAvailable: true,
+    })
+    const facts = buildStandaloneEngineEvidenceFacts(blockedRuntime, repairButton)
+
+    expect(facts.find((fact) => fact.label === 'Pack manifest')).toMatchObject({
+      status: 'missing',
+      value: 'pack.json or .echo/installed-manifest.json is missing.',
+    })
+    expect(facts.find((fact) => fact.label === 'Content graph evidence')).toMatchObject({
+      status: 'missing',
+      value: 'content-graph-evidence.json has not been located.',
+    })
+    expect(facts.find((fact) => fact.label === 'Last launch log')).toMatchObject({
+      status: 'operational',
+      value: 'No Standalone Engine launch log recorded yet.',
+    })
+    expect(facts.find((fact) => fact.label === 'Repair button')?.value).toContain('Repair Install')
   })
 })
