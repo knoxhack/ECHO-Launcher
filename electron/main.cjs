@@ -105,12 +105,12 @@ const MINECRAFT_WINDOWS_STORE_URL = 'ms-windows-store://pdp/?ProductId=9PGW18NPB
 const MINECRAFT_WINDOWS_WINGET_ID = 'Mojang.MinecraftLauncher'
 const MINECRAFT_LINUX_DEB_URL = 'https://launcher.mojang.com/download/Minecraft.deb'
 const MINECRAFT_LINUX_TAR_URL = 'https://launcher.mojang.com/download/Minecraft.tar.gz'
-const ECHO_NATIVE_LOADER_VERSION = '1.0.5'
+const ECHO_NATIVE_LOADER_VERSION = '1.0.6'
 const ECHO_NATIVE_LOADER_LIBRARY_NAME = `com.echo:native-loader:${ECHO_NATIVE_LOADER_VERSION}`
 const ECHO_NATIVE_LOADER_LIBRARY_PATH = `com/echo/native-loader/${ECHO_NATIVE_LOADER_VERSION}/native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
-const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.5/echo-native-loader-1.0.5.jar'
-const ECHO_NATIVE_LOADER_SHA1 = '6419a2ebf3e44d0f2ff9e29cc8856f6f89c209b7'
-const ECHO_NATIVE_LOADER_SIZE = 1_892_985
+const ECHO_NATIVE_LOADER_DOWNLOAD_URL = 'https://github.com/knoxhack/ECHO-Native-Platform/releases/download/v1.0.6/echo-native-loader-1.0.6.jar'
+const ECHO_NATIVE_LOADER_SHA1 = '62947bc53ad7a13f6d803d384fb8b25ff9d2ffe5'
+const ECHO_NATIVE_LOADER_SIZE = 1_896_229
 const ECHO_NATIVE_LOADER_PUBLIC_FILE_NAME = `echo-native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_LIBRARY_FILE_NAME = `native-loader-${ECHO_NATIVE_LOADER_VERSION}.jar`
 const ECHO_NATIVE_LOADER_MAIN_CLASS = 'com.echo.NativeLoaderClient'
@@ -975,6 +975,23 @@ async function appendLauncherLog(level, message) {
     // Logging must never take down the app.
   }
 }
+
+function formatProcessError(error) {
+  if (error instanceof Error) return error.stack || error.message
+  return String(error)
+}
+
+process.on('uncaughtException', (error) => {
+  const message = `Uncaught main process exception: ${formatProcessError(error)}`
+  console.error(message)
+  void appendLauncherLog('ERROR', message)
+})
+
+process.on('unhandledRejection', (error) => {
+  const message = `Unhandled main process rejection: ${formatProcessError(error)}`
+  console.error(message)
+  void appendLauncherLog('ERROR', message)
+})
 
 async function readSettings() {
   const paths = getPaths()
@@ -2970,6 +2987,31 @@ function minecraftVersionFromManifest(manifest = {}) {
   return manifest.minecraftVersion ?? manifest.runtime?.minecraftVersion ?? manifest.minecraft ?? '26.1.2'
 }
 
+function neoForgeVersionFromArguments(args = []) {
+  if (!Array.isArray(args)) return ''
+  for (let index = 0; index < args.length; index += 1) {
+    if (String(args[index] ?? '') !== '--fml.neoForgeVersion') continue
+    const version = String(args[index + 1] ?? '').trim()
+    if (version) return version
+  }
+  return ''
+}
+
+function neoForgeVersionFromManifest(manifest = {}) {
+  const loader = manifest.loader && typeof manifest.loader === 'object' && !Array.isArray(manifest.loader)
+    ? manifest.loader
+    : {}
+  const explicit = String(loader.version ?? '').trim()
+  if (explicit) return explicit
+
+  const launcherVersion = String(loader.minecraftLauncherVersionId ?? loader.versionJson?.id ?? '').trim()
+  const fromLauncherVersion = launcherVersion.replace(/^neoforge-/iu, '').trim()
+  if (fromLauncherVersion && fromLauncherVersion !== launcherVersion) return fromLauncherVersion
+
+  return neoForgeVersionFromArguments(loader.versionJson?.arguments?.game)
+    || neoForgeVersionFromArguments(manifest.launch?.gameArgs)
+}
+
 function runtimePaths() {
   const root = getPaths().runtime
   return {
@@ -4681,53 +4723,59 @@ function resolveManifestAssets(manifest, entry) {
 
 async function resolveInstallableManifest(manifest, entry, payload = {}) {
   const requirements = manifest.moduleRequirements ?? manifest.requiredModules
-  const existingPaths = new Set((manifest.files ?? []).map((file) => String(file?.path ?? '').replace(/\\/g, '/').toLowerCase()))
-  const existingBasenames = new Set([...existingPaths].map((filePath) => path.basename(filePath)))
-  const hasMissingRequiredModules = Array.isArray(requirements) && requirements.some((requirement) => {
-    const moduleId = String(requirement?.id ?? requirement?.moduleId ?? '').trim()
-    const version = String(requirement?.version ?? '').trim()
-    if (!moduleId || !version) return false
-    const family = String(requirement.artifactFamily ?? requirement.family ?? manifest.moduleArtifactFamily ?? moduleArtifactFamilyForPack(manifest.pack)).trim().toLowerCase()
-    const assetName = String(requirement.assetName ?? requirement.artifactName ?? moduleArtifactName(moduleId, version, family)).trim()
-    const requirementPath = String(requirement.path ?? (family === 'echo-addon' ? `addons/${assetName}` : `mods/${assetName}`)).replace(/\\/g, '/').toLowerCase()
-    return !existingPaths.has(requirementPath) && !existingBasenames.has(path.basename(requirementPath))
-  })
-  if (hasMissingRequiredModules) {
-    const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
-    return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
-  }
-  if (manifest.artifactMode === 'zip') {
+  if (manifest.artifactMode === 'zip' && normalizeOfficialPackId(manifest.pack)?.endsWith('-standalone-engine-edition')) {
     return resolveManifestAssets(manifest, entry)
   }
   if (Array.isArray(requirements) && requirements.length > 0) {
-    return resolveManifestAssets(resolveModuleRequirements(manifest, []), entry)
+    const moduleAssets = await fetchModuleReleaseAssets({ refresh: payload.refresh })
+    return resolveManifestAssets(resolveModuleRequirements(manifest, moduleAssets), entry)
   }
   return resolveManifestAssets(manifest, entry)
 }
 
 async function resolveReleaseEntry(payload, profile) {
-  const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(payload.pack ?? profile?.id)
   const pack = normalizeOfficialPackId(payload.pack) ?? normalizeOfficialPackId(profile?.id) ?? CANONICAL_PROFILE_ID
   const index = await releaseList({ refresh: payload.refresh })
-  const entry = selectReleaseEntry(index, channel, payload.version, pack)
-  if (!entry) throw new Error(`No approved ${pack ?? 'official pack'} ${channel} release was found in the ECHO Catalog.`)
+  const requestedChannel = String(payload.channel ?? profile?.channel ?? defaultChannelForPack(pack)).trim()
+  if (requestedChannel && !CHANNELS.has(requestedChannel)) throw new Error(`Unsupported pack channel: ${requestedChannel}`)
+  const catalogPack = catalogPackMetadataForProfile(index, { id: pack })
+  const allowCatalogChannelFallback = payload.allowCatalogChannelFallback === true || payload.channel === undefined
+  const channels = (allowCatalogChannelFallback
+    ? [catalogPack?.channel, requestedChannel, defaultChannelForPack(pack)]
+    : [requestedChannel])
+    .map((channel) => String(channel ?? '').trim())
+    .filter(Boolean)
+    .filter((channel, index, values) => values.indexOf(channel) === index)
+  let entry = null
+  for (const channel of channels) {
+    entry = selectReleaseEntry(index, channel, payload.version, pack)
+    if (entry) break
+  }
+  if (!entry && allowCatalogChannelFallback && !payload.version) {
+    entry = latestReleaseForPackAcrossChannels(index, { id: pack })
+  }
+  if (!entry) throw new Error(`No approved ${pack ?? 'official pack'} ${channels.join(' or ') || 'Catalog'} release was found in the ECHO Catalog.`)
   return entry
 }
 
 async function releaseFetchManifest(payload = {}) {
   const channel = payload.channel ?? defaultChannelForPack(payload.pack)
-  if (!CHANNELS.has(channel)) throw new Error(`Unsupported pack channel: ${channel}`)
+  if (payload.channel !== undefined && !CHANNELS.has(channel)) throw new Error(`Unsupported pack channel: ${channel}`)
 
-  const entry = await resolveReleaseEntry(payload, { channel, id: normalizeOfficialPackId(payload.pack) ?? CANONICAL_PROFILE_ID })
+  const entry = await resolveReleaseEntry({
+    ...payload,
+    allowCatalogChannelFallback: payload.allowCatalogChannelFallback ?? true,
+  }, { channel, id: normalizeOfficialPackId(payload.pack) ?? CANONICAL_PROFILE_ID })
   if (!entry.manifestSha256) {
     throw new Error(`${entry.tagName} is missing a manifest SHA-256 in ${RELEASE_METADATA_ASSET}.`)
   }
 
   const paths = getPaths()
   const pack = entry.pack ?? CANONICAL_PROFILE_ID
-  const cacheName = `${safeFileName(pack)}-${safeFileName(channel)}-${safeFileName(entry.version)}.pack.json`
+  const resolvedChannel = entry.channel ?? channel
+  const cacheName = `${safeFileName(pack)}-${safeFileName(resolvedChannel)}-${safeFileName(entry.version)}.pack.json`
   const cachePath = path.join(paths.releaseCache, 'manifests', cacheName)
-  const manifestPath = path.join(paths.manifests, `${safeFileName(pack)}-${safeFileName(channel)}-${safeFileName(entry.version)}.json`)
+  const manifestPath = path.join(paths.manifests, `${safeFileName(pack)}-${safeFileName(resolvedChannel)}-${safeFileName(entry.version)}.json`)
 
   if (!payload.refresh && (await exists(cachePath))) {
     const cachedHash = await sha256File(cachePath)
@@ -5412,7 +5460,14 @@ async function resolveInstallManifest(payload, profile) {
   if (payload.manifest) return validateSelectedPackManifest(payload.manifest, selectedPack)
   if (payload.manifestPath) return manifestLoad({ ...payload, pack: selectedPack })
   const channel = payload.channel ?? profile?.channel ?? defaultChannelForPack(selectedPack)
-  const fetched = await releaseFetchManifest({ channel, version: payload.version, refresh: payload.refresh ?? true, pack: selectedPack })
+  const fetched = await releaseFetchManifest({
+    ...(payload.channel !== undefined && payload.allowCatalogChannelFallback !== true
+      ? { channel }
+      : { channel, allowCatalogChannelFallback: true }),
+    version: payload.version,
+    refresh: payload.refresh ?? true,
+    pack: selectedPack,
+  })
   return assertManifestMatchesSelectedPack(fetched.manifest, selectedPack)
 }
 
@@ -5681,7 +5736,7 @@ async function resolveNeoForgeInstallerMetadata(manifest, reportOperation) {
   const hasTrustedConfiguredSha256 = /^[a-f0-9]{64}$/i.test(configuredSha256) && configuredSha256 !== 'f'.repeat(64)
   if (configured?.url && hasTrustedConfiguredSha256) return { ...configured, sha256: configuredSha256 }
 
-  const version = manifest.loader?.version
+  const version = neoForgeVersionFromManifest(manifest)
   if (!version) return null
   const url = configured?.url ?? `${neoforgeMavenBaseUrl(version)}-installer.jar`
   reportOperation?.({
@@ -5786,18 +5841,19 @@ async function neoforgeEnsure(payload = {}) {
   if (!manifestRequiresNeoForge(manifest)) {
     return {
       ok: true,
-      version: manifest.loader?.version ?? 'standalone-runtime',
+      version: neoForgeVersionFromManifest(manifest) || 'standalone-runtime',
       installPath,
       skipped: true,
       message: 'NeoForge installer skipped for the standalone runtime pack.',
     }
   }
+  const version = neoForgeVersionFromManifest(manifest)
   const installer = await resolveNeoForgeInstallerMetadata(manifest, reportOperation)
 
   if (!installer) {
     return {
       ok: false,
-      version: manifest.loader?.version ?? 'unknown',
+      version: version || 'unknown',
       installPath,
       skipped: true,
       message: 'No NeoForge installer artifact is configured or inferable for the selected manifest.',
@@ -5814,7 +5870,7 @@ async function neoforgeEnsure(payload = {}) {
   if (!java.preferred || !java.preferred.valid) {
     return {
       ok: false,
-      version: manifest.loader.version,
+      version,
       installPath,
       skipped: true,
       message: 'Java 25+ is required before the NeoForge installer can run. Install/open Minecraft Launcher once so its Java runtime is available, or install Java 25+.',
@@ -5825,10 +5881,10 @@ async function neoforgeEnsure(payload = {}) {
     phaseId: 'neoforge',
     label: 'Downloading NeoForge installer',
     progress: 96,
-    message: `Downloading and SHA-256 verifying ${installer.assetName ?? `neoforge-${manifest.loader.version}-installer.jar`}.`,
+    message: `Downloading and SHA-256 verifying ${installer.assetName ?? `neoforge-${version}-installer.jar`}.`,
   })
   const installerPath = await downloadVerifiedArtifact({
-    path: installer.assetName ?? `neoforge-${manifest.loader.version}-installer.jar`,
+    path: installer.assetName ?? `neoforge-${version}-installer.jar`,
     assetName: installer.assetName,
     url: installer.url,
     sha256: installer.sha256,
@@ -5871,7 +5927,7 @@ async function neoforgeEnsure(payload = {}) {
   if (!result.ok) {
     return {
       ok: false,
-      version: manifest.loader.version,
+      version,
       installerPath,
       installPath,
       javaPath: java.preferred.path,
@@ -5889,7 +5945,7 @@ async function neoforgeEnsure(payload = {}) {
   })
   return {
     ok: true,
-    version: manifest.loader.version,
+    version,
     installerPath,
     versionJson: installerVersionJson,
     installProfileJson,
@@ -5897,7 +5953,7 @@ async function neoforgeEnsure(payload = {}) {
     javaPath: java.preferred.path,
     mode,
     logPath,
-    message: `NeoForge ${manifest.loader.version} ${mode} installer completed.`,
+    message: `NeoForge ${version} ${mode} installer completed.`,
   }
 }
 
@@ -5977,7 +6033,7 @@ function nativeLoaderMinecraftVersionId(manifest) {
 
 function minecraftLauncherVersionId(manifest, runtimeMode) {
   if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') return nativeLoaderMinecraftVersionId(manifest)
-  return manifest.loader?.minecraftLauncherVersionId ?? `neoforge-${manifest.loader?.version ?? 'unknown'}`
+  return manifest.loader?.minecraftLauncherVersionId ?? `neoforge-${neoForgeVersionFromManifest(manifest) || 'unknown'}`
 }
 
 let reservedEchoMinecraftProfileIdsCache = null
@@ -6201,7 +6257,7 @@ function launcherRuntimeManifestDefinition(manifest, runtimeMode) {
     runtimeMode: normalizedMode,
     label: 'NeoForge',
     loaderKey: 'neoforge',
-    version: manifest.loader?.version ?? 'unknown',
+    version: neoForgeVersionFromManifest(manifest) || 'unknown',
     versionJson: manifest.loader?.versionJson,
     versionId: minecraftLauncherVersionId(manifest, normalizedMode),
     librariesLabel: 'NeoForge libraries',
@@ -8090,9 +8146,11 @@ function summarizeVerificationProblem(verification) {
 async function createVerifiedInstallReport(profile, manifest, installPath, verification) {
   const installId = `verify-${nowStamp()}`
   const packName = profile?.name ?? manifest?.name ?? officialPackDisplayName(manifest?.pack) ?? 'Selected pack'
+  const inferredNeoForgeVersion = neoForgeVersionFromManifest(manifest)
+  const neoForgeVersion = inferredNeoForgeVersion || 'unknown'
   const neoforge = {
     ok: true,
-    version: manifest.loader?.version ?? 'unknown',
+    version: neoForgeVersion,
     skipped: true,
     message: `${packName} is already installed; no archive download was needed.`,
   }
@@ -8125,7 +8183,7 @@ async function createVerifiedInstallReport(profile, manifest, installPath, verif
     installPath,
     version: manifest.version ?? profile.version,
     minecraft: minecraftVersionFromManifest(manifest),
-    neoforge: manifest.loader?.version ?? profile.neoforge,
+    neoforge: inferredNeoForgeVersion || profile.neoforge,
     ramGb: manifest.ramMb ? Math.max(2, Math.round(manifest.ramMb / 1024)) : profile.ramGb,
     status: 'healthy',
     manifestPath: path.join(installPath, '.echo', 'installed-manifest.json'),
@@ -9103,7 +9161,7 @@ async function launchPreflight(payload = {}) {
     runtimeVerification,
     accountLinked: true,
     sessionReady: true,
-    neoforgeReady: Boolean(manifest.loader?.version),
+    neoforgeReady: Boolean(neoForgeVersionFromManifest(manifest)),
     ramGb: Number(payload.ramGb ?? profile.ramGb ?? 8),
     blockers,
   }
@@ -9522,7 +9580,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
   const failed = []
   const backedUp = []
   const runtime = { ok: true, warnings: ['Internal Minecraft runtime install skipped for Minecraft Launcher handoff mode.'] }
-  const neoforge = { ok: true, version: manifest.loader?.version ?? 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' }
+  const neoforge = { ok: true, version: neoForgeVersionFromManifest(manifest) || 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' }
 
   await ensureDir(installPath)
   await ensureDir(path.join(installPath, '.echo'))
@@ -9746,6 +9804,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     before,
     after,
   }
+  const finalReport = await writeInstallLikeReport('install', installId, report)
   await writeJson(rollbackPlanPath, {
     installId,
     operation,
@@ -9770,7 +9829,7 @@ async function installZipPackArtifact(payload, profile, manifest) {
     })
   }
   await appendLauncherLog(ok ? 'INFO' : 'WARN', `Hybrid ${operation} ${installId} completed. Installed ${installed.length}, updated ${updated.length}, removed ${removed.length}, verified ${verified.length}, payload=${installPayload.presentCount}/${installPayload.expectedCount}, failed ${failed.length}.`)
-  return writeInstallLikeReport('install', installId, report)
+  return finalReport
 }
 
 async function repairZipPackArtifact(payload, profile, manifest) {
@@ -9850,7 +9909,7 @@ async function repairZipPackArtifact(payload, profile, manifest) {
     warnings,
     backupRoot: repairBackupRoot,
     rollbackPlanPath,
-    neoforge: { ok: true, version: manifest.loader?.version ?? 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' },
+    neoforge: { ok: true, version: neoForgeVersionFromManifest(manifest) || 'unknown', skipped: true, message: 'NeoForge libraries are provided by the strict pack manifest/runtime metadata.' },
     runtime,
     nativeLoaderRuntime,
     payload: repairedPayload,
@@ -9968,6 +10027,10 @@ async function repairRun(payload = {}) {
 }
 
 async function installRun(payload = {}) {
+  const installPayload = {
+    ...payload,
+    allowCatalogChannelFallback: payload.allowCatalogChannelFallback ?? true,
+  }
   if (payload.operationId && !operationStatuses.has(payload.operationId)) {
     updateOperationStatus(payload.operationId, {
       kind: payload.operationKind ?? 'install',
@@ -9982,12 +10045,12 @@ async function installRun(payload = {}) {
   const profiles = await profileList()
   const profile = selectLauncherProfile(profiles, payload, true)
   if (!payload.manifest && !payload.manifestPath) {
-    const entry = await resolveReleaseEntry({ ...payload, refresh: payload.refresh ?? true }, profile)
+    const entry = await resolveReleaseEntry({ ...installPayload, refresh: payload.refresh ?? true }, profile)
     if (entry.trust !== 'verified-metadata') {
       throw new Error(`${entry.tagName} is missing trusted manifest metadata. Beta installs require ${RELEASE_METADATA_ASSET}, a hashed pack manifest, and the metadata-named compressed pack archive.`)
     }
   }
-  const manifest = await resolveInstallManifest(payload, profile)
+  const manifest = await resolveInstallManifest(installPayload, profile)
   if (manifest.artifactMode === 'zip') {
     const result = await installZipPackArtifact(payload, profile, manifest)
     if (payload.operationId && (payload.operationKind ?? 'install') === 'install') {
@@ -10509,14 +10572,38 @@ function packRouteForProfile(profile) {
   }
 }
 
-function latestCatalogReleaseForProfile(index, profile) {
+function catalogPackMetadataForProfile(index, profile) {
+  return (index?.packs ?? []).find((item) => item.id === profile?.id) ?? null
+}
+
+function latestReleaseForPackAcrossChannels(index, profile) {
+  const normalizedPack = normalizeOfficialPackId(profile?.id)
+  if (!normalizedPack) return null
+  return [...(index?.releases ?? [])]
+    .filter((release) => normalizeOfficialPackId(release.pack) === normalizedPack)
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))[0] ?? null
+}
+
+function latestCatalogReleaseForProfile(index, profile, pack) {
   if (!index?.releases?.length || !profile) return null
-  return selectReleaseEntry(index, profile.channel ?? defaultChannelForPack(profile.id), undefined, profile.id)
+  const channels = [
+    pack?.channel,
+    profile.channel,
+    defaultChannelForPack(profile.id),
+  ]
+    .map((channel) => String(channel ?? '').trim())
+    .filter(Boolean)
+    .filter((channel, index, values) => values.indexOf(channel) === index)
+  for (const channel of channels) {
+    const release = selectReleaseEntry(index, channel, undefined, profile.id)
+    if (release) return release
+  }
+  return latestReleaseForPackAcrossChannels(index, profile)
 }
 
 function packCatalogMetadata(index, profile) {
-  const pack = (index?.packs ?? []).find((item) => item.id === profile?.id)
-  const release = latestCatalogReleaseForProfile(index, profile)
+  const pack = catalogPackMetadataForProfile(index, profile)
+  const release = latestCatalogReleaseForProfile(index, profile, pack)
   const hasVerifiedRelease = Boolean(release?.trust === 'verified-metadata' && release.manifestSha256)
   const rawCatalogStatus = String(pack?.catalogStatus ?? (release ? 'approved' : 'missing')).toLowerCase()
   const approvedWithoutInstallableRelease = rawCatalogStatus === 'approved' && !hasVerifiedRelease

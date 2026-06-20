@@ -377,36 +377,82 @@ function moduleRequirementMetadata(requirement, resolvedFile) {
   }
 }
 
+function normalizedReleasePath(value) {
+  return String(value ?? '').replace(/\\/g, '/').toLowerCase()
+}
+
+function findModuleFileIndex(files, expectedPath, assetName) {
+  const normalizedExpectedPath = normalizedReleasePath(expectedPath)
+  const expectedBasename = releasePathBasename(normalizedExpectedPath)
+  const expectedAssetName = releasePathBasename(String(assetName ?? '').toLowerCase())
+  return files.findIndex((file) => {
+    const filePath = normalizedReleasePath(file?.path)
+    const fileBasename = releasePathBasename(filePath)
+    const fileAssetName = releasePathBasename(String(file?.assetName ?? '').toLowerCase())
+    return (
+      (normalizedExpectedPath && filePath === normalizedExpectedPath) ||
+      (expectedBasename && fileBasename === expectedBasename) ||
+      (expectedAssetName && fileAssetName === expectedAssetName) ||
+      (expectedAssetName && fileBasename === expectedAssetName)
+    )
+  })
+}
+
+function mergeResolvedModuleFile(file, resolved) {
+  const next = {
+    ...file,
+    path: resolved.path,
+    assetName: resolved.assetName,
+    sha256: resolved.sha256,
+    size: resolved.size,
+    required: resolved.required,
+    moduleId: resolved.moduleId,
+    side: resolved.side,
+  }
+  if (resolved.url) {
+    next.url = resolved.url
+  } else {
+    delete next.url
+  }
+  if (Array.isArray(resolved.urls) && resolved.urls.length > 1) {
+    next.urls = resolved.urls
+  } else {
+    delete next.urls
+  }
+  return next
+}
+
 function resolveModuleRequirements(manifest = {}, releaseAssets = []) {
   const requirements = normalizeModuleRequirements(manifest)
   if (!requirements.length) return manifest
   const catalog = moduleCatalogFromReleaseAssets(releaseAssets)
-  const existingBasenames = new Set((manifest.files ?? []).map((file) => releasePathBasename(file?.path ? String(file.path).replace(/\\/g, '/').toLowerCase() : '')))
-  const existingFullPaths = new Set((manifest.files ?? []).map((file) => String(file?.path ?? '').replace(/\\/g, '/').toLowerCase()))
-  const moduleFiles = []
+  const files = [...(manifest.files ?? [])]
   const resolvedRequirements = []
   for (const requirement of requirements) {
-    const expectedPath = moduleRequirementInstallPath(requirement).toLowerCase()
-    if (existingFullPaths.has(expectedPath) || existingBasenames.has(releasePathBasename(expectedPath))) {
-      resolvedRequirements.push(moduleRequirementMetadata(requirement))
+    const expectedPath = moduleRequirementInstallPath(requirement)
+    const matchingAsset = catalog.byName.get(requirement.assetName) ?? findModuleArtifactForRequirement(requirement, catalog)
+    let resolved = matchingAsset ? resolveModuleRequirement(requirement, catalog) : null
+    let existingIndex = findModuleFileIndex(files, resolved?.path ?? expectedPath, resolved?.assetName ?? requirement.assetName)
+    if (existingIndex >= 0) {
+      if (resolved) files[existingIndex] = mergeResolvedModuleFile(files[existingIndex], resolved)
+      resolvedRequirements.push(moduleRequirementMetadata(requirement, resolved ?? files[existingIndex]))
       continue
     }
-    const resolved = resolveModuleRequirement(requirement, catalog)
-    const normalizedPath = resolved.path.replace(/\\/g, '/').toLowerCase()
-    if (existingFullPaths.has(normalizedPath) || existingBasenames.has(releasePathBasename(normalizedPath))) {
+    resolved = resolved ?? resolveModuleRequirement(requirement, catalog)
+    existingIndex = findModuleFileIndex(files, resolved.path, resolved.assetName)
+    if (existingIndex >= 0) {
+      files[existingIndex] = mergeResolvedModuleFile(files[existingIndex], resolved)
       resolvedRequirements.push(moduleRequirementMetadata(requirement, resolved))
       continue
     }
-    existingFullPaths.add(normalizedPath)
-    existingBasenames.add(releasePathBasename(normalizedPath))
-    moduleFiles.push(resolved)
+    files.push(resolved)
     resolvedRequirements.push(moduleRequirementMetadata(requirement, resolved))
   }
   return {
     ...manifest,
     modules: [...new Set([...(manifest.modules ?? []), ...requirements.map((item) => item.moduleId)])],
     moduleRequirements: resolvedRequirements,
-    files: [...(manifest.files ?? []), ...moduleFiles],
+    files,
   }
 }
 

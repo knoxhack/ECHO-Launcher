@@ -122,7 +122,7 @@ export function usePackActions() {
           const result = await installService.runInstall({
             profileId: profile.id,
             installPath: profile.installPath,
-            channel: profile.channel,
+            channel: packState.catalog.release?.channel ?? profile.channel,
             version: packState.catalog.release?.version,
             operationId,
             refresh: true,
@@ -143,7 +143,7 @@ export function usePackActions() {
             profileId: profile.id,
             installPath: profile.installPath,
             manifestPath: packState.install.manifestPath,
-            channel: profile.channel,
+            channel: packState.catalog.release?.channel ?? profile.channel,
           })
           options.onProgress?.(result.ok ? 100 : 96)
           const next = await refreshPackState(profile.id)

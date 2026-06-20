@@ -27,7 +27,7 @@ const OFFICIAL_PACKS = [
   ['arcana-division-standalone-edition', 'Arcana Division Standalone Edition'],
 ].map(([profileId, name]) => ({ profileId, name }))
 
-const PUBLIC_CHANNEL_URL = 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/alpha/launcher-channel.json'
+const PUBLIC_CHANNEL_URL = 'https://raw.githubusercontent.com/knoxhack/ECHO-Release-Index/main/channels/beta/launcher-channel.json'
 
 function usage() {
   return `Usage: node scripts/all-modpacks-electron-install-smoke.mjs [options]
@@ -61,6 +61,11 @@ Options:
   --clean                  Remove work-root before launching.
   --keep-open              Leave Electron running after the smoke.
 `
+}
+
+function releaseIndexChannelName(args) {
+  const match = String(args.channelUrl ?? '').match(/\/channels\/([^/]+)\/launcher-channel\.json(?:[?#].*)?$/iu)
+  return match?.[1] ?? 'beta'
 }
 
 function parseArgs(argv) {
@@ -139,7 +144,7 @@ async function jsonCatalogUrls(root, directory) {
   const dir = path.join(root, directory)
   const entries = await fs.readdir(dir).catch(() => [])
   return entries
-    .filter((name) => name.endsWith('.json'))
+    .filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json'))
     .sort()
     .map((name) => pathToFileURL(path.join(dir, name)).href)
 }
@@ -156,27 +161,29 @@ async function copyJsonDirectory(sourceRoot, targetRoot, directory) {
 
 async function buildLocalReleaseIndexChannel(args, workRoot) {
   if (!args.releaseIndexRoot) return args.channelUrl
-  const channelPath = path.join(workRoot, 'local-release-index-channel.json')
+  const channelName = releaseIndexChannelName(args)
   const localRoot = path.join(workRoot, 'local-release-index')
-  const localChannelsAlpha = path.join(localRoot, 'channels', 'alpha')
+  const localChannelRoot = path.join(localRoot, 'channels', channelName)
+  const channelPath = path.join(localChannelRoot, 'launcher-channel.json')
+  const sourceChannelPath = path.join(args.releaseIndexRoot, 'channels', channelName, 'launcher-channel.json')
+  const sourceChannel = await readJson(sourceChannelPath)
   await fs.rm(localRoot, { recursive: true, force: true })
-  await fs.mkdir(localChannelsAlpha, { recursive: true })
+  await fs.mkdir(localChannelRoot, { recursive: true })
   await fs.copyFile(
-    path.join(args.releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json'),
-    path.join(localChannelsAlpha, 'release-manifest.json'),
+    path.join(args.releaseIndexRoot, 'channels', channelName, 'release-manifest.json'),
+    path.join(localChannelRoot, 'release-manifest.json'),
   )
   await fs.copyFile(
-    path.join(args.releaseIndexRoot, 'channels', 'alpha', 'repositories.json'),
-    path.join(localChannelsAlpha, 'repositories.json'),
+    path.join(args.releaseIndexRoot, 'channels', channelName, 'repositories.json'),
+    path.join(localChannelRoot, 'repositories.json'),
   )
   for (const directory of ['products', 'modpacks', 'modules', 'addons']) {
     await copyJsonDirectory(args.releaseIndexRoot, localRoot, directory)
   }
-  const releaseManifestPath = path.join(localChannelsAlpha, 'release-manifest.json')
-  const repositoryCatalogPath = path.join(localChannelsAlpha, 'repositories.json')
+  const releaseManifestPath = path.join(localChannelRoot, 'release-manifest.json')
+  const repositoryCatalogPath = path.join(localChannelRoot, 'repositories.json')
   await writeJson(channelPath, {
-    schemaVersion: 1,
-    channel: 'alpha',
+    ...sourceChannel,
     generatedAt: new Date().toISOString(),
     releaseManifestUrl: pathToFileURL(releaseManifestPath).href,
     repositoryCatalogUrl: pathToFileURL(repositoryCatalogPath).href,
@@ -244,8 +251,8 @@ function moduleEvidenceSourceIndexFromRows(manifest, moduleRows) {
   }
 }
 
-async function loadLocalModuleEvidenceSourceIndex(releaseIndexRoot) {
-  const manifest = await readJson(path.join(releaseIndexRoot, 'channels', 'alpha', 'release-manifest.json')).catch(() => ({}))
+async function loadLocalModuleEvidenceSourceIndex(releaseIndexRoot, channelName = 'beta') {
+  const manifest = await readJson(path.join(releaseIndexRoot, 'channels', channelName, 'release-manifest.json')).catch(() => ({}))
   const modulesDir = path.join(releaseIndexRoot, 'modules')
   const moduleFiles = (await fs.readdir(modulesDir).catch(() => []))
     .filter((name) => name.endsWith('.json'))
@@ -266,7 +273,7 @@ async function loadPublicModuleEvidenceSourceIndex(channelUrl) {
 }
 
 async function loadModuleEvidenceSourceIndex({ releaseIndexRoot, channelUrl }) {
-  if (releaseIndexRoot) return loadLocalModuleEvidenceSourceIndex(releaseIndexRoot)
+  if (releaseIndexRoot) return loadLocalModuleEvidenceSourceIndex(releaseIndexRoot, releaseIndexChannelName({ channelUrl }))
   if (channelUrl && /^https?:\/\//iu.test(channelUrl)) return loadPublicModuleEvidenceSourceIndex(channelUrl)
   return {
     primaryReleaseTag: '',
@@ -291,6 +298,29 @@ function hasEchoMinecraftDependencyRange(toml) {
   return dependencyBlocks(toml).some((block) =>
     /modId\s*=\s*"minecraft"/u.test(block) && /versionRange\s*=\s*"\[26\.1\.2,26\.2\)"/u.test(block)
   )
+}
+
+function neoForgeVersionFromArguments(args = []) {
+  if (!Array.isArray(args)) return ''
+  for (let index = 0; index < args.length; index += 1) {
+    if (String(args[index] ?? '') !== '--fml.neoForgeVersion') continue
+    const version = String(args[index + 1] ?? '').trim()
+    if (version) return version
+  }
+  return ''
+}
+
+function neoForgeVersionFromManifest(manifest = {}) {
+  const loader = manifest.loader && typeof manifest.loader === 'object' && !Array.isArray(manifest.loader)
+    ? manifest.loader
+    : {}
+  const explicit = String(loader.version ?? '').trim()
+  if (explicit) return explicit
+  const launcherVersion = String(loader.minecraftLauncherVersionId ?? loader.versionJson?.id ?? '').trim()
+  const fromLauncherVersion = launcherVersion.replace(/^neoforge-/iu, '').trim()
+  if (fromLauncherVersion && fromLauncherVersion !== launcherVersion) return fromLauncherVersion
+  return neoForgeVersionFromArguments(loader.versionJson?.arguments?.game)
+    || neoForgeVersionFromArguments(manifest.launch?.gameArgs)
 }
 
 async function freePort() {
@@ -505,6 +535,10 @@ async function clickVisibleButton(cdp, text) {
   return result
 }
 
+async function clickVisibleButtonWhenReady(cdp, text, timeoutMs) {
+  return waitFor(`button containing '${text}'`, timeoutMs, async () => clickVisibleButton(cdp, text))
+}
+
 async function navigateHome(cdp) {
   const homeReady = async () => evaluate(cdp, `(() => {
     if (document.getElementById('home-pack-select')) return true
@@ -709,7 +743,11 @@ async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSo
   } else if (selectedPack.endsWith('-neoforge-edition')) {
     const minecraftVersion = manifest.minecraftVersion ?? manifest.minecraft ?? manifest.runtime?.minecraftVersion ?? manifest.loader?.versionJson?.inheritsFrom
     assert(minecraftVersion === '26.1.2', `${selectedPack} NeoForge manifest Minecraft identity is ${minecraftVersion ?? 'missing'}, expected 26.1.2.`)
-    assert(manifest.loader?.versionJson?.inheritsFrom === '26.1.2', `${selectedPack} NeoForge inheritsFrom is ${manifest.loader?.versionJson?.inheritsFrom ?? 'missing'}, expected 26.1.2.`)
+    const neoForgeVersion = neoForgeVersionFromManifest(manifest)
+    assert(neoForgeVersion, `${selectedPack} NeoForge manifest is missing loader.version or --fml.neoForgeVersion.`)
+    if (manifest.loader?.versionJson) {
+      assert(manifest.loader.versionJson.inheritsFrom === '26.1.2', `${selectedPack} NeoForge inheritsFrom is ${manifest.loader.versionJson.inheritsFrom ?? 'missing'}, expected 26.1.2.`)
+    }
   } else if (selectedPack.endsWith('-standalone-engine-edition')) {
     assert(!manifest.minecraftVersion, `${selectedPack} Engine manifest must not carry Minecraft version ${manifest.minecraftVersion}.`)
     assert(manifest.loader === 'echo-standalone-engine', `${selectedPack} Engine manifest loader is ${JSON.stringify(manifest.loader)}, expected echo-standalone-engine.`)
@@ -1392,7 +1430,10 @@ async function run() {
         packResult.visibleInstallAction = action.install
 
         const installStartedAt = Date.now() - 1000
-        const click = await clickVisibleButton(cdp, `Install ${pack.name}`)
+        const click = await guardElectron(
+          `${pack.name} install click`,
+          clickVisibleButtonWhenReady(cdp, `Install ${pack.name}`, Math.min(args.packTimeoutMs, 60_000)),
+        )
         packResult.click = click
         cdp.close()
         cdp = null
