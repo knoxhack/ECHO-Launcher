@@ -125,6 +125,7 @@ const OFFICIAL_PACK_IDS = new Set([
   'ashfall-native-edition',
   'ashfall-neoforge-edition',
   'ashfall-standalone-edition',
+  'ashfall-standalone-engine-edition',
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
@@ -138,7 +139,7 @@ const OFFICIAL_PACK_IDS = new Set([
   'arcana-division-neoforge-edition',
   'arcana-division-standalone-edition',
 ])
-const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'])
+const ASHFALL_RUNTIME_PACK_IDS = new Set(['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition', 'ashfall-standalone-engine-edition'])
 const ASHFALL_PROFILE_DEFINITIONS = [
   {
     id: 'ashfall-native-edition',
@@ -167,6 +168,16 @@ const ASHFALL_PROFILE_DEFINITIONS = [
     channel: 'experimental',
     channelLabel: 'Experimental',
     installFolder: 'Ashfall Standalone Edition',
+    minecraft: 'Standalone',
+    neoforge: 'N/A',
+  },
+  {
+    id: 'ashfall-standalone-engine-edition',
+    name: 'Ashfall Standalone Engine Edition',
+    runtimeMode: 'standalone-engine',
+    channel: 'beta',
+    channelLabel: 'Engine Beta',
+    installFolder: 'Ashfall Standalone Engine Edition',
     minecraft: 'Standalone',
     neoforge: 'N/A',
   },
@@ -1332,7 +1343,7 @@ async function standaloneRuntimeGetState(payload = {}) {
 
 async function repairStandalonePackInstallBeforeLaunch(payload = {}, profileId = CANONICAL_PROFILE_ID) {
   const selectedPack = normalizeOfficialPackId(profileId)
-  if (!selectedPack?.endsWith('-standalone-edition')) return null
+  if (!isStandaloneInstallPackId(selectedPack)) return null
   const profiles = await profileList()
   const profile = selectLauncherProfile(profiles, { ...payload, profileId: selectedPack }, true)
   const installPath = normalizePath(payload.installPath ?? profile.installPath ?? defaultInstallPathForProfile(getPaths(), profile.id))
@@ -1536,6 +1547,372 @@ async function standaloneRuntimeLaunch(payload = {}) {
     ],
     state,
     packRepair,
+  }
+}
+
+function isStandaloneInstallPackId(packId) {
+  const normalized = normalizeOfficialPackId(packId)
+  return Boolean(normalized?.endsWith('-standalone-edition') || normalized?.endsWith('-standalone-engine-edition'))
+}
+
+async function latestLogPath(logsDir, pattern) {
+  try {
+    const entries = await fs.readdir(logsDir, { withFileTypes: true })
+    const logs = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !pattern.test(entry.name)) continue
+      const filePath = path.join(logsDir, entry.name)
+      const stats = await fs.stat(filePath)
+      logs.push({ filePath, mtimeMs: stats.mtimeMs })
+    }
+    return logs.sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.filePath
+  } catch {
+    return undefined
+  }
+}
+
+async function standaloneEngineJava() {
+  const java = await javaDetect()
+  const runtime = java.runtimes.find((candidate) => Number(candidate.major) >= 21) ?? java.preferred ?? java.runtimes[0] ?? null
+  return {
+    ...java,
+    engineRuntime: runtime,
+    engineOk: Number(runtime?.major ?? 0) >= 21,
+  }
+}
+
+async function findStandaloneEngineJar(installRoot) {
+  try {
+    const entries = await fs.readdir(installRoot, { withFileTypes: true })
+    const jars = entries
+      .filter((entry) => entry.isFile() && /^echo-standalone-engine-.*\.jar$/i.test(entry.name))
+      .map((entry) => path.join(installRoot, entry.name))
+      .sort((a, b) => path.basename(b).localeCompare(path.basename(a), undefined, { numeric: true }))
+    return jars[0]
+  } catch {
+    return undefined
+  }
+}
+
+async function readStandaloneEngineManifestState(installRoot, profileId) {
+  const installed = await readInstalledProfileManifestState(installRoot, profileId)
+  if (installed?.valid) return installed
+  const packJsonPath = path.join(installRoot, 'pack.json')
+  const manifest = await readJson(packJsonPath, null)
+  const packId = normalizeOfficialPackId(manifest?.pack ?? manifest?.id)
+  if (manifest && packId === normalizeOfficialPackId(profileId)) {
+    return {
+      valid: true,
+      code: 'pack-json',
+      installPath: installRoot,
+      manifestPath: packJsonPath,
+      manifest,
+      pack: packId,
+    }
+  }
+  return installed ?? {
+    valid: false,
+    code: 'missing',
+    installPath: installRoot,
+    manifestPath: path.join(installRoot, '.echo', 'installed-manifest.json'),
+    manifest: null,
+    pack: undefined,
+    message: 'No installed manifest or pack.json was found.',
+  }
+}
+
+async function verifyStandaloneEngineFiles(installRoot, manifest) {
+  const files = Array.isArray(manifest?.files) ? manifest.files : []
+  const requiredFiles = files.filter((file) => file?.required !== false && String(file?.path ?? '').trim())
+  const results = []
+  for (const file of requiredFiles) {
+    const relativePath = String(file.path).replace(/\\/g, '/')
+    if (!isSafeRelativePath(relativePath)) {
+      results.push({ path: relativePath, status: 'corrupt', expected: file.sha256, actual: null, size: 0 })
+      continue
+    }
+    const absolutePath = safeJoin(installRoot, relativePath)
+    if (!(await exists(absolutePath))) {
+      results.push({ path: relativePath, status: 'missing', expected: file.sha256, actual: null, size: 0 })
+      continue
+    }
+    const stats = await fs.stat(absolutePath)
+    const expected = String(file.sha256 ?? '').toLowerCase()
+    const actual = expected ? await sha256File(absolutePath) : ''
+    results.push({
+      path: relativePath,
+      status: expected && actual.toLowerCase() !== expected ? 'corrupt' : 'valid',
+      expected,
+      actual,
+      size: stats.size,
+    })
+  }
+  return {
+    installPath: installRoot,
+    scanned: results.length,
+    missing: results.filter((item) => item.status === 'missing').map((item) => item.path),
+    corrupt: results.filter((item) => item.status === 'corrupt').map((item) => item.path),
+    valid: results.filter((item) => item.status === 'valid').map((item) => item.path),
+    results,
+  }
+}
+
+async function standaloneEngineEvidenceStatus(evidencePath) {
+  if (!(await exists(evidencePath))) return { status: 'missing', detail: 'content-graph-evidence.json is missing.' }
+  const evidence = await readJson(evidencePath, null)
+  const status = String(evidence?.status ?? '').toUpperCase()
+  if (status === 'PASS') {
+    return {
+      status: 'healthy',
+      detail: `Content graph evidence reports PASS for ${evidence.moduleCount ?? 'unknown'} module(s).`,
+    }
+  }
+  return {
+    status: status ? 'warning' : 'critical',
+    detail: status ? `Content graph evidence reports ${status}.` : 'Content graph evidence is unreadable.',
+  }
+}
+
+async function standaloneEngineResolve(payload = {}) {
+  const profileId = normalizeOfficialPackId(payload.profileId ?? payload.pack ?? 'ashfall-standalone-engine-edition') ?? 'ashfall-standalone-engine-edition'
+  const profiles = await profileList().catch(() => [])
+  const profile = selectLauncherProfile(profiles, { ...payload, profileId }, true)
+  const installRoot = normalizePath(
+    payload.installPath ??
+      payload.runtimeRoot ??
+      profile.installPath ??
+      defaultInstallPathForProfile(getPaths(), profileId),
+  )
+  return { profileId, profile, installRoot }
+}
+
+async function standaloneEngineGetState(payload = {}) {
+  const { profileId, installRoot } = await standaloneEngineResolve(payload)
+  const manifestState = await readStandaloneEngineManifestState(installRoot, profileId)
+  const manifest = manifestState?.manifest
+  const manifestPath = manifestState?.valid ? manifestState.manifestPath : undefined
+  const evidencePath = path.join(installRoot, 'content-graph-evidence.json')
+  const logsDir = path.join(installRoot, 'logs')
+  const [rootExists, engineJar, java, evidence, verification, lastLaunchLogPath] = await Promise.all([
+    exists(installRoot),
+    findStandaloneEngineJar(installRoot),
+    standaloneEngineJava(),
+    standaloneEngineEvidenceStatus(evidencePath),
+    manifestState?.valid
+      ? verifyStandaloneEngineFiles(installRoot, manifest)
+      : Promise.resolve({ installPath: installRoot, scanned: 0, missing: [], corrupt: [], valid: [], results: [] }),
+    latestLogPath(logsDir, /^echo-standalone-engine-.*\.log$/i),
+  ])
+  const javaRuntime = java.engineRuntime
+  const requiredOk = (status) => status === 'healthy' || status === 'operational' || status === 'completed'
+  const fileVerificationStatus = !manifestState?.valid
+    ? 'missing'
+    : verification.missing.length || verification.corrupt.length
+      ? 'warning'
+      : 'healthy'
+  const checks = [
+    {
+      id: 'install-root',
+      label: 'Install root',
+      status: rootExists ? 'healthy' : 'missing',
+      detail: rootExists ? `Resolved ${installRoot}.` : `Install root was not found at ${installRoot}.`,
+      path: installRoot,
+      severity: 'required',
+    },
+    {
+      id: 'pack-manifest',
+      label: 'Pack manifest',
+      status: manifestState?.valid ? 'healthy' : 'missing',
+      detail: manifestState?.valid ? `Manifest found at ${manifestState.manifestPath}.` : manifestState?.message ?? 'pack.json or .echo/installed-manifest.json is missing.',
+      path: manifestState?.manifestPath,
+      severity: 'required',
+    },
+    {
+      id: 'java-21',
+      label: 'Java 21+',
+      status: java.engineOk ? 'healthy' : 'missing',
+      detail: javaRuntime ? `Java ${javaRuntime.version} at ${javaRuntime.path}.` : 'No Java runtime was detected.',
+      path: javaRuntime?.path,
+      command: 'java -version',
+      severity: 'required',
+    },
+    {
+      id: 'engine-jar',
+      label: 'Engine JAR',
+      status: engineJar ? 'healthy' : 'missing',
+      detail: engineJar ? `Engine JAR is ready at ${engineJar}.` : 'echo-standalone-engine-*.jar is missing from the install root.',
+      path: engineJar,
+      severity: 'required',
+    },
+    {
+      id: 'content-graph-evidence',
+      label: 'Content graph evidence',
+      status: evidence.status,
+      detail: evidence.detail,
+      path: evidencePath,
+      severity: 'required',
+    },
+    {
+      id: 'file-verification',
+      label: 'File verification',
+      status: fileVerificationStatus,
+      detail: manifestState?.valid
+        ? `${verification.valid.length} valid, ${verification.missing.length} missing, ${verification.corrupt.length} corrupt required file(s).`
+        : 'File verification requires pack.json or .echo/installed-manifest.json.',
+      path: manifestPath,
+      severity: 'required',
+    },
+  ]
+  const ok = checks.filter((check) => check.severity === 'required').every((check) => requiredOk(check.status))
+  const repairPlan = checks
+    .filter((check) => check.status === 'missing' || check.status === 'critical' || check.status === 'failed' || check.status === 'warning')
+    .map((check) => ({
+      id: `repair-${check.id}`,
+      title: `Restore ${check.label}`,
+      detail: check.id === 'file-verification'
+        ? `Repair the Engine Edition install from the pack ZIP. Missing: ${verification.missing.join(', ') || 'none'}. Corrupt: ${verification.corrupt.join(', ') || 'none'}.`
+        : `Restore or regenerate ${check.path ?? check.label}.`,
+      command: check.command,
+      target: check.path,
+      recommended: check.severity === 'required',
+      automated: check.id === 'file-verification',
+    }))
+  const warnings = checks
+    .filter((check) => !requiredOk(check.status))
+    .map((check) => check.detail)
+  const logs = checks.map((check) => ({
+    id: `standalone-engine-${check.id}`,
+    timestamp: isoNow(),
+    level: runtimeCheckLevel(check.status),
+    source: 'standalone-engine',
+    message: `${check.label}: ${check.detail}`,
+  }))
+  return {
+    ok,
+    generatedAt: isoNow(),
+    runtimeRoot: installRoot,
+    executablePath: engineJar,
+    version: manifest?.version,
+    javaVersion: javaRuntime?.version,
+    manifestPath,
+    contentGraphEvidencePath: evidencePath,
+    lastLaunchLogPath,
+    checks,
+    repairPlan,
+    supportBundle: {
+      available: Boolean(manifestPath || lastLaunchLogPath),
+      entries: [manifestPath, evidencePath, lastLaunchLogPath].filter(Boolean).length,
+      reportPath: manifestPath,
+    },
+    logs,
+    warnings,
+  }
+}
+
+async function standaloneEngineLaunch(payload = {}) {
+  const { profileId, installRoot } = await standaloneEngineResolve(payload)
+  const state = await standaloneEngineGetState({ ...payload, profileId, installPath: installRoot })
+  if (!state.ok || !state.executablePath) {
+    const message = state.warnings[0] ?? 'Standalone Engine verification failed.'
+    await appendLauncherLog('WARN', `Standalone Engine launch blocked for ${profileId}: ${message}`)
+    return {
+      ok: false,
+      profileId,
+      executablePath: state.executablePath,
+      message,
+      warnings: state.warnings,
+      state,
+      packRepair: null,
+    }
+  }
+  const java = await standaloneEngineJava()
+  if (!java.engineOk || !java.engineRuntime?.path) {
+    const message = 'Java 21+ is required to launch Standalone Engine.'
+    return {
+      ok: false,
+      profileId,
+      executablePath: state.executablePath,
+      message,
+      warnings: [message],
+      state,
+      packRepair: null,
+    }
+  }
+  const logsDir = path.join(installRoot, 'logs')
+  await ensureDir(logsDir)
+  const logPath = path.join(logsDir, `echo-standalone-engine-${nowStamp()}.log`)
+  const args = [
+    '-Dfile.encoding=UTF-8',
+    '-jar',
+    state.executablePath,
+    '--pack-root',
+    installRoot,
+    '--manifest',
+    'pack.json',
+    '--save-root',
+    path.join(installRoot, 'saves'),
+  ]
+  if (payload.headlessSmoke === true) args.push('--headless-smoke')
+  await fs.writeFile(
+    logPath,
+    [
+      `[${isoNow()}] ECHO Launcher initialized Standalone Engine launch.`,
+      `[${isoNow()}] Profile: ${profileId}`,
+      `[${isoNow()}] Install root: ${installRoot}`,
+      `[${isoNow()}] Java: ${java.engineRuntime.path} (${java.engineRuntime.version})`,
+      `[${isoNow()}] Engine JAR: ${state.executablePath}`,
+      `[${isoNow()}] Args: ${args.join(' ')}`,
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  if (payload.headlessSmoke === true) {
+    const result = await execFileSafe(java.engineRuntime.path, args, {
+      cwd: installRoot,
+      timeout: 120000,
+      maxBuffer: 8 * 1024 * 1024,
+    })
+    await fs.appendFile(logPath, `${result.stdout ?? ''}${result.stderr ?? ''}${result.error ? `\n${result.error}\n` : ''}`, 'utf8')
+    const nextState = await standaloneEngineGetState({ ...payload, profileId, installPath: installRoot })
+    return {
+      ok: result.ok,
+      profileId,
+      executablePath: state.executablePath,
+      logPath,
+      message: result.ok ? `Standalone Engine headless smoke completed for ${profileId}.` : `Standalone Engine headless smoke failed for ${profileId}.`,
+      warnings: result.ok ? nextState.warnings : [result.error ?? result.stderr ?? 'Headless smoke failed.'],
+      state: { ...nextState, lastLaunchLogPath: logPath },
+      packRepair: null,
+    }
+  }
+  const logFd = fssync.openSync(logPath, 'a')
+  let child
+  try {
+    child = spawn(java.engineRuntime.path, args, {
+      cwd: installRoot,
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      windowsHide: false,
+    })
+  } finally {
+    try {
+      fssync.closeSync(logFd)
+    } catch {
+      // Best effort: the detached child owns its stdio handle after spawn.
+    }
+  }
+  child.unref()
+  await appendLauncherLog('INFO', `Standalone Engine launched for ${profileId}: pid=${child.pid ?? 'unknown'} java=${java.engineRuntime.path} jar=${state.executablePath} log=${logPath}`)
+  return {
+    ok: true,
+    profileId,
+    pid: child.pid,
+    executablePath: state.executablePath,
+    logPath,
+    message: `Standalone Engine launched for ${profileId}.`,
+    warnings: state.warnings,
+    state: { ...state, lastLaunchLogPath: logPath },
+    packRepair: null,
   }
 }
 
@@ -2261,12 +2638,32 @@ function validatePackManifest(manifest, options = {}) {
   if (!CHANNELS.has(manifest.channel)) {
     throw new Error('Pack manifest channel is invalid.')
   }
-  if (normalizedPack.endsWith('-standalone-edition')) {
+  if (isStandaloneInstallPackId(normalizedPack)) {
     if (!manifest.runtime?.requiredJava) {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include runtime.requiredJava.`)
     }
     if (!manifest.launch?.mainClass) {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include launch metadata.`)
+    }
+    if (normalizedPack.endsWith('-standalone-engine-edition')) {
+      if (manifest.loader !== 'echo-standalone-engine') {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must use loader echo-standalone-engine.`)
+      }
+      if (manifest.artifactMode !== 'zip') {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must use artifactMode zip.`)
+      }
+      if (!manifest.artifactName || !isSafeRelativePath(manifest.artifactName)) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include a safe artifactName.`)
+      }
+      if (!manifest.artifactSha256 || !/^[a-f0-9]{64}$/i.test(manifest.artifactSha256)) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include artifactSha256.`)
+      }
+      if (!Number.isFinite(manifest.artifactSize) || Number(manifest.artifactSize) <= 0) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include artifactSize.`)
+      }
+      if ((manifest.moduleArtifactFamily ?? 'standalone') !== 'standalone') {
+        throw new Error(`${manifest.name ?? normalizedPack} moduleArtifactFamily must be standalone.`)
+      }
     }
   } else if (normalizedPack.endsWith('-native-edition')) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
@@ -2279,7 +2676,7 @@ function validatePackManifest(manifest, options = {}) {
     if (!manifest.minecraft && !manifest.minecraftVersion) {
       throw new Error('Pack manifest requires a Minecraft version.')
     }
-    if (manifest.loader?.type !== 'neoforge') {
+    if ((typeof manifest.loader === 'string' ? manifest.loader : manifest.loader?.type) !== 'neoforge') {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include NeoForge loader metadata.`)
     }
   }
@@ -2350,7 +2747,14 @@ function validatePackManifest(manifest, options = {}) {
       }
     }
   }
-  const installer = manifest.loader?.installer
+  const requiredPaths = (manifest.files ?? [])
+    .filter((file) => file?.required !== false)
+    .map((file) => String(file?.path ?? '').replace(/\\/g, '/'))
+  const modJars = requiredPaths.filter((filePath) => /^mods\/.+\.jar$/iu.test(filePath))
+  if (normalizedPack.endsWith('-standalone-engine-edition') && modJars.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} requires standalone module jars under mods/*.jar.`)
+  }
+  const installer = typeof manifest.loader === 'string' ? undefined : manifest.loader?.installer
   if (installer) {
     if (!installer.url && !installer.assetName) {
       throw new Error('NeoForge installer metadata requires a URL or release asset name.')
@@ -2413,7 +2817,7 @@ function normalizedPackRootModulePath(file, normalizedPack) {
   const basename = path.basename(filePath)
   if (!basename) return null
   if (normalizedPack.endsWith('-native-edition') && /\.echo-addon$/iu.test(basename)) return `addons/${basename}`
-  if ((normalizedPack.endsWith('-neoforge-edition') || normalizedPack.endsWith('-standalone-edition')) && /\.jar$/iu.test(basename)) return `mods/${basename}`
+  if ((normalizedPack.endsWith('-neoforge-edition') || isStandaloneInstallPackId(normalizedPack)) && /\.jar$/iu.test(basename)) return `mods/${basename}`
   return null
 }
 
@@ -2430,7 +2834,7 @@ function normalizeLegacyPackFiles(manifest, normalizedPack) {
 }
 
 function normalizeLegacyNeoForgeLoader(manifest, normalizedPack) {
-  if (!normalizedPack.endsWith('-neoforge-edition') || manifest.loader?.type !== 'neoforge') return manifest.loader
+  if (!normalizedPack.endsWith('-neoforge-edition') || (typeof manifest.loader === 'string' ? manifest.loader : manifest.loader?.type) !== 'neoforge' || typeof manifest.loader === 'string') return manifest.loader
   const minecraftVersion = String(manifest.minecraftVersion ?? manifest.minecraft ?? manifest.loader?.versionJson?.inheritsFrom ?? '').trim()
   const loaderVersion = String(manifest.loader?.version ?? '').trim()
   const replacement = NEOFORGE_VERSION_BY_MINECRAFT_VERSION.get(loaderVersion) ?? (loaderVersion === minecraftVersion ? NEOFORGE_VERSION_BY_MINECRAFT_VERSION.get(minecraftVersion) : undefined)
@@ -8987,9 +9391,27 @@ async function extractZipEntryToFile(zipPath, entry, destination, options = {}) 
   }
 }
 
+function findManifestZipEntry(zip, file) {
+  const candidates = [
+    String(file.archivePath ?? '').replace(/\\/g, '/'),
+    String(file.path ?? '').replace(/\\/g, '/'),
+  ].filter(Boolean)
+  for (const candidate of [...new Set(candidates)]) {
+    const exact = zip.getEntry(candidate)
+    if (exact && !exact.isDirectory) return { entry: exact, archivePath: candidate }
+  }
+
+  const entries = zip.getEntries().filter((entry) => !entry.isDirectory)
+  for (const candidate of [...new Set(candidates)]) {
+    const suffix = `/${candidate}`
+    const rooted = entries.find((entry) => String(entry.entryName ?? '').replace(/\\/g, '/').endsWith(suffix))
+    if (rooted) return { entry: rooted, archivePath: String(rooted.entryName ?? '').replace(/\\/g, '/') }
+  }
+  return { entry: null, archivePath: candidates[0] ?? String(file.path ?? '') }
+}
+
 async function extractManifestFileFromZip(zipPath, zip, file, destination, options = {}) {
-  const archivePath = String(file.archivePath ?? file.path ?? '').replace(/\\/g, '/')
-  const entry = zip.getEntry(archivePath)
+  const { entry, archivePath } = findManifestZipEntry(zip, file)
   if (!entry || entry.isDirectory) {
     throw new Error(`File is missing from the verified pack zip: ${archivePath}.`)
   }
@@ -10047,10 +10469,18 @@ function selectedPackOsState(packOs, profileId) {
 
 function packRouteForProfile(profile) {
   const runtimeMode = profile?.runtimeMode ?? (String(profile?.id ?? '').endsWith('-standalone-edition') ? 'native-runtime' : defaultMinecraftRuntimeMode(profile))
+  if (runtimeMode === 'standalone-engine') {
+    return {
+      mode: runtimeMode,
+      label: 'Standalone Engine',
+      shortLabel: 'Engine',
+      detail: 'Runs through the Java 21 ECHO Standalone Engine.',
+    }
+  }
   if (runtimeMode === 'native-runtime') {
     return {
       mode: runtimeMode,
-      label: 'ECHO Standalone Engine',
+      label: 'Legacy Standalone Runtime',
       shortLabel: 'Standalone',
       detail: 'Runs through the standalone ECHO runtime.',
     }
@@ -10079,9 +10509,11 @@ function latestCatalogReleaseForProfile(index, profile) {
 function packCatalogMetadata(index, profile) {
   const pack = (index?.packs ?? []).find((item) => item.id === profile?.id)
   const release = latestCatalogReleaseForProfile(index, profile)
-  const available = Boolean(release?.trust === 'verified-metadata' && release.manifestSha256)
+  const hasVerifiedRelease = Boolean(release?.trust === 'verified-metadata' && release.manifestSha256)
   const rawCatalogStatus = String(pack?.catalogStatus ?? (release ? 'approved' : 'missing')).toLowerCase()
-  const approvedWithoutInstallableRelease = rawCatalogStatus === 'approved' && !available
+  const approvedWithoutInstallableRelease = rawCatalogStatus === 'approved' && !hasVerifiedRelease
+  const warningWithInstallableRelease = rawCatalogStatus === 'warning' && hasVerifiedRelease
+  const available = hasVerifiedRelease && (rawCatalogStatus === 'approved' || warningWithInstallableRelease)
   const catalogStatus = approvedWithoutInstallableRelease ? 'missing' : rawCatalogStatus
   const diagnostic = approvedWithoutInstallableRelease
     ? 'Catalog entry is approved-looking, but no approved release is installable yet.'
@@ -10217,7 +10649,7 @@ async function appPackState(payload = {}) {
   ].filter(Boolean)
   const packOsBlocked = Boolean(selectedPackOs && BLOCKING_UI_STATES.has(selectedPackOs.uiState))
 
-  let minecraftLauncher = { ok: route.mode === 'native-runtime', warnings: [] }
+  let minecraftLauncher = { ok: route.mode === 'native-runtime' || route.mode === 'standalone-engine', warnings: [] }
   if (MINECRAFT_RUNTIME_MODES.has(route.mode)) {
     if (installedState?.valid) {
       try {
@@ -10311,7 +10743,7 @@ async function appPackState(payload = {}) {
   } else if (packOsBlocked || !minecraftLauncher.ok) {
     primaryAction = packStateAction('diagnostics', 'Open Diagnostics', { reason: blockers[0]?.detail ?? 'Launch route needs attention.' })
   } else {
-    primaryAction = packStateAction(route.mode === 'native-runtime' ? 'launch-standalone' : 'play', `Play ${profile.name}`, { variant: 'primary' })
+    primaryAction = packStateAction(route.mode === 'native-runtime' || route.mode === 'standalone-engine' ? 'launch-standalone' : 'play', `Play ${profile.name}`, { variant: 'primary' })
   }
 
   const playReady = installed && !needsFileRepair && !needsNativeRepair && !packOsBlocked && minecraftLauncher.ok
@@ -11193,6 +11625,8 @@ const handlers = {
   'native-loader:launch-ashfall': nativeLoaderLaunchAshfall,
   'standalone-runtime:get-state': standaloneRuntimeGetState,
   'standalone-runtime:launch': standaloneRuntimeLaunch,
+  'standalone-engine:get-state': standaloneEngineGetState,
+  'standalone-engine:launch': standaloneEngineLaunch,
   'release:fetch-manifest': releaseFetchManifest,
   'release:cache-clear': releaseCacheClear,
   'neoforge:ensure': neoforgeEnsure,

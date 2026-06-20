@@ -141,6 +141,23 @@ const packFallbackSeeds: OfficialModpackSeed[] = [
     catalogStatus: 'approved',
   },
   {
+    id: 'ashfall-standalone-engine-edition',
+    name: 'Ashfall Standalone Engine Edition',
+    runtimeMode: 'standalone-engine',
+    betaGate: 'runtime',
+    catalogId: 'ashfall-standalone-engine-edition',
+    status: 'preview',
+    phase: 'Warning Gated',
+    version: '2.0.0-beta.2',
+    minecraft: 'Standalone',
+    channel: 'beta',
+    summary: 'Ashfall verification lane for the rewritten ECHO Standalone Engine.',
+    detail: 'Installs the warning-gated engine ZIP and validates Java 21, content graph evidence, and strict module files.',
+    image: ashfallFamilyImage,
+    moduleCount: 18,
+    catalogStatus: 'warning',
+  },
+  {
     id: 'sky-relay-native-edition',
     name: 'Sky Relay Native Edition',
     runtimeMode: 'native-loader-minecraft',
@@ -366,6 +383,7 @@ function familyForPack(id: OfficialPackId, fallback?: OfficialModpack): Official
 
 export function runtimeLaneLabelFor(mode?: LauncherRuntimeModeId): string {
   if (mode === 'neoforge-minecraft') return 'NeoForge'
+  if (mode === 'standalone-engine') return 'Standalone Engine'
   if (mode === 'native-runtime') return 'Standalone'
   return 'Native Loader'
 }
@@ -396,6 +414,7 @@ function latestReleaseForPack(index: ReleaseIndex, packId: OfficialPackId): Rele
 
 function runtimeModeFor(id: OfficialPackId): LauncherRuntimeModeId {
   if (id.endsWith('-neoforge-edition')) return 'neoforge-minecraft'
+  if (id.endsWith('-standalone-engine-edition')) return 'standalone-engine'
   if (id.endsWith('-standalone-edition')) return 'native-runtime'
   return 'native-loader-minecraft'
 }
@@ -452,7 +471,7 @@ function modpackFromChannelPack(pack: ReleaseIndexChannelPack, index: ReleaseInd
     status,
     phase: locked ? phaseForCatalogStatus(catalogStatus, fallback) : release ? `${releasePhasePrefix} ${titleCase(release.channel)}` : fallback?.phase ?? 'Awaiting Release',
     version: release?.version ?? (locked ? fallback?.version ?? 'Catalog gated' : fallback?.version ?? 'Catalog pending'),
-    minecraft: fallback?.minecraft ?? (normalizedPackId.endsWith('-standalone-edition') ? 'Standalone' : '26.1.2'),
+    minecraft: fallback?.minecraft ?? (normalizedPackId.endsWith('-standalone-edition') || normalizedPackId.endsWith('-standalone-engine-edition') ? 'Standalone' : '26.1.2'),
     channel: release?.channel ?? pack.channel ?? fallback?.channel ?? 'alpha',
     summary: fallback?.summary ?? `${pack.name || fallbackName(normalizedPackId)} from the official Release Index catalog.`,
     detail: diagnostic ?? fallback?.detail ?? 'This pack appears in channel metadata and unlocks after approved strict release assets are available.',

@@ -1,5 +1,5 @@
 import type { Channel } from '../types/launcher'
-import type { OfficialPackId, PackManifest } from '../types/manifests'
+import type { ManifestLoader, OfficialPackId, PackManifest } from '../types/manifests'
 import type { ReleaseEntry, ReleaseIndex } from '../types/releases'
 import { normalizeOfficialPackId, officialPackIds } from '../../electron/release-index-resolver.mjs'
 
@@ -25,7 +25,7 @@ export type { CanonicalArtifactRecord, EchoProtocolRequest, ResolvedEchoProtocol
 
 const channels: Channel[] = ['alpha', 'beta', 'experimental']
 const RELEASE_CACHE_VERSION = 4
-export const playableAshfallPackIds: OfficialPackId[] = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition']
+export const playableAshfallPackIds: OfficialPackId[] = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition', 'ashfall-standalone-engine-edition']
 
 export function isSafeRelativePath(value: string) {
   if (!value || value.includes('\0')) return false
@@ -40,8 +40,17 @@ export function packManifestAssetName(channel: Channel, version: string, pack: O
 
 export function moduleArtifactFamilyForPack(pack: OfficialPackId) {
   if (pack.endsWith('-neoforge-edition')) return 'neoforge'
+  if (pack.endsWith('-standalone-engine-edition')) return 'standalone'
   if (pack.endsWith('-standalone-edition')) return 'standalone'
   return 'echo-addon'
+}
+
+function isStandalonePack(pack: OfficialPackId) {
+  return pack.endsWith('-standalone-edition') || pack.endsWith('-standalone-engine-edition')
+}
+
+function manifestLoaderType(loader: PackManifest['loader']) {
+  return typeof loader === 'string' ? loader : loader?.type
 }
 
 export function moduleArtifactName(moduleId: string, version: string, family: string) {
@@ -248,7 +257,7 @@ function normalizedPackRootModulePath(file: PackManifest['files'][number], norma
   if (!file.moduleId) return null
   const basename = pathBaseName(filePath)
   if (normalizedPack.endsWith('-native-edition') && /\.echo-addon$/iu.test(basename)) return `addons/${basename}`
-  if ((normalizedPack.endsWith('-neoforge-edition') || normalizedPack.endsWith('-standalone-edition')) && /\.jar$/iu.test(basename)) return `mods/${basename}`
+  if ((normalizedPack.endsWith('-neoforge-edition') || isStandalonePack(normalizedPack)) && /\.jar$/iu.test(basename)) return `mods/${basename}`
   return null
 }
 
@@ -265,13 +274,14 @@ function normalizeLegacyPackFiles(manifest: PackManifest, normalizedPack: Offici
 }
 
 function normalizeLegacyNeoForgeLoader(manifest: PackManifest, normalizedPack: OfficialPackId): PackManifest['loader'] {
-  if (!normalizedPack.endsWith('-neoforge-edition') || manifest.loader?.type !== 'neoforge') return manifest.loader
+  const loader = manifest.loader
+  if (!normalizedPack.endsWith('-neoforge-edition') || !loader || typeof loader === 'string' || loader.type !== 'neoforge') return loader
   const minecraftVersion = String(manifest.minecraftVersion ?? manifest.minecraft ?? '').trim()
-  const loaderVersion = String(manifest.loader.version ?? '').trim()
+  const loaderVersion = String(loader.version ?? '').trim()
   const replacement = neoForgeVersionByMinecraftVersion.get(loaderVersion) ?? (loaderVersion === minecraftVersion ? neoForgeVersionByMinecraftVersion.get(minecraftVersion) : undefined)
-  if (!replacement || replacement === loaderVersion) return manifest.loader
-  const next: PackManifest['loader'] = {
-    ...manifest.loader,
+  if (!replacement || replacement === loaderVersion) return loader
+  const next: ManifestLoader = {
+    ...loader,
     version: replacement,
     minecraftLauncherVersionId: `neoforge-${replacement}`,
   }
@@ -317,12 +327,32 @@ export function validatePackManifest(value: unknown): PackManifest {
   if (!channels.includes(manifest.channel)) {
     throw new Error('Manifest channel is invalid.')
   }
-  if (normalizedPack.endsWith('-standalone-edition')) {
+  if (isStandalonePack(normalizedPack)) {
     if (!manifest.runtime?.requiredJava) {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include runtime.requiredJava.`)
     }
     if (!manifest.launch?.mainClass) {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include launch metadata.`)
+    }
+    if (normalizedPack.endsWith('-standalone-engine-edition')) {
+      if (manifest.loader !== 'echo-standalone-engine') {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must use loader echo-standalone-engine.`)
+      }
+      if (manifest.artifactMode !== 'zip') {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must use artifactMode zip.`)
+      }
+      if (!manifest.artifactName || !isSafeRelativePath(manifest.artifactName)) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include a safe artifactName.`)
+      }
+      if (!manifest.artifactSha256 || !/^[a-f0-9]{64}$/i.test(manifest.artifactSha256)) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include artifactSha256.`)
+      }
+      if (!Number.isFinite(manifest.artifactSize) || Number(manifest.artifactSize) <= 0) {
+        throw new Error(`${manifest.name ?? normalizedPack} manifests must include artifactSize.`)
+      }
+      if ((manifest.moduleArtifactFamily ?? 'standalone') !== 'standalone') {
+        throw new Error(`${manifest.name ?? normalizedPack} moduleArtifactFamily must be standalone.`)
+      }
     }
   } else if (normalizedPack.endsWith('-native-edition')) {
     if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
@@ -335,7 +365,7 @@ export function validatePackManifest(value: unknown): PackManifest {
     if (!(manifest.minecraftVersion ?? manifest.minecraft) || typeof (manifest.minecraftVersion ?? manifest.minecraft) !== 'string') {
       throw new Error('Manifest Minecraft version is required.')
     }
-    if (manifest.loader?.type !== 'neoforge') {
+    if (manifestLoaderType(manifest.loader) !== 'neoforge') {
       throw new Error(`${manifest.name ?? normalizedPack} manifests must include NeoForge loader metadata.`)
     }
   }
@@ -414,8 +444,11 @@ export function validatePackManifest(value: unknown): PackManifest {
   if (normalizedPack.endsWith('-neoforge-edition') && modJars.length === 0) {
     throw new Error(`${manifest.name ?? normalizedPack} requires NeoForge mod jars under mods/*.jar, but this manifest lists ${addonFiles.length} Native addon file${addonFiles.length === 1 ? '' : 's'}.`)
   }
+  if (normalizedPack.endsWith('-standalone-engine-edition') && modJars.length === 0) {
+    throw new Error(`${manifest.name ?? normalizedPack} requires standalone module jars under mods/*.jar.`)
+  }
 
-  const installer = manifest.loader?.installer
+  const installer = typeof manifest.loader === 'string' ? undefined : manifest.loader?.installer
   if (installer) {
     if (!installer.url && !installer.assetName) {
       throw new Error('NeoForge installer must include a URL or release asset name.')

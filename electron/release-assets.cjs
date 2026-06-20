@@ -184,7 +184,7 @@ function resolveManifestReleaseAssets(manifest, entryAssets = []) {
 function moduleArtifactFamilyForPack(pack) {
   const normalizedPack = String(pack ?? '').trim().toLowerCase()
   if (normalizedPack.endsWith('-neoforge-edition')) return 'neoforge'
-  if (normalizedPack.endsWith('-standalone-edition')) return 'standalone'
+  if (normalizedPack.endsWith('-standalone-edition') || normalizedPack.endsWith('-standalone-engine-edition')) return 'standalone'
   return 'echo-addon'
 }
 

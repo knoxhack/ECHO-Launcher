@@ -6,10 +6,12 @@ const ASHFALL_PROFILE_IDS = [
   'ashfall-native-edition',
   'ashfall-neoforge-edition',
   'ashfall-standalone-edition',
+  'ashfall-standalone-engine-edition',
   'ashfall-native-loader',
   'ashfall-neoforge',
   'standalone-runtime-showcase',
   'ashfall-standalone-runtime',
+  'ashfall-standalone-engine',
 ]
 
 export interface AshfallInstallPathMigrationInput {

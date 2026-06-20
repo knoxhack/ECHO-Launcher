@@ -29,6 +29,7 @@ const PRIMARY_ACTION_SHORTCUT = 'Control+Enter'
 const routeIcons: Record<string, LucideIcon> = {
   'native-loader-minecraft': Terminal,
   'neoforge-minecraft': Gamepad2,
+  'standalone-engine': Monitor,
   'native-runtime': Monitor,
 }
 

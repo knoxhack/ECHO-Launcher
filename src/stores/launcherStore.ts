@@ -29,6 +29,7 @@ const selectableProfileIds = new Set([
   'ashfall-native-edition',
   'ashfall-neoforge-edition',
   'ashfall-standalone-edition',
+  'ashfall-standalone-engine-edition',
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
@@ -48,6 +49,7 @@ function normalizeSelectedProfileId(profileId?: string) {
   if (profileId === 'ashfall-neoforge') return 'ashfall-neoforge-edition'
   if (profileId === 'ashfall-native-loader') return defaultProfileId
   if (profileId === 'ashfall-standalone-runtime' || profileId === 'standalone-runtime-showcase') return 'ashfall-standalone-edition'
+  if (profileId === 'ashfall-standalone-engine' || profileId === 'ashfall-engine' || profileId === 'standalone-engine') return 'ashfall-standalone-engine-edition'
   if (profileId === 'sky-relay' || profileId === 'sky-relay-native-loader') return 'sky-relay-native-edition'
   if (profileId === 'sky-relay-neoforge') return 'sky-relay-neoforge-edition'
   if (profileId === 'sky-relay-standalone-runtime') return 'sky-relay-standalone-edition'

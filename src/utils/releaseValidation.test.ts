@@ -334,6 +334,7 @@ describe('releaseValidation', () => {
       'ashfall-native-edition',
       'ashfall-neoforge-edition',
       'ashfall-standalone-edition',
+      'ashfall-standalone-engine-edition',
       'sky-relay-native-edition',
       'sky-relay-neoforge-edition',
       'sky-relay-standalone-edition',
@@ -350,6 +351,9 @@ describe('releaseValidation', () => {
     expect(normalizeOfficialPackId('sky-relay')).toBe('sky-relay-native-edition')
     expect(normalizeOfficialPackId('sky-relay-neoforge')).toBe('sky-relay-neoforge-edition')
     expect(normalizeOfficialPackId('sky-relay-standalone-runtime')).toBe('sky-relay-standalone-edition')
+    expect(normalizeOfficialPackId('ashfall-standalone-engine')).toBe('ashfall-standalone-engine-edition')
+    expect(normalizeOfficialPackId('ashfall-engine')).toBe('ashfall-standalone-engine-edition')
+    expect(normalizeOfficialPackId('standalone-engine')).toBe('ashfall-standalone-engine-edition')
     expect(normalizeOfficialPackId('openlands')).toBe('openlands-native-edition')
     expect(normalizeOfficialPackId('openlans')).toBe('openlands-native-edition')
     expect(normalizeOfficialPackId('openlans-neoforge')).toBe('openlands-neoforge-edition')
@@ -377,8 +381,8 @@ describe('releaseValidation', () => {
     ).toThrow('Selected manifest is for Ashfall Native Edition, not Ashfall Standalone Edition.')
   })
 
-  it('keeps Ashfall Native, NeoForge, and Standalone manifest lanes isolated', () => {
-    const lanes = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition'] as const
+  it('keeps Ashfall Native, NeoForge, Standalone, and Engine manifest lanes isolated', () => {
+    const lanes = ['ashfall-native-edition', 'ashfall-neoforge-edition', 'ashfall-standalone-edition', 'ashfall-standalone-engine-edition'] as const
 
     for (const selected of lanes) {
       for (const manifestPack of lanes) {
@@ -404,6 +408,7 @@ describe('releaseValidation', () => {
     expect(moduleArtifactFamilyForPack('sky-relay-native-edition')).toBe('echo-addon')
     expect(moduleArtifactFamilyForPack('openlands-neoforge-edition')).toBe('neoforge')
     expect(moduleArtifactFamilyForPack('sky-relay-standalone-edition')).toBe('standalone')
+    expect(moduleArtifactFamilyForPack('ashfall-standalone-engine-edition')).toBe('standalone')
     expect(moduleArtifactName('echocore', '1.0.0', 'neoforge')).toBe('echocore-1.0.0-neoforge.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'standalone')).toBe('echocore-1.0.0-standalone.jar')
     expect(moduleArtifactName('echocore', '1.0.0', 'echo-addon')).toBe('echocore-1.0.0.echo-addon')
@@ -514,6 +519,7 @@ describe('releaseValidation', () => {
     expect(artifactForPackTarget(canonicalModule, 'ashfall-native-edition')?.name).toBe('echoarmory-1.0.0.echo-addon')
     expect(artifactForPackTarget(canonicalModule, 'ashfall-neoforge-edition')?.name).toBe('echoarmory-1.0.0-neoforge.jar')
     expect(artifactForPackTarget(canonicalModule, 'ashfall-standalone-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
+    expect(artifactForPackTarget(canonicalModule, 'ashfall-standalone-engine-edition')?.name).toBe('echoarmory-1.0.0-standalone.jar')
   })
 
   it('rejects development visibility source-packaged module artifacts', () => {
@@ -791,7 +797,7 @@ describe('releaseValidation', () => {
     })
 
     expect(manifest.pack).toBe('ashfall-neoforge-edition')
-    expect(manifest.loader?.type).toBe('neoforge')
+    expect(manifest.loader).toMatchObject({ type: 'neoforge' })
     expect(manifest.moduleRequirements?.[0]?.id).toBe('echocore')
   })
 
@@ -1134,6 +1140,48 @@ describe('releaseValidation', () => {
       worldgenWarning: false,
     })
     expect(manifest.pack).toBe('ashfall-standalone-edition')
+  })
+
+  it('accepts standalone engine manifests with strict zip and Java 21 metadata', () => {
+    const manifest = validatePackManifest({
+      pack: 'ashfall-standalone-engine-edition',
+      name: 'Ashfall Standalone Engine Edition',
+      version: '2.0.0-beta.2',
+      channel: 'beta',
+      minecraft: 'standalone',
+      loader: 'echo-standalone-engine',
+      runtime: { requiredJava: '21+' },
+      artifactMode: 'zip',
+      artifactName: 'ashfall-standalone-engine-edition-2.0.0-beta.2.zip',
+      artifactSha256: 'a'.repeat(64),
+      artifactSize: 252791,
+      moduleArtifactFamily: 'standalone',
+      launch: {
+        mainClass: 'dev.echo.engine.game.EngineMain',
+        gameArgs: ['--pack-root', '${game_directory}', '--manifest', 'pack.json'],
+        jvmArgs: ['-Dfile.encoding=UTF-8'],
+      },
+      modules: ['echocore'],
+      moduleRequirements: [{ id: 'echocore', version: '1.0.0' }],
+      files: [
+        {
+          path: 'mods/echocore-1.0.0-standalone.jar',
+          assetName: 'echocore-1.0.0-standalone.jar',
+          sha256: 'e'.repeat(64),
+          size: 100,
+          required: true,
+          moduleId: 'echocore',
+          side: 'both',
+        },
+      ],
+      changelog: ['Standalone engine beta'],
+      worldgenWarning: false,
+    })
+
+    expect(manifest.pack).toBe('ashfall-standalone-engine-edition')
+    expect(manifest.loader).toBe('echo-standalone-engine')
+    expect(manifest.runtime?.requiredJava).toBe('21+')
+    expect(manifest.artifactMode).toBe('zip')
   })
 
   it('blocks manifests without verified artifact sources', () => {

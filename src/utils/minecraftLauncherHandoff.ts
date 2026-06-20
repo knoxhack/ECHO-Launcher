@@ -93,6 +93,7 @@ const officialEchoProfileIds = [
   'ashfall-native-edition',
   'ashfall-neoforge-edition',
   'ashfall-standalone-edition',
+  'ashfall-standalone-engine-edition',
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',

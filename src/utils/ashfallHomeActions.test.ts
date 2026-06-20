@@ -51,6 +51,22 @@ describe('getAshfallHomeActions', () => {
     expect(actions.primaryActionKind).toBe('launch-standalone')
   })
 
+  it('shows launch standalone primary for a current standalone engine pack', () => {
+    const actions = getAshfallHomeActions(
+      {
+        ...healthyProfile,
+        id: 'ashfall-standalone-engine-edition',
+        name: 'Ashfall Standalone Engine Edition',
+        runtimeMode: 'standalone-engine',
+        version: '2.0.0-beta.2',
+      },
+      { version: '2.0.0-beta.2' },
+    )
+
+    expect(actions.primaryActionLabel).toBe('Launch Ashfall Standalone Engine Edition')
+    expect(actions.primaryActionKind).toBe('launch-standalone')
+  })
+
   it('keeps play primary when clean installed files have a blocked launch route', () => {
     const actions = getAshfallHomeActions(healthyProfile, { version: '1.0.0' })
     const recoveryActions = getAshfallHomeActions(
@@ -127,7 +143,12 @@ describe('getAshfallHomeRoute', () => {
     expect(getAshfallHomeRoute({ runtimeMode: 'native-loader-minecraft' }).label).toBe('Minecraft + Native Loader')
   })
 
-  it('derives ECHO Standalone Engine from the Standalone profile', () => {
-    expect(getAshfallHomeRoute({ runtimeMode: 'native-runtime' }).label).toBe('ECHO Standalone Engine')
+  it('derives Legacy Standalone Runtime from the old Standalone profile', () => {
+    expect(getAshfallHomeRoute({ runtimeMode: 'native-runtime' }).label).toBe('Legacy Standalone Runtime')
+  })
+
+  it('derives Standalone Engine from the Engine Edition profile', () => {
+    expect(getAshfallHomeRoute({ id: 'ashfall-standalone-engine-edition' }).label).toBe('Standalone Engine')
+    expect(getAshfallHomeRoute({ id: 'ashfall-standalone-engine' }).label).toBe('Standalone Engine')
   })
 })

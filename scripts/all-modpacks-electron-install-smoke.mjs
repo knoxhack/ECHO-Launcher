@@ -12,6 +12,7 @@ const OFFICIAL_PACKS = [
   ['ashfall-native-edition', 'Ashfall Native Edition'],
   ['ashfall-neoforge-edition', 'Ashfall NeoForge Edition'],
   ['ashfall-standalone-edition', 'Ashfall Standalone Edition'],
+  ['ashfall-standalone-engine-edition', 'Ashfall Standalone Engine Edition'],
   ['sky-relay-native-edition', 'Sky Relay Native Edition'],
   ['sky-relay-neoforge-edition', 'Sky Relay NeoForge Edition'],
   ['sky-relay-standalone-edition', 'Sky Relay Standalone Edition'],
@@ -50,11 +51,11 @@ Options:
                            Build a temporary local file-url channel from this
                            Release Index checkout instead of using --channel-url.
   --standalone-runtime-root <path>
-                           Runtime workspace/image used to verify standalone
-                           pack launch routes. Default: ../ECHO-Standalone-Runtime
+                           Runtime workspace/image used to verify legacy
+                           standalone pack launch routes. Default: ../ECHO-Standalone-Runtime
   --pack <profileId>       Limit to one pack. May be provided multiple times.
-  --repair-handoff-fixture Corrupt one installed pack file before Minecraft
-                           handoff and require auto-repair evidence.
+  --repair-handoff-fixture Corrupt one installed pack file and require repair
+                           evidence before launch or Minecraft handoff.
   --pack-timeout-ms <ms>   Timeout per pack. Default: 900000
   --timeout-ms <ms>        Renderer startup timeout. Default: 120000
   --clean                  Remove work-root before launching.
@@ -594,6 +595,16 @@ async function waitForInstallReport(logsDir, afterMs, pack, timeoutMs) {
   })
 }
 
+async function waitForRepairReport(logsDir, afterMs, pack, timeoutMs) {
+  return waitFor(`${pack.name} repair report`, timeoutMs, async () => {
+    const data = await newestReportData(logsDir, 'repair-', afterMs)
+    if (!data?.report) return null
+    if (data.report.profileId !== pack.profileId) return null
+    if (!data.report.ok) throw fatalError(`${pack.name} repair report failed: ${data.report.message ?? data.report.error ?? data.reportPath}`)
+    return data
+  })
+}
+
 function classifyInstalledModuleSource(file, moduleEvidenceSourceIndex) {
   const direct = moduleEvidenceSourceIndex.artifactSourcesByUrl.get(file.url)
   if (direct) return direct
@@ -632,13 +643,23 @@ function summarizeInstalledModuleSources(files) {
 
 function assertInstalledModuleSourceEvidence(selectedPack, installed, moduleEvidenceSourceIndex) {
   assert(installed.fileCount > 0, `${selectedPack} installed manifest did not include any required files.`)
+  const evidenceFileCount = installed.moduleFileCount ?? installed.fileCount
+  if (selectedPack.endsWith('-standalone-engine-edition')) {
+    const expectedModuleCount = installed.moduleRequirementCount
+    assert(Number.isFinite(expectedModuleCount) && expectedModuleCount > 0, `${selectedPack} did not record manifest moduleRequirements.`)
+    assert(evidenceFileCount === expectedModuleCount, `${selectedPack} installed ${evidenceFileCount} module jar(s), expected ${expectedModuleCount} from manifest moduleRequirements.`)
+    return
+  }
   assert(installed.moduleReleaseSources.length > 0, `${selectedPack} did not record module release-source evidence.`)
   const summarizedFiles = installed.moduleReleaseSources.reduce((total, source) => total + Number(source.fileCount ?? 0), 0)
-  assert(summarizedFiles === installed.fileCount, `${selectedPack} module release-source counts cover ${summarizedFiles}/${installed.fileCount} installed files.`)
+  assert(summarizedFiles === evidenceFileCount, `${selectedPack} module release-source counts cover ${summarizedFiles}/${evidenceFileCount} installed module files.`)
 
   if (!moduleEvidenceSourceIndex.primaryReleaseTag) return
 
-  for (const file of installed.files) {
+  const evidenceFiles = selectedPack.endsWith('-standalone-engine-edition')
+    ? installed.files.filter((file) => /^mods\/.+\.jar$/iu.test(file.path))
+    : installed.files
+  for (const file of evidenceFiles) {
     assert(file.releaseTag, `${selectedPack} installed file has no module release tag: ${file.path}`)
     assert(file.releaseSourceState && file.releaseSourceState !== 'unknown', `${selectedPack} installed file has unknown release-source state: ${file.path}`)
   }
@@ -670,6 +691,14 @@ async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSo
   assert(await exists(manifestPath), `Installed manifest missing: ${manifestPath}`)
   const manifest = await readJson(manifestPath)
   assert(manifest.pack === selectedPack, `Installed manifest pack is ${manifest.pack}, expected ${selectedPack}.`)
+  const engineRootFiles = new Set([
+    'echo-standalone-engine-2.0.0-beta.2.jar',
+    'pack.json',
+    'content-graph-evidence.json',
+    'checksums.sha256',
+    'run.ps1',
+    'run.sh',
+  ])
   const expectedFolder = selectedPack.endsWith('-native-edition') ? 'addons/' : 'mods/'
   if (selectedPack.endsWith('-native-edition')) {
     const minecraftVersion = manifest.minecraftVersion ?? manifest.minecraft ?? manifest.runtime?.minecraftVersion ?? manifest.nativeLoader?.versionJson?.inheritsFrom
@@ -681,6 +710,12 @@ async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSo
     const minecraftVersion = manifest.minecraftVersion ?? manifest.minecraft ?? manifest.runtime?.minecraftVersion ?? manifest.loader?.versionJson?.inheritsFrom
     assert(minecraftVersion === '26.1.2', `${selectedPack} NeoForge manifest Minecraft identity is ${minecraftVersion ?? 'missing'}, expected 26.1.2.`)
     assert(manifest.loader?.versionJson?.inheritsFrom === '26.1.2', `${selectedPack} NeoForge inheritsFrom is ${manifest.loader?.versionJson?.inheritsFrom ?? 'missing'}, expected 26.1.2.`)
+  } else if (selectedPack.endsWith('-standalone-engine-edition')) {
+    assert(!manifest.minecraftVersion, `${selectedPack} Engine manifest must not carry Minecraft version ${manifest.minecraftVersion}.`)
+    assert(manifest.loader === 'echo-standalone-engine', `${selectedPack} Engine manifest loader is ${JSON.stringify(manifest.loader)}, expected echo-standalone-engine.`)
+    assert(manifest.runtime?.requiredJava === '21+', `${selectedPack} Engine manifest runtime.requiredJava is ${manifest.runtime?.requiredJava ?? 'missing'}, expected 21+.`)
+    assert(manifest.artifactMode === 'zip', `${selectedPack} Engine manifest artifactMode is ${manifest.artifactMode ?? 'missing'}, expected zip.`)
+    assert(manifest.launch?.mainClass === 'dev.echo.engine.game.EngineMain', `${selectedPack} Engine launch mainClass is ${manifest.launch?.mainClass ?? 'missing'}, expected dev.echo.engine.game.EngineMain.`)
   } else if (selectedPack.endsWith('-standalone-edition')) {
     assert(!manifest.minecraftVersion, `${selectedPack} Standalone manifest must not carry Minecraft version ${manifest.minecraftVersion}.`)
     assert(manifest.loader === 'echo-standalone-runtime', `${selectedPack} Standalone manifest loader is ${JSON.stringify(manifest.loader)}, expected echo-standalone-runtime.`)
@@ -690,7 +725,11 @@ async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSo
   for (const file of manifest.files ?? []) {
     if (file.required === false) continue
     const relativePath = String(file.path ?? '').replace(/\\/g, '/')
-    assert(relativePath.startsWith(expectedFolder), `${selectedPack} installed file is in the wrong lane folder: ${relativePath}`)
+    if (selectedPack.endsWith('-standalone-engine-edition')) {
+      assert(relativePath.startsWith('mods/') || engineRootFiles.has(relativePath), `${selectedPack} installed file is in the wrong lane folder: ${relativePath}`)
+    } else {
+      assert(relativePath.startsWith(expectedFolder), `${selectedPack} installed file is in the wrong lane folder: ${relativePath}`)
+    }
     assert(!String(file.url ?? '').startsWith('file:'), `${selectedPack} manifest file uses unsupported file:// URL: ${relativePath}`)
     const absolutePath = path.join(installPath, relativePath)
     assert(await exists(absolutePath), `Installed file missing: ${relativePath}`)
@@ -720,7 +759,11 @@ async function hashInstalledManifest(installPath, selectedPack, moduleEvidenceSo
     manifestPack: manifest.pack,
     manifestVersion: manifest.version,
     fileCount: files.length,
-    moduleReleaseSources: summarizeInstalledModuleSources(files),
+    moduleRequirementCount: Array.isArray(manifest.moduleRequirements) ? manifest.moduleRequirements.length : null,
+    moduleFileCount: selectedPack.endsWith('-standalone-engine-edition') ? files.filter((file) => /^mods\/.+\.jar$/iu.test(file.path)).length : files.length,
+    moduleReleaseSources: summarizeInstalledModuleSources(
+      selectedPack.endsWith('-standalone-engine-edition') ? files.filter((file) => /^mods\/.+\.jar$/iu.test(file.path)) : files,
+    ),
     files,
   }
 }
@@ -732,7 +775,8 @@ async function corruptInstalledFileForHandoffRepair(installPath, pack, installed
       reason: 'Standalone runtime launch repair is not exercised by Minecraft handoff preparation.',
     }
   }
-  const target = installed.files.find((file) => file.path && file.sha256)
+  const target = installed.files.find((file) => /^(mods|addons)\/.+\.(jar|echo-addon)$/iu.test(String(file.path ?? '')))
+    ?? installed.files.find((file) => file.path && file.sha256)
   assert(target, `${pack.name} has no installed file available for handoff repair corruption.`)
   const absolutePath = path.join(installPath, target.path)
   const beforeSha256 = await sha256File(absolutePath)
@@ -748,7 +792,39 @@ async function corruptInstalledFileForHandoffRepair(installPath, pack, installed
   }
 }
 
+async function repairStandaloneEngineFixture(cdp, pack, installPath, repairFixture, logsDir, timeoutMs) {
+  const repairStartedAt = Date.now() - 1000
+  const repair = await evaluate(cdp, `window.echoNative.invoke('repair:run', {
+    profileId: ${JSON.stringify(pack.profileId)},
+    installPath: ${JSON.stringify(installPath)},
+    backupConfigs: false
+  })`, { timeoutMs })
+  assert(repair?.ok === true, `${pack.name} standalone-engine repair failed: ${repair?.message ?? repair?.error ?? JSON.stringify(repair)}`)
+  assert((repair.before?.corrupt ?? []).includes(repairFixture.path), `${pack.name} standalone-engine repair did not capture corrupt fixture ${repairFixture.path}.`)
+  assert((repair.after?.missing?.length ?? 1) === 0, `${pack.name} standalone-engine repair still has missing files.`)
+  assert((repair.after?.corrupt?.length ?? 1) === 0, `${pack.name} standalone-engine repair still has corrupt files.`)
+  assert((repair.repaired ?? []).includes(repairFixture.path), `${pack.name} standalone-engine repair did not restore ${repairFixture.path}.`)
+  const reportData = repair.reportPath ? { reportPath: repair.reportPath, report: repair } : await waitForRepairReport(logsDir, repairStartedAt, pack, timeoutMs)
+  return {
+    ok: true,
+    reportPath: reportData.reportPath,
+    repaired: repair.repaired ?? [],
+    skipped: repair.skipped ?? [],
+    warnings: repair.warnings ?? [],
+    before: {
+      missing: repair.before?.missing ?? [],
+      corrupt: repair.before?.corrupt ?? [],
+    },
+    after: {
+      missing: repair.after?.missing ?? [],
+      corrupt: repair.after?.corrupt ?? [],
+      valid: repair.after?.valid?.length ?? null,
+    },
+  }
+}
+
 function runtimeModeForPack(pack) {
+  if (pack.profileId.endsWith('-standalone-engine-edition')) return 'standalone-engine'
   if (pack.profileId.endsWith('-standalone-edition')) return 'native-runtime'
   if (pack.profileId.endsWith('-native-edition')) return 'native-loader-minecraft'
   return 'neoforge-minecraft'
@@ -792,6 +868,35 @@ async function seedStaleNeoForgeBootstrapMetadata(cdp, pack, installPath, minecr
 
 async function verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, timeoutMs, options = {}) {
   const runtimeMode = runtimeModeForPack(pack)
+  if (runtimeMode === 'standalone-engine') {
+    const state = await evaluate(cdp, `window.echoNative.invoke('standalone-engine:get-state', {
+      profileId: ${JSON.stringify(pack.profileId)},
+      installPath: ${JSON.stringify(installPath)}
+    })`, { timeoutMs })
+    assert(state?.ok === true, `${pack.name} standalone engine is not ready: ${(state?.warnings ?? []).join(' ') || state?.runtimeRoot || 'unknown reason'}`)
+    assert(state?.runtimeRoot === installPath, `${pack.name} standalone engine runtimeRoot mismatch: ${state?.runtimeRoot ?? 'missing'}`)
+    assert(state?.executablePath && await exists(state.executablePath), `${pack.name} engine JAR is missing: ${state?.executablePath ?? 'missing'}`)
+    assert(state?.manifestPath && await exists(state.manifestPath), `${pack.name} pack manifest is missing: ${state?.manifestPath ?? 'missing'}`)
+    assert(state?.contentGraphEvidencePath && await exists(state.contentGraphEvidencePath), `${pack.name} content graph evidence is missing: ${state?.contentGraphEvidencePath ?? 'missing'}`)
+    const launch = await evaluate(cdp, `window.echoNative.invoke('standalone-engine:launch', {
+      profileId: ${JSON.stringify(pack.profileId)},
+      installPath: ${JSON.stringify(installPath)},
+      headlessSmoke: true
+    })`, { timeoutMs })
+    assert(launch?.ok === true, `${pack.name} standalone engine headless launch failed: ${launch?.message ?? launch?.error ?? JSON.stringify(launch)}`)
+    assert(launch?.logPath && await exists(launch.logPath), `${pack.name} standalone engine launch log is missing: ${launch?.logPath ?? 'missing'}`)
+    return {
+      kind: 'standalone-engine',
+      ok: true,
+      runtimeRoot: state.runtimeRoot,
+      executablePath: state.executablePath,
+      manifestPath: state.manifestPath,
+      contentGraphEvidencePath: state.contentGraphEvidencePath,
+      javaVersion: state.javaVersion ?? null,
+      launchLogPath: launch.logPath,
+      warnings: state.warnings ?? [],
+    }
+  }
   if (runtimeMode === 'native-runtime') {
     const state = await evaluate(cdp, `window.echoNative.invoke('standalone-runtime:get-state', { profileId: ${JSON.stringify(pack.profileId)} })`, { timeoutMs })
     assert(state?.ok === true, `${pack.name} standalone runtime is not ready: ${(state?.warnings ?? []).join(' ') || state?.runtimeRoot || 'unknown reason'}`)
@@ -1186,12 +1291,17 @@ async function run() {
         const repairFixture = args.repairHandoffFixture
           ? await corruptInstalledFileForHandoffRepair(installPath, pack, installed)
           : null
+        let standaloneRepair = null
         const launchRoute = await guardElectron(
           `${pack.name} launch route`,
           (async () => {
             cdp = await openPageCdp(debugPort, args.timeoutMs)
+            const runtimeMode = runtimeModeForPack(pack)
+            if (runtimeMode === 'standalone-engine' && repairFixture && repairFixture.skipped !== true) {
+              standaloneRepair = await repairStandaloneEngineFixture(cdp, pack, installPath, repairFixture, logsDir, args.packTimeoutMs)
+            }
             return verifyLaunchRoute(cdp, pack, installPath, minecraftRoot, args.packTimeoutMs, {
-              expectRepair: Boolean(repairFixture && repairFixture.skipped !== true),
+              expectRepair: Boolean(repairFixture && repairFixture.skipped !== true && runtimeMode !== 'standalone-engine'),
             })
           })(),
         )
@@ -1213,6 +1323,7 @@ async function run() {
           fileCount: installed.fileCount,
           moduleReleaseSources: installed.moduleReleaseSources,
           repairFixture,
+          standaloneRepair,
           launchRoute,
         })
         console.log(`${pack.name}: installed ${installed.fileCount} file(s); module sources ${installed.moduleReleaseSources.map((source) => `${source.fileCount} ${source.releaseSourceState} from ${source.releaseTag}`).join(', ')}`)

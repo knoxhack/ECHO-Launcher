@@ -2,6 +2,7 @@ import type {
   LauncherRuntimeModeId,
   StandaloneRuntimeLaunchButtonState,
   StandaloneRuntimeModeCard,
+  StandaloneRuntimeRepairButtonState,
   StandaloneRuntimeState,
 } from '../types/standaloneRuntime'
 import type { HealthStatus } from '../types/launcher'
@@ -20,10 +21,16 @@ const modeCopy: Record<LauncherRuntimeModeId, Omit<StandaloneRuntimeModeCard, 'i
     actionLabel: 'Play Pack',
   },
   'native-runtime': {
-    label: 'Standalone Runtime Showcase',
-    eyebrow: 'Experimental alpha',
-    detail: 'Checks standalone runtime readiness and launches the experimental runtime showcase.',
-    actionLabel: 'Launch Showcase',
+    label: 'Legacy Standalone Runtime',
+    eyebrow: 'Compatibility',
+    detail: 'Checks legacy standalone runtime readiness for old standalone profiles.',
+    actionLabel: 'Launch Runtime',
+  },
+  'standalone-engine': {
+    label: 'Standalone Engine',
+    eyebrow: 'Engine beta',
+    detail: 'Verifies Java 21, the engine JAR, pack manifest, content graph evidence, and installed files.',
+    actionLabel: 'Launch Engine',
   },
   'neoforge-minecraft': {
     label: 'NeoForge + Minecraft',
@@ -33,7 +40,7 @@ const modeCopy: Record<LauncherRuntimeModeId, Omit<StandaloneRuntimeModeCard, 'i
   },
 }
 
-const modeOrder: LauncherRuntimeModeId[] = ['native-loader-minecraft', 'native-runtime']
+const modeOrder: LauncherRuntimeModeId[] = ['native-loader-minecraft', 'standalone-engine', 'neoforge-minecraft', 'native-runtime']
 
 export function runtimeSummaryStatus(state: StandaloneRuntimeState | null): HealthStatus {
   if (!state) return 'missing'
@@ -53,12 +60,14 @@ function buildRuntimeModeCard(
   const minecraftReady = options.minecraftReady ?? true
   const nativeLoaderReady = options.nativeLoaderReady ?? false
 
-  if (id === 'native-runtime') {
+  if (id === 'native-runtime' || id === 'standalone-engine') {
     return {
       id,
       ...modeCopy[id],
       status: standaloneStatus,
-      disabledReason: state?.ok ? undefined : 'Standalone runtime verification must pass before launch.',
+      disabledReason: state?.ok ? undefined : id === 'standalone-engine'
+        ? 'Standalone Engine verification must pass before launch.'
+        : 'Standalone runtime verification must pass before launch.',
     }
   }
   if (id === 'neoforge-minecraft') {
@@ -118,12 +127,13 @@ export function buildRuntimeLaunchButtonState(input: {
       detail: 'The launcher is handing off control.',
     }
   }
-  if (input.mode === 'native-runtime' && !input.state?.ok) {
+  if ((input.mode === 'native-runtime' || input.mode === 'standalone-engine') && !input.state?.ok) {
+    const blocking = firstBlockingRequiredCheck(input.state)
     return {
       disabled: true,
       label: 'Repair Required',
       status: runtimeSummaryStatus(input.state),
-      detail: card.disabledReason,
+      detail: blocking ? `${blocking.label}: ${blocking.detail}` : card.disabledReason,
     }
   }
   if (input.mode === 'native-loader-minecraft' && !input.nativeLoaderReady) {
@@ -139,5 +149,77 @@ export function buildRuntimeLaunchButtonState(input: {
     label: card.actionLabel,
     status: card.status,
     detail: card.detail,
+  }
+}
+
+function firstBlockingRequiredCheck(state: StandaloneRuntimeState | null) {
+  return (state?.checks ?? []).find(
+    (check) =>
+      check.severity === 'required' &&
+      (check.status === 'missing' || check.status === 'critical' || check.status === 'failed' || check.status === 'warning'),
+  )
+}
+
+export function buildRuntimeRepairButtonState(input: {
+  mode: LauncherRuntimeModeId
+  state: StandaloneRuntimeState | null
+  nativeAvailable: boolean
+  repairing?: boolean
+}): StandaloneRuntimeRepairButtonState {
+  if (!input.nativeAvailable) {
+    return {
+      disabled: true,
+      label: 'Desktop Required',
+      status: 'missing',
+      detail: 'Repair is only available in the Electron desktop shell.',
+    }
+  }
+  if (input.repairing) {
+    return {
+      disabled: true,
+      label: 'Repairing...',
+      status: 'queued',
+      detail: 'The launcher is repairing the selected install from its manifest or pack archive.',
+    }
+  }
+  if (input.mode !== 'standalone-engine') {
+    return {
+      disabled: true,
+      label: 'Use Tools Repair',
+      status: 'operational',
+      detail: 'This runtime mode uses the shared repair flow outside the Standalone Engine card.',
+    }
+  }
+  if (!input.state) {
+    return {
+      disabled: true,
+      label: 'Verify First',
+      status: 'missing',
+      detail: 'Run verification before repairing the Standalone Engine install.',
+    }
+  }
+  if (input.state.ok) {
+    return {
+      disabled: true,
+      label: 'No Repair Needed',
+      status: 'healthy',
+      detail: 'Java, engine JAR, manifest, content graph evidence, and required files are ready.',
+    }
+  }
+  const automatedRepair = input.state.repairPlan.find((action) => action.automated)
+  if (automatedRepair) {
+    return {
+      disabled: false,
+      label: 'Repair Install',
+      status: runtimeSummaryStatus(input.state),
+      detail: automatedRepair.detail,
+    }
+  }
+  const blocking = firstBlockingRequiredCheck(input.state)
+  return {
+    disabled: true,
+    label: 'Manual Repair Needed',
+    status: runtimeSummaryStatus(input.state),
+    detail: blocking ? `${blocking.label}: ${blocking.detail}` : input.state.warnings[0] ?? 'Repair requires manual action before launch.',
   }
 }

@@ -65,6 +65,8 @@ type NativeCommandMap = {
   'native-loader:launch-ashfall': { payload: { operationId?: string; profileId?: string } | undefined; result: NativeLoaderAshfallLaunchResult }
   'standalone-runtime:get-state': { payload: { runtimeRoot?: string } | undefined; result: StandaloneRuntimeState }
   'standalone-runtime:launch': { payload: StandaloneRuntimeLaunchPayload | undefined; result: StandaloneRuntimeLaunchResult }
+  'standalone-engine:get-state': { payload: StandaloneRuntimeLaunchPayload | undefined; result: StandaloneRuntimeState }
+  'standalone-engine:launch': { payload: StandaloneRuntimeLaunchPayload | undefined; result: StandaloneRuntimeLaunchResult }
   'paths:get': { payload: undefined; result: NativePaths }
   'profile:list': { payload: undefined; result: LauncherProfile[] }
   'profile:save': { payload: LauncherProfile; result: LauncherProfile }

@@ -47,16 +47,24 @@ const homeRoutes: Record<LauncherRuntimeModeId, AshfallHomeRoute> = {
   },
   'native-runtime': {
     mode: 'native-runtime',
-    label: 'ECHO Standalone Engine',
+    label: 'Legacy Standalone Runtime',
     shortLabel: 'Standalone',
-    detail: 'Runs the ECHO standalone engine for packs that do not use Minecraft, NeoForge, or Native Loader.',
-    steps: ['Runtime package', 'Standalone checks', 'ECHO engine'],
+    detail: 'Runs the legacy ECHO standalone runtime for old standalone profiles.',
+    steps: ['Runtime package', 'Standalone checks', 'Legacy runtime'],
+  },
+  'standalone-engine': {
+    mode: 'standalone-engine',
+    label: 'Standalone Engine',
+    shortLabel: 'Engine',
+    detail: 'Runs the Java 21 ECHO Standalone Engine with strict pack and content graph verification.',
+    steps: ['Engine ZIP', 'Java 21', 'Content graph evidence'],
   },
 }
 
 export function defaultAshfallRuntimeMode(profile: Partial<Pick<LauncherProfile, 'id' | 'runtimeMode'>>): LauncherRuntimeModeId {
   if (profile.runtimeMode) return profile.runtimeMode
   if (profile.id === 'ashfall-native-edition' || profile.id === 'ashfall-native-loader' || profile.id === 'ashfall') return 'native-loader-minecraft'
+  if (profile.id === 'ashfall-standalone-engine-edition' || profile.id === 'ashfall-standalone-engine') return 'standalone-engine'
   if (profile.id === 'ashfall-standalone-edition') return 'native-runtime'
   return 'neoforge-minecraft'
 }
@@ -114,7 +122,7 @@ export function getSelectedPackHomeActions(
       ? 'update'
       : needsRepair
         ? 'repair'
-        : route.mode === 'native-runtime'
+        : route.mode === 'native-runtime' || route.mode === 'standalone-engine'
           ? 'launch-standalone'
           : 'play'
 

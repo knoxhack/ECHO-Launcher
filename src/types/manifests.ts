@@ -1,6 +1,7 @@
 import type { Channel } from './launcher'
 
 export type LoaderType = 'neoforge' | 'echo-native-loader'
+export type StandaloneLoaderType = 'echo-standalone-runtime' | 'echo-standalone-engine'
 export type FileSide = 'client' | 'server' | 'both'
 export type NeoForgeInstallMode = 'client' | 'server'
 export type PackArtifactMode = 'files' | 'zip'
@@ -8,6 +9,7 @@ export type AshfallRuntimePackId =
   | 'ashfall-native-edition'
   | 'ashfall-neoforge-edition'
   | 'ashfall-standalone-edition'
+  | 'ashfall-standalone-engine-edition'
 export type SkyRelayRuntimePackId =
   | 'sky-relay-native-edition'
   | 'sky-relay-neoforge-edition'
@@ -107,7 +109,7 @@ export interface PackManifest {
   artifactName?: string
   artifactSha256?: string
   artifactSize?: number
-  loader?: ManifestLoader
+  loader?: ManifestLoader | StandaloneLoaderType
   nativeLoader?: NativeLoaderManifest
   runtime?: RuntimeManifest
   launch?: LaunchManifest

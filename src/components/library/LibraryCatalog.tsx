@@ -56,6 +56,7 @@ const runtimeOptions: Array<{ id: 'all' | LauncherRuntimeModeId; label: string; 
   { id: 'all', label: 'All Runtimes', icon: Boxes },
   { id: 'native-loader-minecraft', label: runtimeLaneLabelFor('native-loader-minecraft'), icon: Terminal },
   { id: 'neoforge-minecraft', label: runtimeLaneLabelFor('neoforge-minecraft'), icon: Gamepad2 },
+  { id: 'standalone-engine', label: runtimeLaneLabelFor('standalone-engine'), icon: Monitor },
   { id: 'native-runtime', label: runtimeLaneLabelFor('native-runtime'), icon: Monitor },
 ]
 

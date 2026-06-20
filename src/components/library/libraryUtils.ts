@@ -25,7 +25,7 @@ export interface LibraryFamilyGroup {
   packs: OfficialModpack[]
 }
 
-const runtimeOrder: LauncherRuntimeModeId[] = ['native-loader-minecraft', 'neoforge-minecraft', 'native-runtime']
+const runtimeOrder: LauncherRuntimeModeId[] = ['native-loader-minecraft', 'neoforge-minecraft', 'standalone-engine', 'native-runtime']
 
 export function libraryPackStatus(packState?: NativePackState): LibraryPackStatus {
   if (!packState) return { label: 'Checking', status: 'queued', detail: 'Reading exact pack state from the desktop backend.' }

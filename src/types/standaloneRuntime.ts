@@ -3,7 +3,7 @@ import type { HealthStatus } from './launcher'
 import type { NativeInstallResult, NativeVerifyResult } from './native'
 import type { LauncherProfile } from './profiles'
 
-export type LauncherRuntimeModeId = 'neoforge-minecraft' | 'native-loader-minecraft' | 'native-runtime'
+export type LauncherRuntimeModeId = 'neoforge-minecraft' | 'native-loader-minecraft' | 'native-runtime' | 'standalone-engine'
 export type MinecraftRuntimeModeId = Extract<LauncherRuntimeModeId, 'neoforge-minecraft' | 'native-loader-minecraft'>
 export type StandaloneRuntimeModeId = LauncherRuntimeModeId
 
@@ -41,6 +41,10 @@ export interface StandaloneRuntimeState {
   runtimeRoot: string
   executablePath?: string
   version?: string
+  javaVersion?: string
+  manifestPath?: string
+  contentGraphEvidencePath?: string
+  lastLaunchLogPath?: string
   checks: StandaloneRuntimeCheck[]
   repairPlan: StandaloneRuntimeRepairAction[]
   supportBundle: StandaloneRuntimeSupportBundle
@@ -93,6 +97,13 @@ export interface StandaloneRuntimeModeCard {
 }
 
 export interface StandaloneRuntimeLaunchButtonState {
+  disabled: boolean
+  label: string
+  status: HealthStatus
+  detail?: string
+}
+
+export interface StandaloneRuntimeRepairButtonState {
   disabled: boolean
   label: string
   status: HealthStatus

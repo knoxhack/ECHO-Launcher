@@ -6,6 +6,7 @@ const officialPackIds = [
   'ashfall-native-edition',
   'ashfall-neoforge-edition',
   'ashfall-standalone-edition',
+  'ashfall-standalone-engine-edition',
   'sky-relay-native-edition',
   'sky-relay-neoforge-edition',
   'sky-relay-standalone-edition',
@@ -226,6 +227,7 @@ describe('official modpack catalog', () => {
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
+      'standalone-engine',
       'native-loader-minecraft',
       'neoforge-minecraft',
       'native-runtime',
@@ -247,9 +249,14 @@ describe('official modpack catalog', () => {
   it('keeps fallback Ashfall packs installable', () => {
     const ashfall = officialModpacks.filter((pack) => pack.id.startsWith('ashfall-'))
 
-    expect(ashfall.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable'])
-    expect(ashfall.map((pack) => pack.version)).toEqual(['0.1.0', '0.1.0', '0.1.0'])
-    expect(ashfall.map((pack) => pack.catalogStatus)).toEqual(['approved', 'approved', 'approved'])
+    expect(ashfall.map((pack) => pack.status)).toEqual(['playable', 'playable', 'playable', 'preview'])
+    expect(ashfall.map((pack) => pack.version)).toEqual(['0.1.0', '0.1.0', '0.1.0', '2.0.0-beta.2'])
+    expect(ashfall.map((pack) => pack.catalogStatus)).toEqual(['approved', 'approved', 'approved', 'warning'])
+    expect(ashfall.find((pack) => pack.id === 'ashfall-standalone-engine-edition')).toMatchObject({
+      runtimeLaneLabel: 'Standalone Engine',
+      runtimeMode: 'standalone-engine',
+      moduleCount: 18,
+    })
   })
 
   it('builds visible cards from Release Index channel pack metadata', () => {

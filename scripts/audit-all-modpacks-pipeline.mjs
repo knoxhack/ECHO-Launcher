@@ -8,6 +8,7 @@ const OFFICIAL_PACKS = [
   ['ashfall-native-edition', 'Ashfall Native Edition', 'native', 'ashfall-native'],
   ['ashfall-neoforge-edition', 'Ashfall NeoForge Edition', 'neoforge', 'ashfall-neoforge'],
   ['ashfall-standalone-edition', 'Ashfall Standalone Edition', 'standalone', 'ashfall-standalone'],
+  ['ashfall-standalone-engine-edition', 'Ashfall Standalone Engine Edition', 'standalone', 'ashfall-standalone-engine'],
   ['sky-relay-native-edition', 'Sky Relay Native Edition', 'native', 'sky-relay-native'],
   ['sky-relay-neoforge-edition', 'Sky Relay NeoForge Edition', 'neoforge', 'sky-relay-neoforge'],
   ['sky-relay-standalone-edition', 'Sky Relay Standalone Edition', 'standalone', 'sky-relay-standalone'],
