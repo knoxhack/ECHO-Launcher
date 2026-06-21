@@ -1,7 +1,7 @@
 {
   "name": "echo-launcher",
   "private": true,
-  "version": "1.1.20",
+  "version": "1.1.21",
   "description": "Official desktop launcher for ECHO experiences, PackOS catalogs, and public alpha builds.",
   "author": "knoxhack",
   "homepage": "https://github.com/knoxhack/ECHO-Launcher",

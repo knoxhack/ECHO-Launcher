@@ -12,7 +12,7 @@ export const bundledPackManifest: PackManifest = {
   pack: 'ashfall-native-edition',
   name: 'Ashfall Native Edition',
   version: 'Catalog latest',
-  channel: 'alpha',
+  channel: 'beta',
   minecraft: '26.1.2',
   minecraftVersion: '26.1.2',
   artifactMode: 'zip',
@@ -85,7 +85,7 @@ export const bundledServerManifest: ServerManifest = {
 
 export const bundledReleaseManifest: ReleaseManifest = {
   version: 'Catalog latest',
-  channel: 'alpha',
+  channel: 'beta',
   releasedAt: '',
   manifestUrl: '',
   sha256: '',

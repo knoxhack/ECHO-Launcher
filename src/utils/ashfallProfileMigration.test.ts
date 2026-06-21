@@ -73,7 +73,7 @@ describe('ashfallProfileMigration', () => {
     expect(normalized[0]).toMatchObject({
       id: 'ashfall-native-edition',
       name: 'Ashfall Native Edition',
-      channel: 'alpha',
+      channel: 'beta',
       channelLabel: 'Ashfall Native',
       ramGb: 9,
       installPath: 'C:\\Games\\ECHO\\Ashfall Stable',
