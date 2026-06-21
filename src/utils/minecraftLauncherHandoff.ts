@@ -83,6 +83,15 @@ export interface EchoBootstrapVersionInput {
   timestamp: string
 }
 
+const requiredNeoForgeInheritedLibraries = ['org.slf4j:slf4j-api']
+
+function minecraftLibraryMatchesName(library: unknown, requiredName: string) {
+  if (!library || typeof library !== 'object' || Array.isArray(library)) return false
+  const name = String((library as { name?: unknown }).name ?? '').trim()
+  const parts = name.split(':')
+  return parts.length >= 2 && `${parts[0]}:${parts[1]}`.toLowerCase() === requiredName.toLowerCase()
+}
+
 export function echoMinecraftLauncherProfileId(profileId: string, runtimeMode: 'neoforge-minecraft' | 'native-loader-minecraft' = 'neoforge-minecraft') {
   const safeId = profileId.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
   const baseId = `echo-${safeId || 'profile'}`
@@ -293,6 +302,11 @@ export function validateMinecraftLauncherVersionMetadata(document: unknown, expe
   }
   if (!Array.isArray(version.libraries) || version.libraries.length === 0) {
     return { valid: false, source: 'invalid', reason: 'libraries are missing' }
+  }
+  const missingInheritedLibraries = requiredNeoForgeInheritedLibraries
+    .filter((requiredName) => !(version.libraries as unknown[]).some((library) => minecraftLibraryMatchesName(library, requiredName)))
+  if (missingInheritedLibraries.length > 0) {
+    return { valid: false, source: 'invalid', reason: `NeoForge inherited libraries are missing: ${missingInheritedLibraries.join(', ')}` }
   }
   return {
     valid: true,

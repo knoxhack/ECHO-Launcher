@@ -2827,6 +2827,10 @@ const NEOFORGE_VERSION_BY_MINECRAFT_VERSION = new Map([
   ['26.1.2', '26.1.2.43-beta'],
 ])
 
+const NEOFORGE_REQUIRED_INHERITED_LIBRARY_NAMES = [
+  'org.slf4j:slf4j-api',
+]
+
 function normalizedPackRootModulePath(file, normalizedPack) {
   const filePath = String(file?.path ?? '').replace(/\\/g, '/')
   if (!filePath.toLowerCase().startsWith('pack-root/')) return null
@@ -5086,6 +5090,34 @@ function minecraftLibraryArtifactPath(minecraftRoot, library) {
   return relativePath ? path.join(minecraftRoot, 'libraries', relativePath) : ''
 }
 
+function minecraftLibraryKey(library) {
+  const artifactPath = String(library?.downloads?.artifact?.path ?? '').replace(/\\/g, '/').trim().toLowerCase()
+  if (artifactPath) return `path:${artifactPath}`
+  const name = String(library?.name ?? '').trim().toLowerCase()
+  return name ? `name:${name}` : ''
+}
+
+function minecraftLibraryMatchesName(library, requiredName) {
+  const parts = String(library?.name ?? '').trim().split(':')
+  if (parts.length < 2) return false
+  return `${parts[0]}:${parts[1]}`.toLowerCase() === String(requiredName).toLowerCase()
+}
+
+function mergeMinecraftLibraries(...libraryLists) {
+  const merged = []
+  const seen = new Set()
+  for (const libraries of libraryLists) {
+    for (const library of libraries ?? []) {
+      if (!library || typeof library !== 'object' || Array.isArray(library)) continue
+      const key = minecraftLibraryKey(library)
+      if (key && seen.has(key)) continue
+      if (key) seen.add(key)
+      merged.push(library)
+    }
+  }
+  return merged
+}
+
 async function ensureMinecraftDirectAssetObjects(minecraftRoot, assetIndex) {
   if (!assetIndex?.id || !assetIndex?.url) return { checked: 0, downloaded: 0 }
   const indexPath = path.join(minecraftRoot, 'assets', 'indexes', `${assetIndex.id}.json`)
@@ -6668,11 +6700,16 @@ function validateMinecraftLauncherVersionDocument(document, manifest, versionId,
   if (runtime.runtimeMode === 'neoforge-minecraft') {
     const gameArguments = Array.isArray(document.arguments.game) ? document.arguments.game : []
     const neoForgeLibraryDownloads = minecraftLibraryDownloadArtifacts('', document, 'NeoForge library')
+    const missingInheritedLibraries = NEOFORGE_REQUIRED_INHERITED_LIBRARY_NAMES
+      .filter((requiredName) => !document.libraries.some((library) => minecraftLibraryMatchesName(library, requiredName)))
     if (!gameArguments.includes('--fml.neoForgeVersion')) {
       return { valid: false, source: 'invalid', reason: 'NeoForge launcher arguments are missing --fml.neoForgeVersion' }
     }
     if (neoForgeLibraryDownloads.length === 0) {
       return { valid: false, source: 'invalid', reason: 'NeoForge library download metadata is missing' }
+    }
+    if (missingInheritedLibraries.length > 0) {
+      return { valid: false, source: 'invalid', reason: `NeoForge inherited libraries are missing: ${missingInheritedLibraries.join(', ')}` }
     }
   }
   if (normalizeMinecraftRuntimeMode(runtimeMode, manifest?.pack) === 'native-loader-minecraft') {
@@ -7004,7 +7041,7 @@ async function missingNeoForgeClientArtifacts(minecraftRoot, manifest) {
   return missing
 }
 
-function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = [], runtimeVersionJson = null, nativeRuntime = null) {
+function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packLibraries = [], runtimeVersionJson = null, nativeRuntime = null, baseVersionMetadata = null) {
   const runtime = launcherRuntimeManifestDefinition(manifest, runtimeMode)
   const validation = validateReleaseLauncherVersionManifest(manifest, versionId, runtimeMode, runtimeVersionJson)
   if (!validation.ok) {
@@ -7013,9 +7050,15 @@ function buildEchoManagedVersionManifest(manifest, versionId, runtimeMode, packL
   if (runtime.runtimeMode === 'neoforge-minecraft' && !validation.versionJson) {
     throw new Error(`${runtime.manifestName} NeoForge handoff requires official installer metadata for '${runtime.version}'.`)
   }
-  const versionJson = runtime.runtimeMode === 'native-loader-minecraft'
+  let versionJson = runtime.runtimeMode === 'native-loader-minecraft'
     ? normalizeEchoNativeLoaderVersionJson(validation.versionJson, manifest, versionId, packLibraries, nativeRuntime)
     : stripNullishLauncherFields(validation.versionJson)
+  if (runtime.runtimeMode === 'neoforge-minecraft') {
+    versionJson = {
+      ...versionJson,
+      libraries: mergeMinecraftLibraries(baseVersionMetadata?.libraries, versionJson.libraries),
+    }
+  }
   return {
     ...versionJson,
     echoLauncher: {
@@ -7085,6 +7128,7 @@ async function ensureMinecraftLauncherBaseVersionMetadata(minecraftRoot, manifes
 
   return {
     created: metadataCreated || clientCreated,
+    metadata,
     metadataPath,
     warnings,
   }
@@ -7248,6 +7292,7 @@ async function ensureMinecraftLauncherVersionMetadata(minecraftRoot, manifest, p
     runtimeArtifacts.packLibraries ?? [],
     normalizedMode === 'neoforge-minecraft' ? runtimeArtifacts.versionJson : null,
     normalizedMode === 'native-loader-minecraft' ? runtimeArtifacts.nativeRuntime : null,
+    baseVersion.metadata,
   )
   await ensureDir(path.dirname(initial.metadataPath))
   await writeJson(initial.metadataPath, metadata)

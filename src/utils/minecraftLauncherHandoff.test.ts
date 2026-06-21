@@ -361,6 +361,31 @@ describe('minecraftLauncherHandoff', () => {
     })
   })
 
+  it('rejects NeoForge metadata that omits inherited SLF4J API libraries', () => {
+    expect(
+      validateMinecraftLauncherVersionMetadata(
+        {
+          ...validVersionMetadata(),
+          libraries: [
+            {
+              name: 'net.neoforged:fancymodloader:11.0.13',
+              downloads: {
+                artifact: {
+                  path: 'net/neoforged/fancymodloader/11.0.13/fancymodloader-11.0.13.jar',
+                },
+              },
+            },
+          ],
+        },
+        expectedVersionMetadata(),
+      ),
+    ).toMatchObject({
+      valid: false,
+      source: 'invalid',
+      reason: 'NeoForge inherited libraries are missing: org.slf4j:slf4j-api',
+    })
+  })
+
   it('accepts complete NeoForge metadata and identifies ECHO-written metadata', () => {
     expect(validateMinecraftLauncherVersionMetadata(validVersionMetadata(), expectedVersionMetadata())).toMatchObject({
       valid: true,
@@ -419,6 +444,14 @@ function validVersionMetadata() {
         downloads: {
           artifact: {
             path: 'net/neoforged/fancymodloader/11.0.13/fancymodloader-11.0.13.jar',
+          },
+        },
+      },
+      {
+        name: 'org.slf4j:slf4j-api:2.0.17',
+        downloads: {
+          artifact: {
+            path: 'org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar',
           },
         },
       },
